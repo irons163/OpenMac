@@ -345,6 +345,94 @@ struct KanbanFlowTests {
         #expect(onlyUnassigned.count == 1)
         #expect(onlyUnassigned.first?.id == unassigned.id)
     }
+
+    @Test("computes agent load ratio and overload state")
+    func computesAgentLoadMetrics() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let taskC = WorkTask(
+            title: "Task C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [taskA, taskB, taskC], agents: [agent])
+
+        let ratio = viewModel.loadRatio(for: agent.id)
+        let percent = viewModel.loadPercent(for: agent.id)
+        let overloaded = viewModel.isAgentOverloaded(agent.id)
+
+        #expect(ratio > 1.0)
+        #expect(percent == 150)
+        #expect(overloaded)
+    }
+
+    @Test("reports rebalance availability when overloaded todo can move")
+    func canRebalanceWhenOverloadedTodoHasEligibleTarget() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let target = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [taskA, taskB], agents: [overloaded, target])
+
+        #expect(viewModel.canRebalanceTodoAssignments())
+    }
+
+    @Test("reports no rebalance availability when overloaded work is not todo")
+    func cannotRebalanceWhenOnlyInProgressIsOverloaded() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let target = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [taskA, taskB], agents: [overloaded, target])
+
+        #expect(!viewModel.canRebalanceTodoAssignments())
+    }
 }
 
 struct KanbanPersistenceTests {

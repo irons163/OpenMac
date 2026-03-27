@@ -39,16 +39,15 @@ struct ContentView: View {
         NavigationSplitView {
             List {
                 ForEach(viewModel.agents) { agent in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(agent.name)
-                            .font(.headline)
-                        Text("Skills: \(agent.skills.sorted().joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Load: \(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+                    AgentRowView(
+                        name: agent.name,
+                        skillsText: agent.skills.sorted().joined(separator: ", "),
+                        loadCount: viewModel.activeTaskCount(for: agent.id),
+                        maxLoad: agent.maxConcurrentTasks,
+                        loadPercent: viewModel.loadPercent(for: agent.id),
+                        loadProgress: min(1.0, viewModel.loadRatio(for: agent.id)),
+                        isOverloaded: viewModel.isAgentOverloaded(agent.id)
+                    )
                     .padding(.vertical, 4)
                     .contextMenu {
                         Button("Edit Agent") {
@@ -167,7 +166,7 @@ struct ContentView: View {
                 Button("Rebalance Load") {
                     rebalanceTodoAssignments()
                 }
-                .disabled(viewModel.agents.count < 2)
+                .disabled(!viewModel.canRebalanceTodoAssignments())
                 Button("WIP Limits") {
                     openWIPSettings()
                 }
@@ -495,6 +494,41 @@ struct ContentView: View {
         let validKeys = Set(assigneeFilterOptions.map { $0.key })
         if !validKeys.contains(selectedAssigneeFilterKey) {
             selectedAssigneeFilterKey = "all"
+        }
+    }
+}
+
+private struct AgentRowView: View {
+    let name: String
+    let skillsText: String
+    let loadCount: Int
+    let maxLoad: Int
+    let loadPercent: Int
+    let loadProgress: Double
+    let isOverloaded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(name)
+                .font(.headline)
+            Text("Skills: \(skillsText)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ProgressView(value: loadProgress, total: 1.0)
+                    .progressViewStyle(.linear)
+                Text("\(loadPercent)%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Text("Load: \(loadCount)/\(maxLoad)")
+                .font(.caption2)
+                .foregroundStyle(isOverloaded ? .red : .secondary)
+            if isOverloaded {
+                Text("Overloaded")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
         }
     }
 }

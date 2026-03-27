@@ -315,6 +315,34 @@ final class KanbanBoardViewModel: ObservableObject {
         return movedCount
     }
 
+    func canRebalanceTodoAssignments() -> Bool {
+        guard agents.count >= 2 else { return false }
+
+        let loads = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
+        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+
+        for task in tasks where task.status == .todo {
+            guard let currentAgentID = task.assignedAgentID,
+                  let currentAgent = agentsByID[currentAgentID] else {
+                continue
+            }
+
+            let currentLoad = loads[currentAgentID, default: 0]
+            guard currentLoad > currentAgent.maxConcurrentTasks else { continue }
+
+            let hasTarget = agents.contains { agent in
+                guard agent.id != currentAgentID else { return false }
+                guard agent.hasSkills(for: task) else { return false }
+                return loads[agent.id, default: 0] < agent.maxConcurrentTasks
+            }
+            if hasTarget {
+                return true
+            }
+        }
+
+        return false
+    }
+
     @discardableResult
     func addAgent(
         name: String,
@@ -413,6 +441,20 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func activeTaskCount(for agentID: UUID) -> Int {
         tasks.filter { $0.assignedAgentID == agentID && $0.status != .done }.count
+    }
+
+    func loadRatio(for agentID: UUID) -> Double {
+        guard let agent = agents.first(where: { $0.id == agentID }) else { return 0 }
+        let load = activeTaskCount(for: agentID)
+        return Double(load) / Double(max(1, agent.maxConcurrentTasks))
+    }
+
+    func loadPercent(for agentID: UUID) -> Int {
+        Int((loadRatio(for: agentID) * 100).rounded())
+    }
+
+    func isAgentOverloaded(_ agentID: UUID) -> Bool {
+        loadRatio(for: agentID) > 1.0
     }
 
     func agentName(for id: UUID?) -> String {
