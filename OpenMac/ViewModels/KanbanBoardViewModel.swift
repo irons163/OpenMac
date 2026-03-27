@@ -528,23 +528,31 @@ final class KanbanBoardViewModel: ObservableObject {
         var recommendations: [BoardHealthRecommendation] = []
 
         if unassignedTodoTaskCount > 0 {
-            recommendations.append(
-                BoardHealthRecommendation(
-                    action: .autoAssignUnassignedTodo,
-                    title: "Auto-Assign Unowned To Do",
-                    detail: "\(unassignedTodoTaskCount) unassigned task(s) can be dispatched automatically"
+            if !agents.isEmpty {
+                recommendations.append(
+                    BoardHealthRecommendation(
+                        action: .autoAssignUnassignedTodo,
+                        title: "Auto-Assign Unowned To Do",
+                        detail: "\(unassignedTodoTaskCount) unassigned task(s) can be dispatched automatically"
+                    )
                 )
-            )
 
-            recommendations.append(
-                BoardHealthRecommendation(
-                    action: agents.isEmpty ? .openNewAgent : .openManualTriage,
-                    title: agents.isEmpty ? "Create First Agent" : "Run Manual Triage",
-                    detail: agents.isEmpty
-                        ? "Add an agent profile so pending To Do tasks can be assigned"
-                        : "Open triage sheet to manually assign pending To Do tasks"
+                recommendations.append(
+                    BoardHealthRecommendation(
+                        action: .openManualTriage,
+                        title: "Run Manual Triage",
+                        detail: "Open triage sheet to manually assign pending To Do tasks"
+                    )
                 )
-            )
+            } else {
+                recommendations.append(
+                    BoardHealthRecommendation(
+                        action: .openNewAgent,
+                        title: "Create First Agent",
+                        detail: "Add an agent profile so pending To Do tasks can be assigned"
+                    )
+                )
+            }
         }
 
         if canRebalanceTodoAssignments() {
@@ -594,9 +602,9 @@ final class KanbanBoardViewModel: ObservableObject {
     func applyHealthRecommendation(_ action: BoardHealthAction) -> Bool {
         switch action {
         case .autoAssignUnassignedTodo:
-            let hadUnassignedTodo = unassignedTodoTaskCount > 0
+            let beforeTasks = tasks
             autoAssignTasks()
-            return hadUnassignedTodo
+            return tasks != beforeTasks || hasPendingManualTriage
 
         case .rebalanceTodoLoad:
             return rebalanceTodoAssignments() > 0
@@ -617,6 +625,20 @@ final class KanbanBoardViewModel: ObservableObject {
         case .archiveDone:
             return clearDoneTasks() > 0
         }
+    }
+
+    @discardableResult
+    func applyAllHealthRecommendations() -> Int {
+        let actions = healthRecommendations().map(\.action)
+        var appliedCount = 0
+
+        for action in actions where !isNavigationalHealthAction(action) {
+            if applyHealthRecommendation(action) {
+                appliedCount += 1
+            }
+        }
+
+        return appliedCount
     }
 
     func agentName(for id: UUID?) -> String {
@@ -759,6 +781,15 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let limit = wipLimits[destination] else { return false }
         let currentCount = tasks.filter { $0.status == destination && $0.id != taskID }.count
         return currentCount >= limit
+    }
+
+    private func isNavigationalHealthAction(_ action: BoardHealthAction) -> Bool {
+        switch action {
+        case .openManualTriage, .openNewAgent:
+            return true
+        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
+            return false
+        }
     }
 
     private func persistBoardState() {

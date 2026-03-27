@@ -628,6 +628,7 @@ struct KanbanFlowTests {
 
         #expect(actions.contains(.openNewAgent))
         #expect(!actions.contains(.openManualTriage))
+        #expect(!actions.contains(.autoAssignUnassignedTodo))
     }
 
     @Test("flags pending manual triage when unassigned todo exists and agents are available")
@@ -661,6 +662,66 @@ struct KanbanFlowTests {
         let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
 
         #expect(!viewModel.hasPendingManualTriage)
+    }
+
+    @Test("applies all mutating health recommendations in one pass")
+    func appliesAllMutatingHealthRecommendationsInOnePass() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let available = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssignedA = WorkTask(
+            title: "Todo A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoAssignedB = WorkTask(
+            title: "Todo B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoUnassigned = WorkTask(
+            title: "Todo C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssignedA, todoAssignedB, todoUnassigned, inProgress, done],
+            agents: [overloaded, available],
+            wipLimits: [.inProgress: 1, .review: 2]
+        )
+
+        let appliedCount = viewModel.applyAllHealthRecommendations()
+
+        #expect(appliedCount == 4)
+        #expect(viewModel.doneTaskCount == 0)
+        #expect(viewModel.wipLimit(for: .inProgress) == 2)
+        #expect(viewModel.unassignedTodoTaskCount == 0)
+        #expect(viewModel.activeTaskCount(for: overloaded.id) == 1)
+        #expect(viewModel.healthRecommendations().isEmpty)
     }
 
     @Test("returns no health recommendations when board is healthy")

@@ -89,7 +89,8 @@ struct ContentView: View {
 
                 BoardHealthRecommendationsView(
                     recommendations: viewModel.healthRecommendations(),
-                    onAction: applyHealthRecommendation
+                    onAction: applyHealthRecommendation,
+                    onApplyAll: applyAllHealthRecommendations
                 )
 
                 HStack(spacing: 12) {
@@ -169,7 +170,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItemGroup {
                 Button("Auto Assign AI") {
-                    viewModel.autoAssignTasks()
+                    runAutoAssignFromToolbar()
                 }
                 Button("New Task") {
                     isShowingNewTaskSheet = true
@@ -361,6 +362,14 @@ struct ContentView: View {
         }
     }
 
+    private func runAutoAssignFromToolbar() {
+        viewModel.autoAssignTasks()
+        refreshTriageSelections()
+        if viewModel.hasPendingManualTriage {
+            openManualTriage()
+        }
+    }
+
     private func applyHealthRecommendation(_ action: BoardHealthAction) {
         let applied = viewModel.applyHealthRecommendation(action)
         guard applied else { return }
@@ -380,6 +389,16 @@ struct ContentView: View {
             isShowingNewAgentSheet = true
         case .increaseWIPLimit(_):
             break
+        }
+    }
+
+    private func applyAllHealthRecommendations() {
+        let appliedCount = viewModel.applyAllHealthRecommendations()
+        guard appliedCount > 0 else { return }
+
+        refreshTriageSelections()
+        if viewModel.hasPendingManualTriage {
+            openManualTriage()
         }
     }
 
@@ -608,6 +627,7 @@ private struct BoardHealthSummaryView: View {
 private struct BoardHealthRecommendationsView: View {
     let recommendations: [BoardHealthRecommendation]
     let onAction: (BoardHealthAction) -> Void
+    let onApplyAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -616,9 +636,19 @@ private struct BoardHealthRecommendationsView: View {
                     .font(.caption)
                     .foregroundStyle(.green)
             } else {
-                Text("Suggested Actions")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Suggested Actions")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if hasMutatingRecommendations {
+                        Button("Apply All") {
+                            onApplyAll()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -650,6 +680,17 @@ private struct BoardHealthRecommendationsView: View {
                     }
                     .padding(.vertical, 2)
                 }
+            }
+        }
+    }
+
+    private var hasMutatingRecommendations: Bool {
+        recommendations.contains { recommendation in
+            switch recommendation.action {
+            case .openManualTriage, .openNewAgent:
+                return false
+            case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
+                return true
             }
         }
     }
