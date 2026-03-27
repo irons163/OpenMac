@@ -78,6 +78,15 @@ struct ContentView: View {
                     }
                 }
 
+                BoardHealthSummaryView(
+                    totalTasks: viewModel.totalTaskCount,
+                    todoTasks: viewModel.todoTaskCount,
+                    unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
+                    overloadedAgents: viewModel.overloadedAgentCount,
+                    inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
+                    reviewPressure: viewModel.wipPressurePercent(for: .review)
+                )
+
                 HStack(spacing: 12) {
                     TextField("Search tasks", text: $taskSearchQuery)
                         .textFieldStyle(.roundedBorder)
@@ -545,6 +554,47 @@ private struct AgentRowView: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+}
+
+private struct BoardHealthSummaryView: View {
+    let totalTasks: Int
+    let todoTasks: Int
+    let unassignedTodoTasks: Int
+    let overloadedAgents: Int
+    let inProgressPressure: Int
+    let reviewPressure: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SummaryBadge(title: "Total", value: "\(totalTasks)", color: .blue)
+            SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
+            SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
+            SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
+            SummaryBadge(title: "In Progress WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
+            SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
+            Spacer()
+        }
+    }
+}
+
+private struct SummaryBadge: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

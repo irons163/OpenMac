@@ -18,6 +18,11 @@ final class KanbanBoardViewModel: ObservableObject {
     private let assignmentEngine: AutoAssignmentEngine
     private let boardStore: KanbanBoardStore?
 
+    var totalTaskCount: Int { tasks.count }
+    var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
+    var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
+    var overloadedAgentCount: Int { agents.filter { isAgentOverloaded($0.id) }.count }
+
     init(
         tasks: [WorkTask],
         agents: [AgentProfile],
@@ -477,6 +482,12 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func isAgentOverloaded(_ agentID: UUID) -> Bool {
         loadRatio(for: agentID) > 1.0
+    }
+
+    func wipPressurePercent(for status: KanbanStatus) -> Int {
+        guard let limit = wipLimit(for: status), limit > 0 else { return 0 }
+        let currentCount = tasks.filter { $0.status == status }.count
+        return Int((Double(currentCount) / Double(limit) * 100).rounded())
     }
 
     func agentName(for id: UUID?) -> String {

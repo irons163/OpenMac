@@ -433,6 +433,86 @@ struct KanbanFlowTests {
 
         #expect(!viewModel.canRebalanceTodoAssignments())
     }
+
+    @Test("computes board health counters")
+    func computesBoardHealthCounters() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let healthy = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssigned = WorkTask(
+            title: "Todo Assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoUnassigned = WorkTask(
+            title: "Todo Unassigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .done,
+            assignedAgentID: healthy.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [todoAssigned, todoUnassigned, inProgress, done], agents: [overloaded, healthy])
+
+        #expect(viewModel.totalTaskCount == 4)
+        #expect(viewModel.todoTaskCount == 2)
+        #expect(viewModel.unassignedTodoTaskCount == 1)
+        #expect(viewModel.overloadedAgentCount == 1)
+    }
+
+    @Test("computes wip pressure ratio against configured limits")
+    func computesWIPPressureRatio() {
+        let inProgressA = WorkTask(
+            title: "A",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let inProgressB = WorkTask(
+            title: "B",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let review = WorkTask(
+            title: "Review",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [inProgressA, inProgressB, review],
+            agents: [],
+            wipLimits: [.inProgress: 4, .review: 2]
+        )
+
+        #expect(viewModel.wipPressurePercent(for: .inProgress) == 50)
+        #expect(viewModel.wipPressurePercent(for: .review) == 50)
+    }
 }
 
 struct KanbanPersistenceTests {
