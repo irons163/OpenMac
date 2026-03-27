@@ -216,6 +216,25 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func clearDoneTasks() -> Int {
+        let doneTaskIDs = Set(tasks.filter { $0.status == .done }.map { $0.id })
+        guard !doneTaskIDs.isEmpty else {
+            lastBoardMessage = "No done tasks to archive"
+            return 0
+        }
+
+        tasks.removeAll { $0.status == .done }
+        for taskID in doneTaskIDs {
+            lastUnassignedTaskIDs.remove(taskID)
+            lastAssignmentReasons[taskID] = nil
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return doneTaskIDs.count
+    }
+
+    @discardableResult
     func addAgent(
         name: String,
         skillsText: String,

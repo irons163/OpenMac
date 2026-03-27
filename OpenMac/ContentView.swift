@@ -87,6 +87,17 @@ struct ContentView: View {
                     }
                     .pickerStyle(.menu)
 
+                    Text("Showing \(filteredTaskCount) / \(viewModel.tasks.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button("Reset Filters") {
+                        resetTaskFilters()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(taskSearchQuery.isEmpty && selectedAssigneeFilterKey == "all")
+
                     Spacer()
                 }
 
@@ -148,6 +159,10 @@ struct ContentView: View {
                 Button("New Agent") {
                     isShowingNewAgentSheet = true
                 }
+                Button("Archive Done") {
+                    archiveDoneTasks()
+                }
+                .disabled(viewModel.tasks(in: .done).isEmpty)
                 Button("WIP Limits") {
                     openWIPSettings()
                 }
@@ -310,6 +325,13 @@ struct ContentView: View {
         }
     }
 
+    private func archiveDoneTasks() {
+        let removedCount = viewModel.clearDoneTasks()
+        if removedCount > 0 {
+            refreshTriageSelections()
+        }
+    }
+
     private func openManualTriage() {
         refreshTriageSelections()
         isShowingManualTriageSheet = true
@@ -437,6 +459,17 @@ struct ContentView: View {
 
     private func filteredBoardTasks(in status: KanbanStatus) -> [WorkTask] {
         viewModel.filteredTasks(in: status, query: taskSearchQuery, assigneeFilter: selectedAssigneeFilter)
+    }
+
+    private var filteredTaskCount: Int {
+        KanbanStatus.allCases.reduce(0) { partialResult, status in
+            partialResult + filteredBoardTasks(in: status).count
+        }
+    }
+
+    private func resetTaskFilters() {
+        taskSearchQuery = ""
+        selectedAssigneeFilterKey = "all"
     }
 
     private func normalizeAssigneeFilterSelection() {

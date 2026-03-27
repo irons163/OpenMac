@@ -906,6 +906,63 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("clears done tasks and persists snapshot once")
+    func clearsDoneTasksAndPersists() {
+        let doneA = WorkTask(
+            title: "Ship v1",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let doneB = WorkTask(
+            title: "Close sprint",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let todo = WorkTask(
+            title: "Next task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [doneA, todo, doneB], agents: [], boardStore: store)
+
+        let removedCount = viewModel.clearDoneTasks()
+
+        #expect(removedCount == 2)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.id == todo.id)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("clear done tasks reports when there is nothing to clear")
+    func clearDoneTasksNoopWithoutDoneTasks() {
+        let todo = WorkTask(
+            title: "Next task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [todo], agents: [], boardStore: store)
+
+        let removedCount = viewModel.clearDoneTasks()
+
+        #expect(removedCount == 0)
+        #expect(viewModel.lastBoardMessage == "No done tasks to archive")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("updating task skills can unassign incompatible agent")
     func updateTaskUnassignsIncompatibleAgent() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
