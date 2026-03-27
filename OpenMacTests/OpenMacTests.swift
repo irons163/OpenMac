@@ -504,6 +504,7 @@ struct KanbanFlowTests {
         )
 
         #expect(viewModel.boardHealthScore == 100)
+        #expect(viewModel.boardHealthLabel == "Excellent")
     }
 
     @Test("reduces health score for unassigned work overload and WIP pressure")
@@ -565,6 +566,56 @@ struct KanbanFlowTests {
         )
 
         #expect(viewModel.boardHealthScore == 55)
+        #expect(viewModel.boardHealthLabel == "Critical")
+    }
+
+    @Test("maps medium health scores to watch label")
+    func mapsMediumHealthScoresToWatchLabel() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let todoAssigned = WorkTask(
+            title: "Todo",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssigned, done],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        #expect(viewModel.boardHealthScore == 95)
+        #expect(viewModel.boardHealthLabel == "Excellent")
+
+        _ = viewModel.addTask(
+            title: "Unassigned",
+            details: "",
+            requiredSkillsText: "swiftui",
+            storyPoints: 1
+        )
+
+        #expect(viewModel.boardHealthScore == 85)
+        #expect(viewModel.boardHealthLabel == "Excellent")
+
+        _ = viewModel.addTask(
+            title: "Unassigned 2",
+            details: "",
+            requiredSkillsText: "swiftui",
+            storyPoints: 1
+        )
+
+        #expect(viewModel.boardHealthScore == 75)
+        #expect(viewModel.boardHealthLabel == "Watch")
     }
 
     @Test("computes wip pressure ratio against configured limits")

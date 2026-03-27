@@ -65,6 +65,11 @@ final class KanbanBoardViewModel: ObservableObject {
         if doneTaskCount > 0 { penalty += 5 }
         return max(0, 100 - penalty)
     }
+    var boardHealthLabel: String {
+        if boardHealthScore >= 85 { return "Excellent" }
+        if boardHealthScore >= 60 { return "Watch" }
+        return "Critical"
+    }
 
     init(
         tasks: [WorkTask],

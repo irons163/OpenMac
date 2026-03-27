@@ -84,6 +84,7 @@ struct ContentView: View {
                     unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
                     overloadedAgents: viewModel.overloadedAgentCount,
                     healthScore: viewModel.boardHealthScore,
+                    healthLabel: viewModel.boardHealthLabel,
                     inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
                     reviewPressure: viewModel.wipPressurePercent(for: .review)
                 )
@@ -610,6 +611,7 @@ private struct BoardHealthSummaryView: View {
     let unassignedTodoTasks: Int
     let overloadedAgents: Int
     let healthScore: Int
+    let healthLabel: String
     let inProgressPressure: Int
     let reviewPressure: Int
 
@@ -619,7 +621,7 @@ private struct BoardHealthSummaryView: View {
             SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
             SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
             SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
-            SummaryBadge(title: "Health", value: "\(healthScore)", color: healthScoreColor)
+            SummaryBadge(title: "Health (\(healthLabel))", value: "\(healthScore)", color: healthScoreColor)
             SummaryBadge(title: "In Progress WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
             SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
             Spacer()
