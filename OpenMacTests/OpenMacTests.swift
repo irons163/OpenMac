@@ -490,6 +490,90 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Cannot set Review WIP below current count (2)")
         #expect(store.savedSnapshots.isEmpty)
     }
+
+    @Test("manually assigns triage task to a valid agent and persists")
+    func manuallyAssignsTriageTaskAndPersists() {
+        let task = WorkTask(
+            title: "Unassigned task",
+            details: "Need manual help",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let unmatchedAgent = AgentProfile(name: "Backend Agent", skills: ["api"], maxConcurrentTasks: 2)
+        let triageAgent = AgentProfile(name: "UI Agent", skills: ["swiftui", "ui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [unmatchedAgent], boardStore: store)
+
+        viewModel.autoAssignTasks()
+        #expect(viewModel.lastUnassignedTaskIDs.contains(task.id))
+
+        viewModel.agents.append(triageAgent)
+        let assigned = viewModel.manuallyAssignTask(task.id, to: triageAgent.id)
+
+        #expect(assigned)
+        #expect(viewModel.tasks.first?.assignedAgentID == triageAgent.id)
+        #expect(!viewModel.lastUnassignedTaskIDs.contains(task.id))
+        #expect(viewModel.assignmentReason(for: task.id)?.contains("manual[UI Agent]") == true)
+        #expect(store.savedSnapshots.count == 2)
+    }
+
+    @Test("rejects manual triage when agent lacks required skills")
+    func rejectsManualTriageForSkillMismatch() {
+        let task = WorkTask(
+            title: "ML task",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Frontend Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let assigned = viewModel.manuallyAssignTask(task.id, to: agent.id)
+
+        #expect(!assigned)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+        #expect(viewModel.lastBoardMessage == "Agent Frontend Agent does not match required skills")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("rejects manual triage when agent is already at max load")
+    func rejectsManualTriageForOverloadedAgent() {
+        let overloadedAgent = AgentProfile(name: "Busy Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let activeTask = WorkTask(
+            title: "Already active",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: overloadedAgent.id
+        )
+        let todoTask = WorkTask(
+            title: "Need assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [activeTask, todoTask],
+            agents: [overloadedAgent],
+            boardStore: store
+        )
+
+        let assigned = viewModel.manuallyAssignTask(todoTask.id, to: overloadedAgent.id)
+
+        #expect(!assigned)
+        #expect(viewModel.tasks.first(where: { $0.id == todoTask.id })?.assignedAgentID == nil)
+        #expect(viewModel.lastBoardMessage == "Agent Busy Agent is at max load (1)")
+        #expect(store.savedSnapshots.isEmpty)
+    }
 }
 
 private final class SpyBoardStore: KanbanBoardStore {

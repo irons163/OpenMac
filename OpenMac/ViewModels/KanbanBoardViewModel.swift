@@ -158,6 +158,46 @@ final class KanbanBoardViewModel: ObservableObject {
         lastAssignmentReasons[taskID]
     }
 
+    func triageCandidates() -> [WorkTask] {
+        tasks
+            .filter { lastUnassignedTaskIDs.contains($0.id) }
+            .sorted {
+                if $0.storyPoints != $1.storyPoints {
+                    return $0.storyPoints > $1.storyPoints
+                }
+                return $0.createdAt < $1.createdAt
+            }
+    }
+
+    @discardableResult
+    func manuallyAssignTask(_ taskID: UUID, to agentID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        guard let agent = agents.first(where: { $0.id == agentID }) else { return false }
+
+        guard tasks[taskIndex].status == .todo else {
+            lastBoardMessage = "Only To Do tasks can be manually triaged"
+            return false
+        }
+
+        guard agent.hasSkills(for: tasks[taskIndex]) else {
+            lastBoardMessage = "Agent \(agent.name) does not match required skills"
+            return false
+        }
+
+        let currentLoad = activeTaskCount(for: agentID)
+        guard currentLoad < agent.maxConcurrentTasks else {
+            lastBoardMessage = "Agent \(agent.name) is at max load (\(agent.maxConcurrentTasks))"
+            return false
+        }
+
+        tasks[taskIndex].assignedAgentID = agentID
+        lastUnassignedTaskIDs.remove(taskID)
+        lastAssignmentReasons[taskID] = "manual[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {
         guard let limit = wipLimits[destination] else { return false }
         let currentCount = tasks.filter { $0.status == destination && $0.id != taskID }.count

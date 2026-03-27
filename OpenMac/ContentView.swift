@@ -5,12 +5,14 @@ struct ContentView: View {
 
     @State private var isShowingNewTaskSheet = false
     @State private var isShowingWIPSettingsSheet = false
+    @State private var isShowingManualTriageSheet = false
     @State private var newTaskTitle = ""
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
+    @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -101,6 +103,9 @@ struct ContentView: View {
                 Button("WIP Limits") {
                     openWIPSettings()
                 }
+                Button("Manual Triage") {
+                    openManualTriage()
+                }
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -129,6 +134,19 @@ struct ContentView: View {
                 onApply: applyWIPSettings
             )
         }
+        .sheet(isPresented: $isShowingManualTriageSheet) {
+            ManualTriageSheet(
+                tasks: viewModel.triageCandidates(),
+                agents: viewModel.agents,
+                boardMessage: viewModel.lastBoardMessage,
+                selectedAgentByTaskID: $triageSelectionByTaskID,
+                loadText: { agent in
+                    "\(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)"
+                },
+                onAssign: assignManually,
+                onClose: { isShowingManualTriageSheet = false }
+            )
+        }
     }
 
     private func resetDraftAndClose() {
@@ -153,6 +171,42 @@ struct ContentView: View {
         if updated {
             isShowingWIPSettingsSheet = false
         }
+    }
+
+    private func openManualTriage() {
+        refreshTriageSelections()
+        isShowingManualTriageSheet = true
+    }
+
+    private func assignManually(taskID: UUID) {
+        guard let selectedAgentID = triageSelectionByTaskID[taskID] else { return }
+        let assigned = viewModel.manuallyAssignTask(taskID, to: selectedAgentID)
+        if assigned {
+            triageSelectionByTaskID.removeValue(forKey: taskID)
+            refreshTriageSelections()
+            if viewModel.triageCandidates().isEmpty {
+                isShowingManualTriageSheet = false
+            }
+        }
+    }
+
+    private func refreshTriageSelections() {
+        let candidates = viewModel.triageCandidates()
+        var refreshed: [UUID: UUID] = [:]
+
+        for task in candidates {
+            if let existing = triageSelectionByTaskID[task.id] {
+                refreshed[task.id] = existing
+            } else if let fallback = defaultTriageAgentID(for: task) {
+                refreshed[task.id] = fallback
+            }
+        }
+
+        triageSelectionByTaskID = refreshed
+    }
+
+    private func defaultTriageAgentID(for task: WorkTask) -> UUID? {
+        viewModel.agents.first(where: { $0.hasSkills(for: task) })?.id ?? viewModel.agents.first?.id
     }
 }
 
@@ -380,6 +434,85 @@ private struct WIPSettingsSheet: View {
         }
         .padding(18)
         .frame(width: 360)
+    }
+}
+
+private struct ManualTriageSheet: View {
+    let tasks: [WorkTask]
+    let agents: [AgentProfile]
+    let boardMessage: String?
+    @Binding var selectedAgentByTaskID: [UUID: UUID]
+    let loadText: (AgentProfile) -> String
+    let onAssign: (UUID) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Manual Triage")
+                .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                Text(boardMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if tasks.isEmpty {
+                Text("No tasks waiting for manual triage.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(tasks) { task in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(task.title)
+                                    .font(.headline)
+                                Text("Skills: \(task.requiredSkills.sorted().joined(separator: ", "))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                if agents.isEmpty {
+                                    Text("No agents available for assignment.")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                } else {
+                                    Picker("Assign To", selection: selectionBinding(for: task.id, fallback: agents[0].id)) {
+                                        ForEach(agents) { agent in
+                                            Text("\(agent.name) (\(loadText(agent)))")
+                                                .tag(agent.id)
+                                        }
+                                    }
+
+                                    Button("Assign") {
+                                        onAssign(task.id)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Close", action: onClose)
+            }
+        }
+        .padding(18)
+        .frame(width: 460, height: 440)
+    }
+
+    private func selectionBinding(for taskID: UUID, fallback: UUID) -> Binding<UUID> {
+        Binding(
+            get: { selectedAgentByTaskID[taskID] ?? fallback },
+            set: { selectedAgentByTaskID[taskID] = $0 }
+        )
     }
 }
 
