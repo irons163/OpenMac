@@ -110,6 +110,93 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessage = nil
     }
 
+    @discardableResult
+    func addAgent(
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int = 3
+    ) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Agent name is required"
+            return false
+        }
+
+        let skills = skillsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        agents.append(
+            AgentProfile(
+                name: trimmedName,
+                skills: skills,
+                maxConcurrentTasks: maxConcurrentTasks
+            )
+        )
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func removeAgent(_ agentID: UUID) -> Bool {
+        guard agents.contains(where: { $0.id == agentID }) else { return false }
+
+        agents.removeAll { $0.id == agentID }
+
+        for index in tasks.indices where tasks[index].assignedAgentID == agentID {
+            tasks[index].assignedAgentID = nil
+            lastAssignmentReasons[tasks[index].id] = nil
+
+            if tasks[index].status == .todo {
+                lastUnassignedTaskIDs.insert(tasks[index].id)
+            }
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func updateAgent(
+        _ agentID: UUID,
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int
+    ) -> Bool {
+        guard let agentIndex = agents.firstIndex(where: { $0.id == agentID }) else { return false }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Agent name is required"
+            return false
+        }
+
+        let normalizedCapacity = max(1, maxConcurrentTasks)
+        let currentLoad = activeTaskCount(for: agentID)
+        guard normalizedCapacity >= currentLoad else {
+            lastBoardMessage = "Cannot set capacity below current load (\(currentLoad))"
+            return false
+        }
+
+        let skills = skillsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        agents[agentIndex] = AgentProfile(
+            id: agentID,
+            name: trimmedName,
+            skills: skills,
+            maxConcurrentTasks: normalizedCapacity
+        )
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
     func activeTaskCount(for agentID: UUID) -> Int {
         tasks.filter { $0.assignedAgentID == agentID && $0.status != .done }.count
     }
@@ -160,12 +247,31 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func triageCandidates() -> [WorkTask] {
         tasks
-            .filter { lastUnassignedTaskIDs.contains($0.id) }
+            .filter { $0.status == .todo && $0.assignedAgentID == nil }
             .sorted {
                 if $0.storyPoints != $1.storyPoints {
                     return $0.storyPoints > $1.storyPoints
                 }
                 return $0.createdAt < $1.createdAt
+            }
+    }
+
+    func assignableAgents(for taskID: UUID) -> [AgentProfile] {
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return [] }
+        guard task.status == .todo, task.assignedAgentID == nil else { return [] }
+
+        return agents
+            .filter { agent in
+                agent.hasSkills(for: task) && activeTaskCount(for: agent.id) < agent.maxConcurrentTasks
+            }
+            .sorted { lhs, rhs in
+                let leftLoad = activeTaskCount(for: lhs.id)
+                let rightLoad = activeTaskCount(for: rhs.id)
+
+                if leftLoad != rightLoad {
+                    return leftLoad < rightLoad
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
     }
 
@@ -176,6 +282,10 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard tasks[taskIndex].status == .todo else {
             lastBoardMessage = "Only To Do tasks can be manually triaged"
+            return false
+        }
+        guard tasks[taskIndex].assignedAgentID == nil else {
+            lastBoardMessage = "Task is already assigned"
             return false
         }
 
@@ -196,6 +306,35 @@ final class KanbanBoardViewModel: ObservableObject {
         persistBoardState()
         lastBoardMessage = nil
         return true
+    }
+
+    @discardableResult
+    func bulkAssignTriageTasks() -> Int {
+        let candidates = triageCandidates()
+        var assignedCount = 0
+
+        for task in candidates {
+            guard let agentID = assignableAgents(for: task.id).first?.id else { continue }
+            guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else { continue }
+            guard let agent = agents.first(where: { $0.id == agentID }) else { continue }
+
+            let currentLoad = activeTaskCount(for: agentID)
+            tasks[taskIndex].assignedAgentID = agentID
+            lastUnassignedTaskIDs.remove(task.id)
+            lastAssignmentReasons[task.id] = "manual-bulk[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+            assignedCount += 1
+        }
+
+        guard assignedCount > 0 else {
+            if !candidates.isEmpty {
+                lastBoardMessage = "No eligible agents available for pending triage tasks"
+            }
+            return 0
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return assignedCount
     }
 
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {

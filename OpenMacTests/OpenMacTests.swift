@@ -574,6 +574,294 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Agent Busy Agent is at max load (1)")
         #expect(store.savedSnapshots.isEmpty)
     }
+
+    @Test("triage candidates include todo tasks that remain unassigned without auto-assign")
+    func triageCandidatesIncludePlainUnassignedTodoTasks() {
+        let todoUnassigned = WorkTask(
+            title: "Unassigned To Do",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let todoAssigned = WorkTask(
+            title: "Assigned To Do",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: UUID()
+        )
+        let reviewUnassigned = WorkTask(
+            title: "Review task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 3,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [todoUnassigned, todoAssigned, reviewUnassigned], agents: [])
+
+        let candidates = viewModel.triageCandidates()
+
+        #expect(candidates.count == 1)
+        #expect(candidates.first?.id == todoUnassigned.id)
+    }
+
+    @Test("assignable agents for triage only include skill-matched agents with remaining capacity")
+    func assignableAgentsFilterBySkillAndCapacity() {
+        let task = WorkTask(
+            title: "Triage target",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let qualifiedAgent = AgentProfile(name: "Qualified", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let overloadedAgent = AgentProfile(name: "Overloaded", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let skillMismatchAgent = AgentProfile(name: "Mismatch", skills: ["backend"], maxConcurrentTasks: 3)
+        let activeTask = WorkTask(
+            title: "Existing load",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: overloadedAgent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task, activeTask],
+            agents: [qualifiedAgent, overloadedAgent, skillMismatchAgent]
+        )
+
+        let eligible = viewModel.assignableAgents(for: task.id)
+
+        #expect(eligible.count == 1)
+        #expect(eligible.first?.id == qualifiedAgent.id)
+    }
+
+    @Test("bulk triage assigns all currently eligible unassigned todo tasks")
+    func bulkTriageAssignsEligibleTasks() {
+        let uiTask = WorkTask(
+            title: "UI task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let testingTask = WorkTask(
+            title: "Testing task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [uiTask, testingTask],
+            agents: [uiAgent],
+            boardStore: store
+        )
+
+        let assignedCount = viewModel.bulkAssignTriageTasks()
+
+        #expect(assignedCount == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == uiTask.id })?.assignedAgentID == uiAgent.id)
+        #expect(viewModel.tasks.first(where: { $0.id == testingTask.id })?.assignedAgentID == nil)
+        #expect(viewModel.triageCandidates().count == 1)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("bulk triage reports when no eligible assignment can be made")
+    func bulkTriageReportsNoEligibleAssignments() {
+        let task = WorkTask(
+            title: "ML task",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let assignedCount = viewModel.bulkAssignTriageTasks()
+
+        #expect(assignedCount == 0)
+        #expect(viewModel.lastBoardMessage == "No eligible agents available for pending triage tasks")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("adds agent with parsed skills and persists board snapshot")
+    func addsAgentAndPersists() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let added = viewModel.addAgent(
+            name: "Platform Agent",
+            skillsText: "api, db, swiftui",
+            maxConcurrentTasks: 4
+        )
+
+        #expect(added)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents[0].name == "Platform Agent")
+        #expect(viewModel.agents[0].skills == Set(["api", "db", "swiftui"]))
+        #expect(viewModel.agents[0].maxConcurrentTasks == 4)
+        #expect(store.savedSnapshots.count == 1)
+        #expect(store.savedSnapshots.last?.agents.count == 1)
+    }
+
+    @Test("rejects adding agent with empty name")
+    func rejectsAgentWithEmptyName() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let added = viewModel.addAgent(
+            name: "   ",
+            skillsText: "swiftui",
+            maxConcurrentTasks: 2
+        )
+
+        #expect(!added)
+        #expect(viewModel.agents.isEmpty)
+        #expect(viewModel.lastBoardMessage == "Agent name is required")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("updates agent profile and persists snapshot")
+    func updatesAgentProfileAndPersists() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let updated = viewModel.updateAgent(
+            agent.id,
+            name: "Platform Agent",
+            skillsText: "api, db, swiftui",
+            maxConcurrentTasks: 4
+        )
+
+        #expect(updated)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents[0].name == "Platform Agent")
+        #expect(viewModel.agents[0].skills == Set(["api", "db", "swiftui"]))
+        #expect(viewModel.agents[0].maxConcurrentTasks == 4)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rejects updating agent when name is empty")
+    func rejectsUpdatingAgentWithEmptyName() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let updated = viewModel.updateAgent(
+            agent.id,
+            name: "  ",
+            skillsText: "swiftui",
+            maxConcurrentTasks: 2
+        )
+
+        #expect(!updated)
+        #expect(viewModel.agents[0].name == "UI Agent")
+        #expect(viewModel.lastBoardMessage == "Agent name is required")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("rejects reducing agent capacity below current active load")
+    func rejectsReducingAgentCapacityBelowLoad() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let activeA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let activeB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [activeA, activeB], agents: [agent], boardStore: store)
+
+        let updated = viewModel.updateAgent(
+            agent.id,
+            name: "UI Agent",
+            skillsText: "swiftui",
+            maxConcurrentTasks: 1
+        )
+
+        #expect(!updated)
+        #expect(viewModel.agents[0].maxConcurrentTasks == 3)
+        #expect(viewModel.lastBoardMessage == "Cannot set capacity below current load (2)")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("newly added agent participates in auto assignment")
+    func addedAgentCanReceiveAutoAssignedTask() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+        _ = viewModel.addAgent(name: "UI Agent", skillsText: "swiftui, ui", maxConcurrentTasks: 2)
+
+        viewModel.autoAssignTasks()
+
+        #expect(viewModel.tasks.first?.assignedAgentID == viewModel.agents.first?.id)
+    }
+
+    @Test("removing agent unassigns their tasks and persists snapshot")
+    func removesAgentUnassignsTasksAndPersists() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let ownedTask = WorkTask(
+            title: "Assigned work",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [ownedTask], agents: [agent], boardStore: store)
+
+        let removed = viewModel.removeAgent(agent.id)
+
+        #expect(removed)
+        #expect(viewModel.agents.isEmpty)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+        #expect(viewModel.triageCandidates().count == 1)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("removing unknown agent returns false and does not persist")
+    func rejectsRemovingUnknownAgent() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let removed = viewModel.removeAgent(UUID())
+
+        #expect(!removed)
+        #expect(viewModel.agents.count == 1)
+        #expect(store.savedSnapshots.isEmpty)
+    }
 }
 
 private final class SpyBoardStore: KanbanBoardStore {

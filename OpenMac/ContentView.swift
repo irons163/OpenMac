@@ -4,12 +4,21 @@ struct ContentView: View {
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
+    @State private var isShowingNewAgentSheet = false
+    @State private var isShowingEditAgentSheet = false
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
     @State private var newTaskTitle = ""
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
+    @State private var newAgentName = ""
+    @State private var newAgentSkills = ""
+    @State private var newAgentCapacity = 3
+    @State private var editingAgentID: UUID?
+    @State private var editAgentName = ""
+    @State private var editAgentSkills = ""
+    @State private var editAgentCapacity = 3
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
@@ -20,18 +29,29 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(viewModel.agents) { agent in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(agent.name)
-                        .font(.headline)
-                    Text("Skills: \(agent.skills.sorted().joined(separator: ", "))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Load: \(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+            List {
+                ForEach(viewModel.agents) { agent in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(agent.name)
+                            .font(.headline)
+                        Text("Skills: \(agent.skills.sorted().joined(separator: ", "))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Load: \(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 4)
+                    .contextMenu {
+                        Button("Edit Agent") {
+                            openEditAgent(agent)
+                        }
+                        Button("Remove Agent", role: .destructive) {
+                            removeAgent(agent.id)
+                        }
+                    }
                 }
-                .padding(.vertical, 4)
+                .onDelete(perform: deleteAgents)
             }
             .navigationTitle("AI Agents")
         } detail: {
@@ -40,8 +60,8 @@ struct ContentView: View {
                     Text("AI Agent Kanban Dispatch")
                         .font(.title2.weight(.semibold))
                     Spacer()
-                    if !viewModel.lastUnassignedTaskIDs.isEmpty {
-                        Text("\(viewModel.lastUnassignedTaskIDs.count) task(s) need manual triage")
+                    if !viewModel.triageCandidates().isEmpty {
+                        Text("\(viewModel.triageCandidates().count) task(s) need manual triage")
                             .font(.callout)
                             .foregroundStyle(.orange)
                     }
@@ -100,6 +120,9 @@ struct ContentView: View {
                 Button("New Task") {
                     isShowingNewTaskSheet = true
                 }
+                Button("New Agent") {
+                    isShowingNewAgentSheet = true
+                }
                 Button("WIP Limits") {
                     openWIPSettings()
                 }
@@ -134,16 +157,46 @@ struct ContentView: View {
                 onApply: applyWIPSettings
             )
         }
+        .sheet(isPresented: $isShowingNewAgentSheet) {
+            NewAgentSheet(
+                name: $newAgentName,
+                skills: $newAgentSkills,
+                maxConcurrentTasks: $newAgentCapacity,
+                boardMessage: viewModel.lastBoardMessage,
+                onCancel: resetAgentDraftAndClose,
+                onCreate: {
+                    let added = viewModel.addAgent(
+                        name: newAgentName,
+                        skillsText: newAgentSkills,
+                        maxConcurrentTasks: newAgentCapacity
+                    )
+                    if added {
+                        resetAgentDraftAndClose()
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $isShowingEditAgentSheet) {
+            EditAgentSheet(
+                name: $editAgentName,
+                skills: $editAgentSkills,
+                maxConcurrentTasks: $editAgentCapacity,
+                boardMessage: viewModel.lastBoardMessage,
+                onCancel: closeEditAgentSheet,
+                onSave: applyAgentEdits
+            )
+        }
         .sheet(isPresented: $isShowingManualTriageSheet) {
             ManualTriageSheet(
                 tasks: viewModel.triageCandidates(),
-                agents: viewModel.agents,
                 boardMessage: viewModel.lastBoardMessage,
                 selectedAgentByTaskID: $triageSelectionByTaskID,
-                loadText: { agent in
-                    "\(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)"
+                assignableAgents: { task in
+                    viewModel.assignableAgents(for: task.id)
                 },
+                loadText: { agent in "\(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)" },
                 onAssign: assignManually,
+                onAssignAll: assignAllManually,
                 onClose: { isShowingManualTriageSheet = false }
             )
         }
@@ -155,6 +208,13 @@ struct ContentView: View {
         newTaskSkills = ""
         newTaskPoints = 1
         isShowingNewTaskSheet = false
+    }
+
+    private func resetAgentDraftAndClose() {
+        newAgentName = ""
+        newAgentSkills = ""
+        newAgentCapacity = 3
+        isShowingNewAgentSheet = false
     }
 
     private func openWIPSettings() {
@@ -190,6 +250,14 @@ struct ContentView: View {
         }
     }
 
+    private func assignAllManually() {
+        _ = viewModel.bulkAssignTriageTasks()
+        refreshTriageSelections()
+        if viewModel.triageCandidates().isEmpty {
+            isShowingManualTriageSheet = false
+        }
+    }
+
     private func refreshTriageSelections() {
         let candidates = viewModel.triageCandidates()
         var refreshed: [UUID: UUID] = [:]
@@ -206,7 +274,54 @@ struct ContentView: View {
     }
 
     private func defaultTriageAgentID(for task: WorkTask) -> UUID? {
-        viewModel.agents.first(where: { $0.hasSkills(for: task) })?.id ?? viewModel.agents.first?.id
+        viewModel.assignableAgents(for: task.id).first?.id
+    }
+
+    private func deleteAgents(at offsets: IndexSet) {
+        let ids: [UUID] = offsets.map { viewModel.agents[$0].id }
+
+        for id in ids {
+            removeAgent(id)
+        }
+    }
+
+    private func removeAgent(_ agentID: UUID) {
+        let removed = viewModel.removeAgent(agentID)
+        if removed {
+            refreshTriageSelections()
+        }
+    }
+
+    private func openEditAgent(_ agent: AgentProfile) {
+        editingAgentID = agent.id
+        editAgentName = agent.name
+        editAgentSkills = agent.skills.sorted().joined(separator: ", ")
+        editAgentCapacity = agent.maxConcurrentTasks
+        isShowingEditAgentSheet = true
+    }
+
+    private func closeEditAgentSheet() {
+        editingAgentID = nil
+        editAgentName = ""
+        editAgentSkills = ""
+        editAgentCapacity = 3
+        isShowingEditAgentSheet = false
+    }
+
+    private func applyAgentEdits() {
+        guard let editingAgentID else { return }
+
+        let updated = viewModel.updateAgent(
+            editingAgentID,
+            name: editAgentName,
+            skillsText: editAgentSkills,
+            maxConcurrentTasks: editAgentCapacity
+        )
+
+        if updated {
+            refreshTriageSelections()
+            closeEditAgentSheet()
+        }
     }
 }
 
@@ -437,13 +552,86 @@ private struct WIPSettingsSheet: View {
     }
 }
 
+private struct NewAgentSheet: View {
+    @Binding var name: String
+    @Binding var skills: String
+    @Binding var maxConcurrentTasks: Int
+    let boardMessage: String?
+
+    let onCancel: () -> Void
+    let onCreate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Create Agent")
+                .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                Text(boardMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            TextField("Name", text: $name)
+            TextField("Skills (comma separated)", text: $skills)
+            Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Create", action: onCreate)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
+    }
+}
+
+private struct EditAgentSheet: View {
+    @Binding var name: String
+    @Binding var skills: String
+    @Binding var maxConcurrentTasks: Int
+    let boardMessage: String?
+
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Agent")
+                .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                Text(boardMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            TextField("Name", text: $name)
+            TextField("Skills (comma separated)", text: $skills)
+            Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save", action: onSave)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
+    }
+}
+
 private struct ManualTriageSheet: View {
     let tasks: [WorkTask]
-    let agents: [AgentProfile]
     let boardMessage: String?
     @Binding var selectedAgentByTaskID: [UUID: UUID]
+    let assignableAgents: (WorkTask) -> [AgentProfile]
     let loadText: (AgentProfile) -> String
     let onAssign: (UUID) -> Void
+    let onAssignAll: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -455,6 +643,12 @@ private struct ManualTriageSheet: View {
                 Text(boardMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button("Assign All Eligible", action: onAssignAll)
+                    .buttonStyle(.bordered)
             }
 
             if tasks.isEmpty {
@@ -472,13 +666,15 @@ private struct ManualTriageSheet: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
 
-                                if agents.isEmpty {
-                                    Text("No agents available for assignment.")
+                                let eligibleAgents = assignableAgents(task)
+
+                                if eligibleAgents.isEmpty {
+                                    Text("No eligible agents currently available.")
                                         .font(.caption)
                                         .foregroundStyle(.red)
                                 } else {
-                                    Picker("Assign To", selection: selectionBinding(for: task.id, fallback: agents[0].id)) {
-                                        ForEach(agents) { agent in
+                                    Picker("Assign To", selection: selectionBinding(for: task.id, fallback: eligibleAgents[0].id)) {
+                                        ForEach(eligibleAgents) { agent in
                                             Text("\(agent.name) (\(loadText(agent)))")
                                                 .tag(agent.id)
                                         }
