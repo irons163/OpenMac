@@ -10,6 +10,7 @@ enum TaskAssigneeFilter: Equatable {
 enum BoardHealthAction: Equatable {
     case autoAssignUnassignedTodo
     case openManualTriage
+    case openNewAgent
     case rebalanceTodoLoad
     case increaseWIPLimit(KanbanStatus)
     case archiveDone
@@ -26,6 +27,8 @@ struct BoardHealthRecommendation: Identifiable, Equatable {
             return "auto-assign-unassigned-todo"
         case .openManualTriage:
             return "open-manual-triage"
+        case .openNewAgent:
+            return "open-new-agent"
         case .rebalanceTodoLoad:
             return "rebalance-todo-load"
         case let .increaseWIPLimit(status):
@@ -534,9 +537,11 @@ final class KanbanBoardViewModel: ObservableObject {
 
             recommendations.append(
                 BoardHealthRecommendation(
-                    action: .openManualTriage,
-                    title: "Run Manual Triage",
-                    detail: "Open triage sheet to manually assign pending To Do tasks"
+                    action: agents.isEmpty ? .openNewAgent : .openManualTriage,
+                    title: agents.isEmpty ? "Create First Agent" : "Run Manual Triage",
+                    detail: agents.isEmpty
+                        ? "Add an agent profile so pending To Do tasks can be assigned"
+                        : "Open triage sheet to manually assign pending To Do tasks"
                 )
             )
         }
@@ -597,6 +602,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
         case .openManualTriage:
             return !triageCandidates().isEmpty
+
+        case .openNewAgent:
+            return agents.isEmpty
 
         case let .increaseWIPLimit(status):
             guard let currentLimit = wipLimit(for: status) else {

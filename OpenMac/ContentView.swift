@@ -371,6 +371,8 @@ struct ContentView: View {
         case .openManualTriage:
             refreshTriageSelections()
             openManualTriage()
+        case .openNewAgent:
+            isShowingNewAgentSheet = true
         case .increaseWIPLimit(_):
             break
         }

@@ -604,11 +604,30 @@ struct KanbanFlowTests {
             status: .todo,
             assignedAgentID: nil
         )
-        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
 
         let actions = viewModel.healthRecommendations().map(\.action)
 
         #expect(actions.contains(.openManualTriage))
+    }
+
+    @Test("includes add agent recommendation when unassigned todo exists and no agents are available")
+    func includesAddAgentRecommendationWhenNoAgents() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let actions = viewModel.healthRecommendations().map(\.action)
+
+        #expect(actions.contains(.openNewAgent))
+        #expect(!actions.contains(.openManualTriage))
     }
 
     @Test("returns no health recommendations when board is healthy")
