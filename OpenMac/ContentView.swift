@@ -366,7 +366,12 @@ struct ContentView: View {
         guard applied else { return }
 
         switch action {
-        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .archiveDone:
+        case .autoAssignUnassignedTodo:
+            refreshTriageSelections()
+            if viewModel.hasPendingManualTriage {
+                openManualTriage()
+            }
+        case .rebalanceTodoLoad, .archiveDone:
             refreshTriageSelections()
         case .openManualTriage:
             refreshTriageSelections()

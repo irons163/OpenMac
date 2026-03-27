@@ -53,6 +53,7 @@ final class KanbanBoardViewModel: ObservableObject {
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
     var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
+    var hasPendingManualTriage: Bool { !agents.isEmpty && unassignedTodoTaskCount > 0 }
     var doneTaskCount: Int { tasks.filter { $0.status == .done }.count }
     var overloadedAgentCount: Int { agents.filter { isAgentOverloaded($0.id) }.count }
 
@@ -593,9 +594,9 @@ final class KanbanBoardViewModel: ObservableObject {
     func applyHealthRecommendation(_ action: BoardHealthAction) -> Bool {
         switch action {
         case .autoAssignUnassignedTodo:
-            let before = tasks
+            let hadUnassignedTodo = unassignedTodoTaskCount > 0
             autoAssignTasks()
-            return tasks != before
+            return hadUnassignedTodo
 
         case .rebalanceTodoLoad:
             return rebalanceTodoAssignments() > 0

@@ -630,6 +630,39 @@ struct KanbanFlowTests {
         #expect(!actions.contains(.openManualTriage))
     }
 
+    @Test("flags pending manual triage when unassigned todo exists and agents are available")
+    func flagsPendingManualTriageWhenAgentsExist() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        viewModel.autoAssignTasks()
+
+        #expect(viewModel.hasPendingManualTriage)
+    }
+
+    @Test("does not flag manual triage when no agents exist")
+    func doesNotFlagManualTriageWhenNoAgentsExist() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        #expect(!viewModel.hasPendingManualTriage)
+    }
+
     @Test("returns no health recommendations when board is healthy")
     func returnsNoHealthRecommendationsWhenHealthy() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
