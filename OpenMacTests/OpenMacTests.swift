@@ -963,6 +963,76 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("rebalances overloaded todo assignments and persists once")
+    func rebalancesOverloadedTodoAssignments() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let available = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let taskC = WorkTask(
+            title: "Task C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [taskA, taskB, taskC],
+            agents: [overloaded, available],
+            boardStore: store
+        )
+
+        let movedCount = viewModel.rebalanceTodoAssignments()
+
+        #expect(movedCount == 1)
+        #expect(viewModel.activeTaskCount(for: overloaded.id) == 2)
+        #expect(viewModel.activeTaskCount(for: available.id) == 1)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rebalance does not move in-progress assignments")
+    func rebalanceDoesNotMoveInProgressAssignments() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let available = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [inProgress],
+            agents: [overloaded, available],
+            boardStore: store
+        )
+
+        let movedCount = viewModel.rebalanceTodoAssignments()
+
+        #expect(movedCount == 0)
+        #expect(viewModel.tasks.first?.assignedAgentID == overloaded.id)
+        #expect(viewModel.lastBoardMessage == "No todo rebalancing needed")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("updating task skills can unassign incompatible agent")
     func updateTaskUnassignsIncompatibleAgent() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)

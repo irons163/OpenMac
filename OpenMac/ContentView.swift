@@ -163,6 +163,10 @@ struct ContentView: View {
                     archiveDoneTasks()
                 }
                 .disabled(viewModel.tasks(in: .done).isEmpty)
+                Button("Rebalance Load") {
+                    rebalanceTodoAssignments()
+                }
+                .disabled(viewModel.agents.count < 2)
                 Button("WIP Limits") {
                     openWIPSettings()
                 }
@@ -328,6 +332,13 @@ struct ContentView: View {
     private func archiveDoneTasks() {
         let removedCount = viewModel.clearDoneTasks()
         if removedCount > 0 {
+            refreshTriageSelections()
+        }
+    }
+
+    private func rebalanceTodoAssignments() {
+        let movedCount = viewModel.rebalanceTodoAssignments()
+        if movedCount > 0 {
             refreshTriageSelections()
         }
     }

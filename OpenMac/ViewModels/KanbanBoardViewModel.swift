@@ -235,6 +235,69 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func rebalanceTodoAssignments() -> Int {
+        var loads = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
+        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        var movedCount = 0
+
+        let candidateIndices = tasks.indices
+            .filter { index in
+                guard tasks[index].status == .todo, let assignedID = tasks[index].assignedAgentID else { return false }
+                guard let agent = agentsByID[assignedID] else { return false }
+                let currentLoad = loads[assignedID, default: 0]
+                return currentLoad > agent.maxConcurrentTasks
+            }
+            .sorted { lhs, rhs in
+                if tasks[lhs].storyPoints != tasks[rhs].storyPoints {
+                    return tasks[lhs].storyPoints < tasks[rhs].storyPoints
+                }
+                return tasks[lhs].createdAt < tasks[rhs].createdAt
+            }
+
+        for index in candidateIndices {
+            guard let currentAgentID = tasks[index].assignedAgentID,
+                  let currentAgent = agentsByID[currentAgentID] else {
+                continue
+            }
+
+            let currentLoad = loads[currentAgentID, default: 0]
+            guard currentLoad > currentAgent.maxConcurrentTasks else { continue }
+
+            let eligibleTargets = agents
+                .filter { agent in
+                    guard agent.id != currentAgentID else { return false }
+                    guard agent.hasSkills(for: tasks[index]) else { return false }
+                    return loads[agent.id, default: 0] < agent.maxConcurrentTasks
+                }
+                .sorted { lhs, rhs in
+                    let leftLoad = loads[lhs.id, default: 0]
+                    let rightLoad = loads[rhs.id, default: 0]
+                    if leftLoad != rightLoad {
+                        return leftLoad < rightLoad
+                    }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+
+            guard let target = eligibleTargets.first else { continue }
+
+            tasks[index].assignedAgentID = target.id
+            loads[currentAgentID, default: 0] -= 1
+            loads[target.id, default: 0] += 1
+            lastAssignmentReasons[tasks[index].id] = "rebalance[\(currentAgent.name)->\(target.name)] load[\(loads[target.id, default: 0])/\(target.maxConcurrentTasks)]"
+            movedCount += 1
+        }
+
+        guard movedCount > 0 else {
+            lastBoardMessage = "No todo rebalancing needed"
+            return 0
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return movedCount
+    }
+
+    @discardableResult
     func addAgent(
         name: String,
         skillsText: String,
