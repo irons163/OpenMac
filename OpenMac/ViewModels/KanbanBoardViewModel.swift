@@ -1,6 +1,12 @@
 import Combine
 import Foundation
 
+enum TaskAssigneeFilter: Equatable {
+    case all
+    case unassigned
+    case assigned(UUID)
+}
+
 final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var tasks: [WorkTask]
     @Published private(set) var lastUnassignedTaskIDs: Set<UUID> = []
@@ -37,6 +43,34 @@ final class KanbanBoardViewModel: ObservableObject {
                 }
                 return $0.createdAt < $1.createdAt
             }
+    }
+
+    func filteredTasks(in status: KanbanStatus, query: String, assigneeFilter: TaskAssigneeFilter) -> [WorkTask] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return tasks(in: status).filter { task in
+            let matchesQuery: Bool
+            if normalizedQuery.isEmpty {
+                matchesQuery = true
+            } else {
+                let titleMatch = task.title.lowercased().contains(normalizedQuery)
+                let detailsMatch = task.details.lowercased().contains(normalizedQuery)
+                let skillsMatch = task.requiredSkills.contains { $0.lowercased().contains(normalizedQuery) }
+                matchesQuery = titleMatch || detailsMatch || skillsMatch
+            }
+
+            let matchesAssignee: Bool
+            switch assigneeFilter {
+            case .all:
+                matchesAssignee = true
+            case .unassigned:
+                matchesAssignee = task.assignedAgentID == nil
+            case let .assigned(agentID):
+                matchesAssignee = task.assignedAgentID == agentID
+            }
+
+            return matchesQuery && matchesAssignee
+        }
     }
 
     @discardableResult
@@ -83,22 +117,27 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessage = nil
     }
 
+    @discardableResult
     func addTask(
         title: String,
         details: String,
         requiredSkillsText: String,
         storyPoints: Int = 1
-    ) {
+    ) -> Bool {
         let skills = requiredSkillsText
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            lastBoardMessage = "Task title is required"
+            return false
+        }
 
         tasks.append(
             WorkTask(
-                title: title,
+                title: trimmedTitle,
                 details: details,
                 requiredSkills: skills,
                 storyPoints: storyPoints,
@@ -108,6 +147,72 @@ final class KanbanBoardViewModel: ObservableObject {
         )
         persistBoardState()
         lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func updateTask(
+        _ taskID: UUID,
+        title: String,
+        details: String,
+        requiredSkillsText: String,
+        storyPoints: Int
+    ) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            lastBoardMessage = "Task title is required"
+            return false
+        }
+
+        let skills = requiredSkillsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        tasks[taskIndex].title = trimmedTitle
+        tasks[taskIndex].details = details
+        tasks[taskIndex].requiredSkills = Set(skills.map { $0.lowercased() })
+        tasks[taskIndex].storyPoints = max(1, storyPoints)
+
+        if let agentID = tasks[taskIndex].assignedAgentID {
+            guard let agent = agents.first(where: { $0.id == agentID }) else {
+                tasks[taskIndex].assignedAgentID = nil
+                lastAssignmentReasons[taskID] = nil
+                if tasks[taskIndex].status == .todo {
+                    lastUnassignedTaskIDs.insert(taskID)
+                }
+                persistBoardState()
+                lastBoardMessage = nil
+                return true
+            }
+
+            if !agent.hasSkills(for: tasks[taskIndex]) {
+                tasks[taskIndex].assignedAgentID = nil
+                lastAssignmentReasons[taskID] = nil
+                if tasks[taskIndex].status == .todo {
+                    lastUnassignedTaskIDs.insert(taskID)
+                }
+            }
+        } else if tasks[taskIndex].status == .todo {
+            lastUnassignedTaskIDs.insert(taskID)
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func removeTask(_ taskID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        tasks.remove(at: taskIndex)
+        lastUnassignedTaskIDs.remove(taskID)
+        lastAssignmentReasons[taskID] = nil
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
     }
 
     @discardableResult
@@ -192,6 +297,15 @@ final class KanbanBoardViewModel: ObservableObject {
             skills: skills,
             maxConcurrentTasks: normalizedCapacity
         )
+
+        for index in tasks.indices where tasks[index].assignedAgentID == agentID && tasks[index].status == .todo {
+            if !agents[agentIndex].hasSkills(for: tasks[index]) {
+                tasks[index].assignedAgentID = nil
+                lastAssignmentReasons[tasks[index].id] = nil
+                lastUnassignedTaskIDs.insert(tasks[index].id)
+            }
+        }
+
         persistBoardState()
         lastBoardMessage = nil
         return true

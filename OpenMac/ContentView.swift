@@ -4,6 +4,7 @@ struct ContentView: View {
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
+    @State private var isShowingEditTaskSheet = false
     @State private var isShowingNewAgentSheet = false
     @State private var isShowingEditAgentSheet = false
     @State private var isShowingWIPSettingsSheet = false
@@ -12,6 +13,11 @@ struct ContentView: View {
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
+    @State private var editingTaskID: UUID?
+    @State private var editTaskTitle = ""
+    @State private var editTaskDetails = ""
+    @State private var editTaskSkills = ""
+    @State private var editTaskPoints = 1
     @State private var newAgentName = ""
     @State private var newAgentSkills = ""
     @State private var newAgentCapacity = 3
@@ -22,6 +28,8 @@ struct ContentView: View {
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
+    @State private var taskSearchQuery = ""
+    @State private var selectedAssigneeFilterKey = "all"
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -67,6 +75,21 @@ struct ContentView: View {
                     }
                 }
 
+                HStack(spacing: 12) {
+                    TextField("Search tasks", text: $taskSearchQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 300)
+
+                    Picker("Assignee", selection: $selectedAssigneeFilterKey) {
+                        ForEach(assigneeFilterOptions, id: \.key) { option in
+                            Text(option.label).tag(option.key)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Spacer()
+                }
+
                 if let message = viewModel.lastBoardMessage {
                     Text(message)
                         .font(.callout)
@@ -78,7 +101,7 @@ struct ContentView: View {
                         ForEach(KanbanStatus.allCases) { status in
                             KanbanColumnView(
                                 status: status,
-                                tasks: viewModel.tasks(in: status),
+                                tasks: filteredBoardTasks(in: status),
                                 wipLimit: viewModel.wipLimit(for: status),
                                 assigneeName: { task in
                                     viewModel.agentName(for: task.assignedAgentID)
@@ -94,6 +117,8 @@ struct ContentView: View {
                                     guard let next = status.next else { return }
                                     viewModel.moveTask(task.id, to: next)
                                 },
+                                onEditTask: openEditTask,
+                                onDeleteTask: removeTask,
                                 onDropTask: { taskID in
                                     viewModel.handleDrop(taskID, to: status)
                                 }
@@ -137,15 +162,18 @@ struct ContentView: View {
                 details: $newTaskDetails,
                 skills: $newTaskSkills,
                 storyPoints: $newTaskPoints,
+                boardMessage: viewModel.lastBoardMessage,
                 onCancel: resetDraftAndClose,
                 onCreate: {
-                    viewModel.addTask(
+                    let added = viewModel.addTask(
                         title: newTaskTitle,
                         details: newTaskDetails,
                         requiredSkillsText: newTaskSkills,
                         storyPoints: newTaskPoints
                     )
-                    resetDraftAndClose()
+                    if added {
+                        resetDraftAndClose()
+                    }
                 }
             )
         }
@@ -155,6 +183,17 @@ struct ContentView: View {
                 reviewLimit: $reviewWIPLimitDraft,
                 onCancel: { isShowingWIPSettingsSheet = false },
                 onApply: applyWIPSettings
+            )
+        }
+        .sheet(isPresented: $isShowingEditTaskSheet) {
+            EditTaskSheet(
+                title: $editTaskTitle,
+                details: $editTaskDetails,
+                skills: $editTaskSkills,
+                storyPoints: $editTaskPoints,
+                boardMessage: viewModel.lastBoardMessage,
+                onCancel: closeEditTaskSheet,
+                onSave: applyTaskEdits
             )
         }
         .sheet(isPresented: $isShowingNewAgentSheet) {
@@ -200,6 +239,9 @@ struct ContentView: View {
                 onClose: { isShowingManualTriageSheet = false }
             )
         }
+        .onChange(of: viewModel.agents) { _ in
+            normalizeAssigneeFilterSelection()
+        }
     }
 
     private func resetDraftAndClose() {
@@ -208,6 +250,24 @@ struct ContentView: View {
         newTaskSkills = ""
         newTaskPoints = 1
         isShowingNewTaskSheet = false
+    }
+
+    private func openEditTask(_ task: WorkTask) {
+        editingTaskID = task.id
+        editTaskTitle = task.title
+        editTaskDetails = task.details
+        editTaskSkills = task.requiredSkills.sorted().joined(separator: ", ")
+        editTaskPoints = task.storyPoints
+        isShowingEditTaskSheet = true
+    }
+
+    private func closeEditTaskSheet() {
+        editingTaskID = nil
+        editTaskTitle = ""
+        editTaskDetails = ""
+        editTaskSkills = ""
+        editTaskPoints = 1
+        isShowingEditTaskSheet = false
     }
 
     private func resetAgentDraftAndClose() {
@@ -230,6 +290,23 @@ struct ContentView: View {
         ])
         if updated {
             isShowingWIPSettingsSheet = false
+        }
+    }
+
+    private func applyTaskEdits() {
+        guard let editingTaskID else { return }
+
+        let updated = viewModel.updateTask(
+            editingTaskID,
+            title: editTaskTitle,
+            details: editTaskDetails,
+            requiredSkillsText: editTaskSkills,
+            storyPoints: editTaskPoints
+        )
+
+        if updated {
+            refreshTriageSelections()
+            closeEditTaskSheet()
         }
     }
 
@@ -292,6 +369,13 @@ struct ContentView: View {
         }
     }
 
+    private func removeTask(_ taskID: UUID) {
+        let removed = viewModel.removeTask(taskID)
+        if removed {
+            refreshTriageSelections()
+        }
+    }
+
     private func openEditAgent(_ agent: AgentProfile) {
         editingAgentID = agent.id
         editAgentName = agent.name
@@ -323,6 +407,44 @@ struct ContentView: View {
             closeEditAgentSheet()
         }
     }
+
+    private var assigneeFilterOptions: [(key: String, label: String)] {
+        let base = [
+            (key: "all", label: "All Assignees"),
+            (key: "unassigned", label: "Unassigned")
+        ]
+        let agentOptions = viewModel.agents
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { agent in
+                (key: agent.id.uuidString, label: agent.name)
+            }
+        return base + agentOptions
+    }
+
+    private var selectedAssigneeFilter: TaskAssigneeFilter {
+        if selectedAssigneeFilterKey == "all" {
+            return .all
+        }
+        if selectedAssigneeFilterKey == "unassigned" {
+            return .unassigned
+        }
+        guard let id = UUID(uuidString: selectedAssigneeFilterKey),
+              viewModel.agents.contains(where: { $0.id == id }) else {
+            return .all
+        }
+        return .assigned(id)
+    }
+
+    private func filteredBoardTasks(in status: KanbanStatus) -> [WorkTask] {
+        viewModel.filteredTasks(in: status, query: taskSearchQuery, assigneeFilter: selectedAssigneeFilter)
+    }
+
+    private func normalizeAssigneeFilterSelection() {
+        let validKeys = Set(assigneeFilterOptions.map { $0.key })
+        if !validKeys.contains(selectedAssigneeFilterKey) {
+            selectedAssigneeFilterKey = "all"
+        }
+    }
 }
 
 private struct KanbanColumnView: View {
@@ -333,6 +455,8 @@ private struct KanbanColumnView: View {
     let assignmentReason: (WorkTask) -> String?
     let moveBackward: (WorkTask) -> Void
     let moveForward: (WorkTask) -> Void
+    let onEditTask: (WorkTask) -> Void
+    let onDeleteTask: (UUID) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -373,6 +497,8 @@ private struct KanbanColumnView: View {
                         assignmentReason: assignmentReason(task),
                         canMoveBackward: status.previous != nil,
                         canMoveForward: status.next != nil,
+                        onEdit: { onEditTask(task) },
+                        onDelete: { onDeleteTask(task.id) },
                         onMoveBackward: { moveBackward(task) },
                         onMoveForward: { moveForward(task) }
                     )
@@ -421,6 +547,8 @@ private struct TaskCardView: View {
     let assignmentReason: String?
     let canMoveBackward: Bool
     let canMoveForward: Bool
+    let onEdit: () -> Void
+    let onDelete: () -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -485,6 +613,10 @@ private struct TaskCardView: View {
         }
         .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .contextMenu {
+            Button("Edit Task", action: onEdit)
+            Button("Delete Task", role: .destructive, action: onDelete)
+        }
         .draggable(task.id.uuidString)
     }
 }
@@ -494,6 +626,7 @@ private struct NewTaskSheet: View {
     @Binding var details: String
     @Binding var skills: String
     @Binding var storyPoints: Int
+    let boardMessage: String?
 
     let onCancel: () -> Void
     let onCreate: () -> Void
@@ -502,6 +635,12 @@ private struct NewTaskSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Create Task")
                 .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                Text(boardMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
 
             TextField("Title", text: $title)
             TextField("Details", text: $details)
@@ -513,6 +652,44 @@ private struct NewTaskSheet: View {
                 Spacer()
                 Button("Cancel", action: onCancel)
                 Button("Create", action: onCreate)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
+    }
+}
+
+private struct EditTaskSheet: View {
+    @Binding var title: String
+    @Binding var details: String
+    @Binding var skills: String
+    @Binding var storyPoints: Int
+    let boardMessage: String?
+
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Task")
+                .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                Text(boardMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            TextField("Title", text: $title)
+            TextField("Details", text: $details)
+            TextField("Skills (comma separated)", text: $skills)
+            Stepper("Story Points: \(storyPoints)", value: $storyPoints, in: 1 ... 13)
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save", action: onSave)
                     .keyboardShortcut(.defaultAction)
             }
         }

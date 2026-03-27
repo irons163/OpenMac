@@ -270,6 +270,81 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks[0].assignedAgentID == agent.id)
         #expect(viewModel.assignmentReason(for: task.id) != nil)
     }
+
+    @Test("filters tasks by search query across title details and skills")
+    func filtersTasksBySearchQuery() {
+        let matchByTitle = WorkTask(
+            title: "Implement search panel",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let matchByDetails = WorkTask(
+            title: "Board metrics",
+            details: "Need search query parser",
+            requiredSkills: ["swift"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let matchBySkills = WorkTask(
+            title: "Styling",
+            details: "",
+            requiredSkills: ["search"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let nonMatch = WorkTask(
+            title: "Notifications",
+            details: "No filter keyword",
+            requiredSkills: ["backend"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [matchByTitle, matchByDetails, matchBySkills, nonMatch], agents: [])
+
+        let filtered = viewModel.filteredTasks(in: .todo, query: "search", assigneeFilter: .all)
+
+        #expect(filtered.count == 3)
+        #expect(filtered.contains(where: { $0.id == matchByTitle.id }))
+        #expect(filtered.contains(where: { $0.id == matchByDetails.id }))
+        #expect(filtered.contains(where: { $0.id == matchBySkills.id }))
+        #expect(!filtered.contains(where: { $0.id == nonMatch.id }))
+    }
+
+    @Test("filters tasks by assignee option")
+    func filtersTasksByAssigneeOption() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let assigned = WorkTask(
+            title: "Assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let unassigned = WorkTask(
+            title: "Unassigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [assigned, unassigned], agents: [agent])
+
+        let onlyAssigned = viewModel.filteredTasks(in: .inProgress, query: "", assigneeFilter: .assigned(agent.id))
+        let onlyUnassigned = viewModel.filteredTasks(in: .inProgress, query: "", assigneeFilter: .unassigned)
+
+        #expect(onlyAssigned.count == 1)
+        #expect(onlyAssigned.first?.id == assigned.id)
+        #expect(onlyUnassigned.count == 1)
+        #expect(onlyUnassigned.first?.id == unassigned.id)
+    }
 }
 
 struct KanbanPersistenceTests {
@@ -697,6 +772,169 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("adds task with normalized skills and persists snapshot")
+    func addsTaskAndPersists() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let added = viewModel.addTask(
+            title: "Implement Search",
+            details: "Add board filtering",
+            requiredSkillsText: "swiftui, ui,  ",
+            storyPoints: 3
+        )
+
+        #expect(added)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].title == "Implement Search")
+        #expect(viewModel.tasks[0].requiredSkills == Set(["swiftui", "ui"]))
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rejects adding task with empty title")
+    func rejectsAddingTaskWithEmptyTitle() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let added = viewModel.addTask(
+            title: "   ",
+            details: "No title",
+            requiredSkillsText: "swiftui",
+            storyPoints: 2
+        )
+
+        #expect(!added)
+        #expect(viewModel.tasks.isEmpty)
+        #expect(viewModel.lastBoardMessage == "Task title is required")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("updates task fields and persists snapshot")
+    func updatesTaskAndPersists() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "Initial details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "Build kanban board",
+            details: "Updated details",
+            requiredSkillsText: "swiftui, ui",
+            storyPoints: 5
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].title == "Build kanban board")
+        #expect(viewModel.tasks[0].details == "Updated details")
+        #expect(viewModel.tasks[0].requiredSkills == Set(["swiftui", "ui"]))
+        #expect(viewModel.tasks[0].storyPoints == 5)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rejects updating task with empty title")
+    func rejectsUpdatingTaskWithEmptyTitle() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "   ",
+            details: "",
+            requiredSkillsText: "swiftui",
+            storyPoints: 2
+        )
+
+        #expect(!updated)
+        #expect(viewModel.tasks[0].title == "Build board")
+        #expect(viewModel.lastBoardMessage == "Task title is required")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("removes task and persists snapshot")
+    func removesTaskAndPersists() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let removed = viewModel.removeTask(task.id)
+
+        #expect(removed)
+        #expect(viewModel.tasks.isEmpty)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("removing unknown task returns false and does not persist")
+    func rejectsRemovingUnknownTask() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let removed = viewModel.removeTask(UUID())
+
+        #expect(!removed)
+        #expect(viewModel.tasks.count == 1)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("updating task skills can unassign incompatible agent")
+    func updateTaskUnassignsIncompatibleAgent() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "Build board",
+            details: "",
+            requiredSkillsText: "backend",
+            storyPoints: 2
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.assignmentReason(for: task.id) == nil)
+        #expect(viewModel.triageCandidates().contains(where: { $0.id == task.id }))
+        #expect(store.savedSnapshots.count == 1)
+    }
+
     @Test("adds agent with parsed skills and persists board snapshot")
     func addsAgentAndPersists() {
         let store = SpyBoardStore()
@@ -752,6 +990,34 @@ struct KanbanPersistenceTests {
         #expect(viewModel.agents[0].name == "Platform Agent")
         #expect(viewModel.agents[0].skills == Set(["api", "db", "swiftui"]))
         #expect(viewModel.agents[0].maxConcurrentTasks == 4)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("updating agent skills can unassign incompatible todo tasks")
+    func updateAgentUnassignsIncompatibleTodoTasks() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui", "ui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let updated = viewModel.updateAgent(
+            agent.id,
+            name: "UI Agent",
+            skillsText: "backend",
+            maxConcurrentTasks: 2
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.assignmentReason(for: task.id) == nil)
+        #expect(viewModel.triageCandidates().contains(where: { $0.id == task.id }))
         #expect(store.savedSnapshots.count == 1)
     }
 
