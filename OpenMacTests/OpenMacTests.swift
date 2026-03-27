@@ -906,6 +906,49 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("unassigns task and persists snapshot")
+    func unassignsTaskAndPersists() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let unassigned = viewModel.unassignTask(task.id)
+
+        #expect(unassigned)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.assignmentReason(for: task.id) == nil)
+        #expect(viewModel.triageCandidates().contains(where: { $0.id == task.id }))
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rejects unassigning task that is already unassigned")
+    func rejectsUnassigningAlreadyUnassignedTask() {
+        let task = WorkTask(
+            title: "Build board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let unassigned = viewModel.unassignTask(task.id)
+
+        #expect(!unassigned)
+        #expect(viewModel.lastBoardMessage == "Task is already unassigned")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("clears done tasks and persists snapshot once")
     func clearsDoneTasksAndPersists() {
         let doneA = WorkTask(

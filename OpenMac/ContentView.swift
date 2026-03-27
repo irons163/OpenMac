@@ -130,6 +130,7 @@ struct ContentView: View {
                                 },
                                 onEditTask: openEditTask,
                                 onDeleteTask: removeTask,
+                                onUnassignTask: unassignTask,
                                 onDropTask: { taskID in
                                     viewModel.handleDrop(taskID, to: status)
                                 }
@@ -409,6 +410,13 @@ struct ContentView: View {
         }
     }
 
+    private func unassignTask(_ taskID: UUID) {
+        let unassigned = viewModel.unassignTask(taskID)
+        if unassigned {
+            refreshTriageSelections()
+        }
+    }
+
     private func openEditAgent(_ agent: AgentProfile) {
         editingAgentID = agent.id
         editAgentName = agent.name
@@ -501,6 +509,7 @@ private struct KanbanColumnView: View {
     let moveForward: (WorkTask) -> Void
     let onEditTask: (WorkTask) -> Void
     let onDeleteTask: (UUID) -> Void
+    let onUnassignTask: (UUID) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -541,7 +550,9 @@ private struct KanbanColumnView: View {
                         assignmentReason: assignmentReason(task),
                         canMoveBackward: status.previous != nil,
                         canMoveForward: status.next != nil,
+                        canUnassign: task.assignedAgentID != nil && task.status != .done,
                         onEdit: { onEditTask(task) },
+                        onUnassign: { onUnassignTask(task.id) },
                         onDelete: { onDeleteTask(task.id) },
                         onMoveBackward: { moveBackward(task) },
                         onMoveForward: { moveForward(task) }
@@ -591,7 +602,9 @@ private struct TaskCardView: View {
     let assignmentReason: String?
     let canMoveBackward: Bool
     let canMoveForward: Bool
+    let canUnassign: Bool
     let onEdit: () -> Void
+    let onUnassign: () -> Void
     let onDelete: () -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
@@ -659,6 +672,9 @@ private struct TaskCardView: View {
         .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
         .contextMenu {
             Button("Edit Task", action: onEdit)
+            if canUnassign {
+                Button("Unassign Task", action: onUnassign)
+            }
             Button("Delete Task", role: .destructive, action: onDelete)
         }
         .draggable(task.id.uuidString)

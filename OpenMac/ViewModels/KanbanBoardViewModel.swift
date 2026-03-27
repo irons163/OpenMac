@@ -216,6 +216,24 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func unassignTask(_ taskID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        guard tasks[taskIndex].assignedAgentID != nil else {
+            lastBoardMessage = "Task is already unassigned"
+            return false
+        }
+
+        tasks[taskIndex].assignedAgentID = nil
+        lastAssignmentReasons[taskID] = nil
+        if tasks[taskIndex].status == .todo {
+            lastUnassignedTaskIDs.insert(taskID)
+        }
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
     func clearDoneTasks() -> Int {
         let doneTaskIDs = Set(tasks.filter { $0.status == .done }.map { $0.id })
         guard !doneTaskIDs.isEmpty else {
