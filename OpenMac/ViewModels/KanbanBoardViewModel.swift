@@ -638,6 +638,14 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         }
 
+        if appliedCount > 0 {
+            lastBoardMessage = "Applied \(appliedCount) health recommendation(s)"
+        } else if !actions.isEmpty {
+            lastBoardMessage = "No automatic fixes available for current recommendations"
+        } else {
+            lastBoardMessage = "Board health already stable"
+        }
+
         return appliedCount
     }
 

@@ -722,6 +722,25 @@ struct KanbanFlowTests {
         #expect(viewModel.unassignedTodoTaskCount == 0)
         #expect(viewModel.activeTaskCount(for: overloaded.id) == 1)
         #expect(viewModel.healthRecommendations().isEmpty)
+        #expect(viewModel.lastBoardMessage == "Applied 4 health recommendation(s)")
+    }
+
+    @Test("reports when apply-all has no automatic fixes available")
+    func reportsWhenApplyAllHasNoAutomaticFixes() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let appliedCount = viewModel.applyAllHealthRecommendations()
+
+        #expect(appliedCount == 0)
+        #expect(viewModel.lastBoardMessage == "No automatic fixes available for current recommendations")
     }
 
     @Test("returns no health recommendations when board is healthy")
