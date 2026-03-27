@@ -478,6 +478,95 @@ struct KanbanFlowTests {
         #expect(viewModel.overloadedAgentCount == 1)
     }
 
+    @Test("reports perfect health score for stable board")
+    func reportsPerfectHealthScoreForStableBoard() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssigned = WorkTask(
+            title: "Todo Assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssigned, inProgress],
+            agents: [agent],
+            wipLimits: [.inProgress: 4, .review: 2]
+        )
+
+        #expect(viewModel.boardHealthScore == 100)
+    }
+
+    @Test("reduces health score for unassigned work overload and WIP pressure")
+    func reducesHealthScoreForBoardRisks() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let healthy = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssignedA = WorkTask(
+            title: "Todo A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoAssignedB = WorkTask(
+            title: "Todo B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoUnassigned = WorkTask(
+            title: "Todo C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let review = WorkTask(
+            title: "Review",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: healthy.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssignedA, todoAssignedB, todoUnassigned, inProgress, review, done],
+            agents: [overloaded, healthy],
+            wipLimits: [.inProgress: 1, .review: 1]
+        )
+
+        #expect(viewModel.boardHealthScore == 55)
+    }
+
     @Test("computes wip pressure ratio against configured limits")
     func computesWIPPressureRatio() {
         let inProgressA = WorkTask(

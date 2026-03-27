@@ -56,6 +56,15 @@ final class KanbanBoardViewModel: ObservableObject {
     var hasPendingManualTriage: Bool { !agents.isEmpty && unassignedTodoTaskCount > 0 }
     var doneTaskCount: Int { tasks.filter { $0.status == .done }.count }
     var overloadedAgentCount: Int { agents.filter { isAgentOverloaded($0.id) }.count }
+    var boardHealthScore: Int {
+        var penalty = 0
+        penalty += min(30, unassignedTodoTaskCount * 10)
+        penalty += min(30, overloadedAgentCount * 10)
+        if wipPressurePercent(for: .inProgress) >= 100 { penalty += 10 }
+        if wipPressurePercent(for: .review) >= 100 { penalty += 10 }
+        if doneTaskCount > 0 { penalty += 5 }
+        return max(0, 100 - penalty)
+    }
 
     init(
         tasks: [WorkTask],
