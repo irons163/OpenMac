@@ -123,6 +123,37 @@ final class KanbanBoardViewModel: ObservableObject {
         wipLimits[status]
     }
 
+    @discardableResult
+    func updateWIPLimit(for status: KanbanStatus, limit: Int?) -> Bool {
+        updateWIPLimits([status: limit])
+    }
+
+    @discardableResult
+    func updateWIPLimits(_ limits: [KanbanStatus: Int?]) -> Bool {
+        var candidateLimits = wipLimits
+
+        for (status, limit) in limits {
+            if let limit {
+                candidateLimits[status] = max(1, limit)
+            } else {
+                candidateLimits[status] = nil
+            }
+        }
+
+        for (status, limit) in candidateLimits {
+            let currentCount = tasks.filter { $0.status == status }.count
+            guard limit >= currentCount else {
+                lastBoardMessage = "Cannot set \(status.title) WIP below current count (\(currentCount))"
+                return false
+            }
+        }
+
+        wipLimits = candidateLimits
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
     func assignmentReason(for taskID: UUID) -> String? {
         lastAssignmentReasons[taskID]
     }

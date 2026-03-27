@@ -361,6 +361,135 @@ struct KanbanPersistenceTests {
         #expect(loadedTask?.assignedAgentID == snapshotTask?.assignedAgentID)
         #expect(abs((loadedTask?.createdAt.timeIntervalSince(snapshotTask?.createdAt ?? .distantPast) ?? 1)) < 0.01)
     }
+
+    @Test("updates WIP limit and persists new board snapshot")
+    func updatesWIPLimitAndPersists() {
+        let task = WorkTask(
+            title: "Active task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [],
+            wipLimits: [.inProgress: 3],
+            boardStore: store
+        )
+
+        let updated = viewModel.updateWIPLimit(for: .inProgress, limit: 4)
+
+        #expect(updated)
+        #expect(viewModel.wipLimit(for: .inProgress) == 4)
+        #expect(store.savedSnapshots.count == 1)
+        #expect(store.savedSnapshots.last?.wipLimits[.inProgress] == 4)
+    }
+
+    @Test("rejects WIP limit lower than current task count in that column")
+    func rejectsWIPLimitLowerThanCurrentCount() {
+        let reviewTask1 = WorkTask(
+            title: "Review A",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let reviewTask2 = WorkTask(
+            title: "Review B",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [reviewTask1, reviewTask2],
+            agents: [],
+            wipLimits: [.review: 3],
+            boardStore: store
+        )
+
+        let updated = viewModel.updateWIPLimit(for: .review, limit: 1)
+
+        #expect(!updated)
+        #expect(viewModel.wipLimit(for: .review) == 3)
+        #expect(viewModel.lastBoardMessage == "Cannot set Review WIP below current count (2)")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("updates multiple WIP limits atomically and persists once")
+    func updatesMultipleWIPLimitsAtomically() {
+        let inProgressTask = WorkTask(
+            title: "In progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let reviewTask = WorkTask(
+            title: "Review",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [inProgressTask, reviewTask],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 2],
+            boardStore: store
+        )
+
+        let updated = viewModel.updateWIPLimits([.inProgress: 4, .review: 5])
+
+        #expect(updated)
+        #expect(viewModel.wipLimit(for: .inProgress) == 4)
+        #expect(viewModel.wipLimit(for: .review) == 5)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("does not partially apply WIP changes when one update is invalid")
+    func rejectsBatchWIPUpdateWithoutPartialMutation() {
+        let reviewTask1 = WorkTask(
+            title: "Review 1",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let reviewTask2 = WorkTask(
+            title: "Review 2",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [reviewTask1, reviewTask2],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 3],
+            boardStore: store
+        )
+
+        let updated = viewModel.updateWIPLimits([.inProgress: 5, .review: 1])
+
+        #expect(!updated)
+        #expect(viewModel.wipLimit(for: .inProgress) == 3)
+        #expect(viewModel.wipLimit(for: .review) == 3)
+        #expect(viewModel.lastBoardMessage == "Cannot set Review WIP below current count (2)")
+        #expect(store.savedSnapshots.isEmpty)
+    }
 }
 
 private final class SpyBoardStore: KanbanBoardStore {

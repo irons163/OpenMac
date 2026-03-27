@@ -4,10 +4,13 @@ struct ContentView: View {
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
+    @State private var isShowingWIPSettingsSheet = false
     @State private var newTaskTitle = ""
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
+    @State private var inProgressWIPLimitDraft = 1
+    @State private var reviewWIPLimitDraft = 1
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -95,6 +98,9 @@ struct ContentView: View {
                 Button("New Task") {
                     isShowingNewTaskSheet = true
                 }
+                Button("WIP Limits") {
+                    openWIPSettings()
+                }
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -115,6 +121,14 @@ struct ContentView: View {
                 }
             )
         }
+        .sheet(isPresented: $isShowingWIPSettingsSheet) {
+            WIPSettingsSheet(
+                inProgressLimit: $inProgressWIPLimitDraft,
+                reviewLimit: $reviewWIPLimitDraft,
+                onCancel: { isShowingWIPSettingsSheet = false },
+                onApply: applyWIPSettings
+            )
+        }
     }
 
     private func resetDraftAndClose() {
@@ -123,6 +137,22 @@ struct ContentView: View {
         newTaskSkills = ""
         newTaskPoints = 1
         isShowingNewTaskSheet = false
+    }
+
+    private func openWIPSettings() {
+        inProgressWIPLimitDraft = viewModel.wipLimit(for: .inProgress) ?? 1
+        reviewWIPLimitDraft = viewModel.wipLimit(for: .review) ?? 1
+        isShowingWIPSettingsSheet = true
+    }
+
+    private func applyWIPSettings() {
+        let updated = viewModel.updateWIPLimits([
+            .inProgress: inProgressWIPLimitDraft,
+            .review: reviewWIPLimitDraft
+        ])
+        if updated {
+            isShowingWIPSettingsSheet = false
+        }
     }
 }
 
@@ -319,6 +349,37 @@ private struct NewTaskSheet: View {
         }
         .padding(18)
         .frame(width: 420)
+    }
+}
+
+private struct WIPSettingsSheet: View {
+    @Binding var inProgressLimit: Int
+    @Binding var reviewLimit: Int
+
+    let onCancel: () -> Void
+    let onApply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Edit WIP Limits")
+                .font(.title3.weight(.semibold))
+
+            Stepper("In Progress: \(inProgressLimit)", value: $inProgressLimit, in: 1 ... 20)
+            Stepper("Review: \(reviewLimit)", value: $reviewLimit, in: 1 ... 20)
+
+            Text("Tip: limit cannot be smaller than the number of tasks currently in that column.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Apply", action: onApply)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
     }
 }
 
