@@ -368,6 +368,9 @@ struct ContentView: View {
         switch action {
         case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .archiveDone:
             refreshTriageSelections()
+        case .openManualTriage:
+            refreshTriageSelections()
+            openManualTriage()
         case .increaseWIPLimit(_):
             break
         }

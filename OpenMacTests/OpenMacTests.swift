@@ -594,6 +594,23 @@ struct KanbanFlowTests {
         #expect(viewModel.wipLimit(for: .review) == 2)
     }
 
+    @Test("includes manual triage recommendation when unassigned todo exists")
+    func includesManualTriageRecommendation() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let actions = viewModel.healthRecommendations().map(\.action)
+
+        #expect(actions.contains(.openManualTriage))
+    }
+
     @Test("returns no health recommendations when board is healthy")
     func returnsNoHealthRecommendationsWhenHealthy() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
