@@ -1164,6 +1164,66 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("unassigns all todo tasks for a specific agent")
+    func unassignsAgentTodoTasks() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoA = WorkTask(
+            title: "Todo A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let todoB = WorkTask(
+            title: "Todo B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [todoA, todoB, inProgress], agents: [agent], boardStore: store)
+
+        let count = viewModel.unassignTodoTasks(for: agent.id)
+
+        #expect(count == 2)
+        #expect(viewModel.tasks.first(where: { $0.id == todoA.id })?.assignedAgentID == nil)
+        #expect(viewModel.tasks.first(where: { $0.id == todoB.id })?.assignedAgentID == nil)
+        #expect(viewModel.tasks.first(where: { $0.id == inProgress.id })?.assignedAgentID == agent.id)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("unassign agent todo tasks reports when nothing can be unassigned")
+    func unassignAgentTodoTasksNoop() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [inProgress], agents: [agent], boardStore: store)
+
+        let count = viewModel.unassignTodoTasks(for: agent.id)
+
+        #expect(count == 0)
+        #expect(viewModel.lastBoardMessage == "No todo tasks assigned to selected agent")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("updating task skills can unassign incompatible agent")
     func updateTaskUnassignsIncompatibleAgent() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)

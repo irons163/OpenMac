@@ -53,6 +53,10 @@ struct ContentView: View {
                         Button("Edit Agent") {
                             openEditAgent(agent)
                         }
+                        Button("Unassign Todo Tasks") {
+                            unassignTodoTasks(for: agent.id)
+                        }
+                        .disabled(!hasAssignedTodoTasks(for: agent.id))
                         Button("Remove Agent", role: .destructive) {
                             removeAgent(agent.id)
                         }
@@ -402,6 +406,13 @@ struct ContentView: View {
         }
     }
 
+    private func unassignTodoTasks(for agentID: UUID) {
+        let count = viewModel.unassignTodoTasks(for: agentID)
+        if count > 0 {
+            refreshTriageSelections()
+        }
+    }
+
     private func removeTask(_ taskID: UUID) {
         let removed = viewModel.removeTask(taskID)
         if removed {
@@ -459,6 +470,10 @@ struct ContentView: View {
                 (key: agent.id.uuidString, label: agent.name)
             }
         return base + agentOptions
+    }
+
+    private func hasAssignedTodoTasks(for agentID: UUID) -> Bool {
+        viewModel.tasks(in: .todo).contains(where: { $0.assignedAgentID == agentID })
     }
 
     private var selectedAssigneeFilter: TaskAssigneeFilter {
