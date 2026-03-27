@@ -7,6 +7,32 @@ enum TaskAssigneeFilter: Equatable {
     case assigned(UUID)
 }
 
+enum BoardHealthAction: Equatable {
+    case autoAssignUnassignedTodo
+    case rebalanceTodoLoad
+    case increaseWIPLimit(KanbanStatus)
+    case archiveDone
+}
+
+struct BoardHealthRecommendation: Identifiable, Equatable {
+    let action: BoardHealthAction
+    let title: String
+    let detail: String
+
+    var id: String {
+        switch action {
+        case .autoAssignUnassignedTodo:
+            return "auto-assign-unassigned-todo"
+        case .rebalanceTodoLoad:
+            return "rebalance-todo-load"
+        case let .increaseWIPLimit(status):
+            return "increase-wip-\(status.rawValue)"
+        case .archiveDone:
+            return "archive-done"
+        }
+    }
+}
+
 final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var tasks: [WorkTask]
     @Published private(set) var lastUnassignedTaskIDs: Set<UUID> = []
@@ -21,6 +47,7 @@ final class KanbanBoardViewModel: ObservableObject {
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
     var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
+    var doneTaskCount: Int { tasks.filter { $0.status == .done }.count }
     var overloadedAgentCount: Int { agents.filter { isAgentOverloaded($0.id) }.count }
 
     init(
@@ -488,6 +515,85 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let limit = wipLimit(for: status), limit > 0 else { return 0 }
         let currentCount = tasks.filter { $0.status == status }.count
         return Int((Double(currentCount) / Double(limit) * 100).rounded())
+    }
+
+    func healthRecommendations() -> [BoardHealthRecommendation] {
+        var recommendations: [BoardHealthRecommendation] = []
+
+        if unassignedTodoTaskCount > 0 {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .autoAssignUnassignedTodo,
+                    title: "Auto-Assign Unowned To Do",
+                    detail: "\(unassignedTodoTaskCount) unassigned task(s) can be dispatched automatically"
+                )
+            )
+        }
+
+        if canRebalanceTodoAssignments() {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .rebalanceTodoLoad,
+                    title: "Rebalance Overloaded Agents",
+                    detail: "Move eligible To Do tasks away from overloaded agents"
+                )
+            )
+        }
+
+        if wipPressurePercent(for: .inProgress) >= 100, wipLimit(for: .inProgress) != nil {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .increaseWIPLimit(.inProgress),
+                    title: "Increase In Progress WIP",
+                    detail: "In Progress is at or above its WIP limit"
+                )
+            )
+        }
+
+        if wipPressurePercent(for: .review) >= 100, wipLimit(for: .review) != nil {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .increaseWIPLimit(.review),
+                    title: "Increase Review WIP",
+                    detail: "Review is at or above its WIP limit"
+                )
+            )
+        }
+
+        if doneTaskCount > 0 {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .archiveDone,
+                    title: "Archive Done Tasks",
+                    detail: "\(doneTaskCount) completed task(s) can be archived"
+                )
+            )
+        }
+
+        return recommendations
+    }
+
+    @discardableResult
+    func applyHealthRecommendation(_ action: BoardHealthAction) -> Bool {
+        switch action {
+        case .autoAssignUnassignedTodo:
+            let before = tasks
+            autoAssignTasks()
+            return tasks != before
+
+        case .rebalanceTodoLoad:
+            return rebalanceTodoAssignments() > 0
+
+        case let .increaseWIPLimit(status):
+            guard let currentLimit = wipLimit(for: status) else {
+                lastBoardMessage = "\(status.title) has no configured WIP limit"
+                return false
+            }
+            return updateWIPLimit(for: status, limit: currentLimit + 1)
+
+        case .archiveDone:
+            return clearDoneTasks() > 0
+        }
     }
 
     func agentName(for id: UUID?) -> String {

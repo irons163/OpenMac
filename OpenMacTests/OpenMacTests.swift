@@ -513,6 +513,114 @@ struct KanbanFlowTests {
         #expect(viewModel.wipPressurePercent(for: .inProgress) == 50)
         #expect(viewModel.wipPressurePercent(for: .review) == 50)
     }
+
+    @Test("builds actionable health recommendations from board state")
+    func buildsActionableHealthRecommendations() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let available = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssignedA = WorkTask(
+            title: "Todo A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoAssignedB = WorkTask(
+            title: "Todo B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoUnassigned = WorkTask(
+            title: "Todo Unassigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssignedA, todoAssignedB, todoUnassigned, inProgress, done],
+            agents: [overloaded, available],
+            wipLimits: [.inProgress: 1, .review: 2]
+        )
+
+        let actions = viewModel.healthRecommendations().map(\.action)
+
+        #expect(actions.contains(.autoAssignUnassignedTodo))
+        #expect(actions.contains(.rebalanceTodoLoad))
+        #expect(actions.contains(.increaseWIPLimit(.inProgress)))
+        #expect(actions.contains(.archiveDone))
+    }
+
+    @Test("applies increase WIP health recommendation")
+    func appliesIncreaseWIPHealthRecommendation() {
+        let reviewTask = WorkTask(
+            title: "Review",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [reviewTask],
+            agents: [],
+            wipLimits: [.review: 1]
+        )
+
+        let applied = viewModel.applyHealthRecommendation(.increaseWIPLimit(.review))
+
+        #expect(applied)
+        #expect(viewModel.wipLimit(for: .review) == 2)
+    }
+
+    @Test("returns no health recommendations when board is healthy")
+    func returnsNoHealthRecommendationsWhenHealthy() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssigned = WorkTask(
+            title: "Todo Assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssigned, inProgress],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        #expect(viewModel.healthRecommendations().isEmpty)
+    }
 }
 
 struct KanbanPersistenceTests {

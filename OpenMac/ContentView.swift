@@ -87,6 +87,11 @@ struct ContentView: View {
                     reviewPressure: viewModel.wipPressurePercent(for: .review)
                 )
 
+                BoardHealthRecommendationsView(
+                    recommendations: viewModel.healthRecommendations(),
+                    onAction: applyHealthRecommendation
+                )
+
                 HStack(spacing: 12) {
                     TextField("Search tasks", text: $taskSearchQuery)
                         .textFieldStyle(.roundedBorder)
@@ -356,6 +361,18 @@ struct ContentView: View {
         }
     }
 
+    private func applyHealthRecommendation(_ action: BoardHealthAction) {
+        let applied = viewModel.applyHealthRecommendation(action)
+        guard applied else { return }
+
+        switch action {
+        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .archiveDone:
+            refreshTriageSelections()
+        case .increaseWIPLimit(_):
+            break
+        }
+    }
+
     private func openManualTriage() {
         refreshTriageSelections()
         isShowingManualTriageSheet = true
@@ -574,6 +591,56 @@ private struct BoardHealthSummaryView: View {
             SummaryBadge(title: "In Progress WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
             SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
             Spacer()
+        }
+    }
+}
+
+private struct BoardHealthRecommendationsView: View {
+    let recommendations: [BoardHealthRecommendation]
+    let onAction: (BoardHealthAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if recommendations.isEmpty {
+                Text("Board health looks stable. No immediate actions recommended.")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else {
+                Text("Suggested Actions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(recommendations) { recommendation in
+                            Button {
+                                onAction(recommendation.action)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(recommendation.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(recommendation.detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(2)
+                                }
+                                .frame(width: 220, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
         }
     }
 }
