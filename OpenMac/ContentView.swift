@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -163,7 +164,7 @@ struct ContentView: View {
             .padding(20)
             .background(
                 LinearGradient(
-                    colors: [Color(red: 0.96, green: 0.98, blue: 1.0), Color(red: 0.93, green: 0.96, blue: 0.99)],
+                    colors: detailBackgroundColors,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -568,6 +569,19 @@ struct ContentView: View {
             selectedAssigneeFilterKey = "all"
         }
     }
+
+    private var detailBackgroundColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.12, green: 0.14, blue: 0.18),
+                Color(red: 0.10, green: 0.12, blue: 0.16)
+            ]
+        }
+        return [
+            Color(red: 0.96, green: 0.98, blue: 1.0),
+            Color(red: 0.93, green: 0.96, blue: 0.99)
+        ]
+    }
 }
 
 private struct AgentRowView: View {
@@ -640,6 +654,7 @@ private struct BoardHealthSummaryView: View {
 }
 
 private struct BoardHealthRecommendationsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let recommendations: [BoardHealthRecommendation]
     let onAction: (BoardHealthAction) -> Void
     let onApplyAll: () -> Void
@@ -684,10 +699,10 @@ private struct BoardHealthRecommendationsView: View {
                                 .frame(width: 220, alignment: .leading)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                                .background(recommendationCardBackground, in: RoundedRectangle(cornerRadius: 10))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                                        .stroke(recommendationCardBorder, lineWidth: 1)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -697,6 +712,14 @@ private struct BoardHealthRecommendationsView: View {
                 }
             }
         }
+    }
+
+    private var recommendationCardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.75)
+    }
+
+    private var recommendationCardBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
     }
 
     private var hasMutatingRecommendations: Bool {
@@ -712,6 +735,7 @@ private struct BoardHealthRecommendationsView: View {
 }
 
 private struct SummaryBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
     let color: Color
@@ -727,11 +751,12 @@ private struct SummaryBadge: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(color.opacity(colorScheme == .dark ? 0.22 : 0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
 private struct KanbanColumnView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let status: KanbanStatus
     let tasks: [WorkTask]
     let wipLimit: Int?
@@ -758,13 +783,13 @@ private struct KanbanColumnView: View {
                         .foregroundStyle(tasks.count >= wipLimit ? .red : .primary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.7), in: Capsule())
+                        .background(counterBackground, in: Capsule())
                 } else {
                     Text("\(tasks.count)")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.7), in: Capsule())
+                        .background(counterBackground, in: Capsule())
                 }
             }
 
@@ -773,7 +798,7 @@ private struct KanbanColumnView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 120)
-                    .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                    .background(emptyStateBackground, in: RoundedRectangle(cornerRadius: 12))
             } else {
                 ForEach(tasks) { task in
                     TaskCardView(
@@ -800,7 +825,7 @@ private struct KanbanColumnView: View {
         .background(columnColor, in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.65), lineWidth: 1)
+                .stroke(columnBorderColor, lineWidth: 1)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
@@ -815,6 +840,18 @@ private struct KanbanColumnView: View {
     }
 
     private var columnColor: Color {
+        if colorScheme == .dark {
+            switch status {
+            case .todo:
+                return Color(red: 0.17, green: 0.24, blue: 0.32)
+            case .inProgress:
+                return Color(red: 0.16, green: 0.28, blue: 0.22)
+            case .review:
+                return Color(red: 0.32, green: 0.26, blue: 0.16)
+            case .done:
+                return Color(red: 0.23, green: 0.23, blue: 0.27)
+            }
+        }
         switch status {
         case .todo:
             return Color(red: 0.84, green: 0.92, blue: 1.0)
@@ -826,9 +863,22 @@ private struct KanbanColumnView: View {
             return Color(red: 0.90, green: 0.90, blue: 0.93)
         }
     }
+
+    private var counterBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.white.opacity(0.7)
+    }
+
+    private var emptyStateBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.5)
+    }
+
+    private var columnBorderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.65)
+    }
 }
 
 private struct TaskCardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let task: WorkTask
     let assigneeName: String
     let assignmentReason: String?
@@ -862,7 +912,7 @@ private struct TaskCardView: View {
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.08), in: Capsule())
+                    .background(storyPointBackground, in: Capsule())
 
                 Spacer()
 
@@ -901,7 +951,11 @@ private struct TaskCardView: View {
             }
         }
         .padding(12)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .background(taskCardBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(taskCardBorder, lineWidth: 1)
+        )
         .contextMenu {
             Button("Edit Task", action: onEdit)
             if canUnassign {
@@ -910,6 +964,18 @@ private struct TaskCardView: View {
             Button("Delete Task", role: .destructive, action: onDelete)
         }
         .draggable(task.id.uuidString)
+    }
+
+    private var storyPointBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08)
+    }
+
+    private var taskCardBackground: Color {
+        colorScheme == .dark ? Color(red: 0.16, green: 0.17, blue: 0.20) : Color.white
+    }
+
+    private var taskCardBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.05)
     }
 }
 
@@ -1094,6 +1160,7 @@ private struct EditAgentSheet: View {
 }
 
 private struct ManualTriageSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
     let tasks: [WorkTask]
     let boardMessage: String?
     @Binding var selectedAgentByTaskID: [UUID: UUID]
@@ -1157,7 +1224,7 @@ private struct ManualTriageSheet: View {
                                 }
                             }
                             .padding(10)
-                            .background(Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 10))
+                            .background(triageCardBackground, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
                     .padding(.vertical, 2)
@@ -1178,6 +1245,10 @@ private struct ManualTriageSheet: View {
             get: { selectedAgentByTaskID[taskID] ?? fallback },
             set: { selectedAgentByTaskID[taskID] = $0 }
         )
+    }
+
+    private var triageCardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.85)
     }
 }
 
