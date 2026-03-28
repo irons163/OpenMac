@@ -784,6 +784,11 @@ final class KanbanBoardViewModel: ObservableObject {
         bulkTriageAssignmentPlan(using: preferredAssignments).count
     }
 
+    func bulkUnassignableTriageTaskCount(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
+        let assignableCount = bulkAssignableTriageTaskCount(using: preferredAssignments)
+        return max(0, triageCandidates().count - assignableCount)
+    }
+
     func bulkTriageAssignmentPlan(using preferredAssignments: [UUID: UUID] = [:]) -> [UUID: UUID] {
         let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
@@ -867,7 +872,10 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         persistBoardState()
-        lastBoardMessage = nil
+        let remainingTriageCount = triageCandidates().count
+        lastBoardMessage = remainingTriageCount > 0
+            ? bulkTriageAssignmentSummary(assignedCount: assignedCount, remainingCount: remainingTriageCount)
+            : nil
         return assignedCount
     }
 
@@ -906,6 +914,12 @@ final class KanbanBoardViewModel: ObservableObject {
     ) -> Bool {
         guard agent.hasSkills(for: task) else { return false }
         return loadsByAgentID[agent.id, default: 0] < agent.maxConcurrentTasks
+    }
+
+    private func bulkTriageAssignmentSummary(assignedCount: Int, remainingCount: Int) -> String {
+        let assignedLabel = assignedCount == 1 ? "task" : "tasks"
+        let remainingLabel = remainingCount == 1 ? "task still needs" : "tasks still need"
+        return "Assigned \(assignedCount) triage \(assignedLabel). \(remainingCount) \(remainingLabel) manual attention"
     }
 
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {

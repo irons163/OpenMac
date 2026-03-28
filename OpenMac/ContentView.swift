@@ -318,6 +318,7 @@ struct ContentView: View {
                 boardMessage: viewModel.lastBoardMessage,
                 selectedAgentByTaskID: $triageSelectionByTaskID,
                 assignAllEligibleCount: viewModel.bulkAssignableTriageTaskCount(using: triageSelectionByTaskID),
+                unassignableTaskCount: viewModel.bulkUnassignableTriageTaskCount(using: triageSelectionByTaskID),
                 assignableAgents: { task in
                     viewModel.assignableAgents(for: task.id)
                 },
@@ -1254,6 +1255,7 @@ private struct ManualTriageSheet: View {
     let boardMessage: String?
     @Binding var selectedAgentByTaskID: [UUID: UUID]
     let assignAllEligibleCount: Int
+    let unassignableTaskCount: Int
     let assignableAgents: (WorkTask) -> [AgentProfile]
     let loadText: (AgentProfile) -> String
     let onAssign: (UUID) -> Void
@@ -1276,6 +1278,12 @@ private struct ManualTriageSheet: View {
                 Button("Assign All Eligible (\(assignAllEligibleCount))", action: onAssignAll)
                     .buttonStyle(.bordered)
                     .disabled(assignAllEligibleCount == 0)
+            }
+
+            if unassignableTaskCount > 0 {
+                Text("\(unassignableTaskCount) task(s) currently have no eligible agent and will be skipped.")
+                    .font(.caption)
+                    .foregroundStyle(colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0))
             }
 
             if tasks.isEmpty {

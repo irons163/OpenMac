@@ -1608,6 +1608,35 @@ struct KanbanPersistenceTests {
         #expect(count == 1)
     }
 
+    @Test("bulk triage unassignable count tracks tasks without current assignment plan")
+    func bulkTriageUnassignableCountTracksPlanGap() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [firstTask, secondTask], agents: [uiAgent])
+
+        let assignable = viewModel.bulkAssignableTriageTaskCount()
+        let unassignable = viewModel.bulkUnassignableTriageTaskCount()
+
+        #expect(assignable == 1)
+        #expect(unassignable == 1)
+        #expect(assignable + unassignable == viewModel.triageCandidates().count)
+    }
+
     @Test("bulk triage assignable count is a read-only preview")
     func bulkTriageAssignableCountDoesNotMutateBoardState() {
         let task = WorkTask(
@@ -1662,6 +1691,60 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first(where: { $0.id == testingTask.id })?.assignedAgentID == nil)
         #expect(viewModel.triageCandidates().count == 1)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("bulk triage reports partial assignment when some tasks still need manual triage")
+    func bulkTriageReportsPartialAssignmentSummary() {
+        let uiTask = WorkTask(
+            title: "UI task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let testingTask = WorkTask(
+            title: "Testing task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [uiTask, testingTask], agents: [uiAgent])
+
+        let assignedCount = viewModel.bulkAssignTriageTasks()
+
+        #expect(assignedCount == 1)
+        #expect(viewModel.lastBoardMessage == "Assigned 1 triage task. 1 task still needs manual attention")
+    }
+
+    @Test("bulk triage clears summary message when all triage tasks are assigned")
+    func bulkTriageClearsSummaryMessageWhenFullyAssigned() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [firstTask, secondTask], agents: [uiAgent])
+
+        let assignedCount = viewModel.bulkAssignTriageTasks()
+
+        #expect(assignedCount == 2)
+        #expect(viewModel.lastBoardMessage == nil)
     }
 
     @Test("bulk triage prefers selected agents from manual triage choices")
