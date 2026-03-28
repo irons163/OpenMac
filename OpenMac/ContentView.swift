@@ -181,19 +181,24 @@ struct ContentView: View {
                 Button("New Agent") {
                     isShowingNewAgentSheet = true
                 }
-                Button("Archive Done") {
-                    archiveDoneTasks()
-                }
-                .disabled(viewModel.tasks(in: .done).isEmpty)
-                Button("Rebalance Load") {
-                    rebalanceTodoAssignments()
-                }
-                .disabled(!viewModel.canRebalanceTodoAssignments())
-                Button("WIP Limits") {
-                    openWIPSettings()
-                }
-                Button("Manual Triage") {
-                    openManualTriage()
+                Menu("Board Actions") {
+                    Button("Archive Done") {
+                        archiveDoneTasks()
+                    }
+                    .disabled(viewModel.tasks(in: .done).isEmpty)
+
+                    Button("Rebalance Load") {
+                        rebalanceTodoAssignments()
+                    }
+                    .disabled(!viewModel.canRebalanceTodoAssignments())
+
+                    Button("WIP Limits") {
+                        openWIPSettings()
+                    }
+
+                    Button("Manual Triage") {
+                        openManualTriage()
+                    }
                 }
             }
         }
