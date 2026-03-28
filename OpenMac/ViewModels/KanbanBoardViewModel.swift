@@ -89,14 +89,191 @@ protocol AgentTaskExecuting {
 }
 
 struct DefaultAgentTaskExecutor: AgentTaskExecuting {
+    var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
+    var urlSession: URLSession = .shared
+    var timeoutSeconds: TimeInterval = 30
+
     func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
-        let provider = agent.runtimeProfile?.provider ?? .localMock
+        let runtimeProfile = agent.runtimeProfile ?? AgentRuntimeProfile(provider: .localMock)
+        let provider = runtimeProfile.provider
         switch provider {
         case .localMock:
             let summary = "Mock run completed by \(agent.name) for \"\(task.title)\""
             return .success(summary: summary)
         case .openAICompatible:
-            return .failure(message: "OpenAI-compatible runtime is not configured yet")
+            return runOpenAICompatible(task: task, agent: agent, runtimeProfile: runtimeProfile)
+        }
+    }
+
+    private func runOpenAICompatible(
+        task: WorkTask,
+        agent: AgentProfile,
+        runtimeProfile: AgentRuntimeProfile
+    ) -> AgentTaskExecutionOutcome {
+        let environment = environmentProvider()
+        let apiKey = resolvedAPIKey(from: environment)
+        guard let apiKey else {
+            return .failure(message: "Missing OPENAI_API_KEY for OpenAI-compatible runtime")
+        }
+
+        let endpoint = resolvedEndpoint(
+            configuredEndpoint: runtimeProfile.endpoint,
+            environment: environment
+        )
+        guard let url = URL(string: endpoint) else {
+            return .failure(message: "Invalid OpenAI-compatible endpoint")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeoutSeconds
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let payload = ChatCompletionRequest(
+            model: runtimeProfile.model,
+            messages: buildMessages(task: task, agent: agent)
+        )
+
+        do {
+            request.httpBody = try JSONEncoder().encode(payload)
+            let response = try send(request: request)
+            let summary = response.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let summary, !summary.isEmpty else {
+                return .failure(message: "OpenAI-compatible runtime returned empty output")
+            }
+            return .success(summary: summary)
+        } catch {
+            return .failure(message: "OpenAI-compatible run failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func resolvedAPIKey(from environment: [String: String]) -> String? {
+        let keyCandidates = ["OPENAI_API_KEY", "OPENAI_COMPAT_API_KEY"]
+        for key in keyCandidates {
+            if let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func resolvedEndpoint(configuredEndpoint: String?, environment: [String: String]) -> String {
+        let configured = configuredEndpoint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !configured.isEmpty {
+            if configured.contains("/chat/completions") {
+                return configured
+            }
+            return configured.hasSuffix("/")
+                ? "\(configured)v1/chat/completions"
+                : "\(configured)/v1/chat/completions"
+        }
+
+        let baseFromEnv = environment["OPENAI_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !baseFromEnv.isEmpty {
+            if baseFromEnv.contains("/chat/completions") {
+                return baseFromEnv
+            }
+            return baseFromEnv.hasSuffix("/")
+                ? "\(baseFromEnv)v1/chat/completions"
+                : "\(baseFromEnv)/v1/chat/completions"
+        }
+
+        return "https://api.openai.com/v1/chat/completions"
+    }
+
+    private func buildMessages(task: WorkTask, agent: AgentProfile) -> [ChatMessage] {
+        let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
+        let skillsLine = sortedSkills.isEmpty ? "none" : sortedSkills
+        let userPrompt = """
+        Agent: \(agent.name)
+        Task title: \(task.title)
+        Task details: \(task.details)
+        Required skills: \(skillsLine)
+        Story points: \(task.storyPoints)
+
+        Provide a concise execution summary and key outcomes.
+        """
+        return [
+            ChatMessage(role: "system", content: "You are an autonomous software execution agent. Respond with concise plain text."),
+            ChatMessage(role: "user", content: userPrompt)
+        ]
+    }
+
+    private func send(request: URLRequest) throws -> ChatCompletionResponse {
+        let semaphore = DispatchSemaphore(value: 0)
+        var responseData: Data?
+        var urlResponse: URLResponse?
+        var responseError: Error?
+
+        let task = urlSession.dataTask(with: request) { data, response, error in
+            responseData = data
+            urlResponse = response
+            responseError = error
+            semaphore.signal()
+        }
+        task.resume()
+
+        if semaphore.wait(timeout: .now() + timeoutSeconds) == .timedOut {
+            task.cancel()
+            throw ExecutorError.timeout
+        }
+
+        if let responseError {
+            throw responseError
+        }
+
+        guard let httpResponse = urlResponse as? HTTPURLResponse else {
+            throw ExecutorError.invalidResponse
+        }
+        guard let responseData else {
+            throw ExecutorError.emptyResponse
+        }
+
+        guard (200 ... 299).contains(httpResponse.statusCode) else {
+            let responseBody = String(data: responseData, encoding: .utf8) ?? "status \(httpResponse.statusCode)"
+            throw ExecutorError.serverError(responseBody)
+        }
+
+        return try JSONDecoder().decode(ChatCompletionResponse.self, from: responseData)
+    }
+
+    private enum ExecutorError: LocalizedError {
+        case timeout
+        case invalidResponse
+        case emptyResponse
+        case serverError(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .timeout:
+                return "Request timed out"
+            case .invalidResponse:
+                return "Invalid response"
+            case .emptyResponse:
+                return "Empty response"
+            case let .serverError(message):
+                return message
+            }
+        }
+    }
+
+    private struct ChatCompletionRequest: Encodable {
+        let model: String
+        let messages: [ChatMessage]
+    }
+
+    private struct ChatMessage: Codable {
+        let role: String
+        let content: String
+    }
+
+    private struct ChatCompletionResponse: Decodable {
+        let choices: [Choice]
+
+        struct Choice: Decodable {
+            let message: ChatMessage
         }
     }
 }
@@ -1090,6 +1267,21 @@ final class KanbanBoardViewModel: ObservableObject {
         skillsText: String,
         maxConcurrentTasks: Int = 3
     ) -> Bool {
+        addAgent(
+            name: name,
+            skillsText: skillsText,
+            maxConcurrentTasks: maxConcurrentTasks,
+            runtimeProfile: nil
+        )
+    }
+
+    @discardableResult
+    func addAgent(
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int = 3,
+        runtimeProfile: AgentRuntimeProfile? = nil
+    ) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             lastBoardMessage = "Agent name is required"
@@ -1105,7 +1297,8 @@ final class KanbanBoardViewModel: ObservableObject {
             AgentProfile(
                 name: trimmedName,
                 skills: skills,
-                maxConcurrentTasks: maxConcurrentTasks
+                maxConcurrentTasks: maxConcurrentTasks,
+                runtimeProfile: runtimeProfile
             )
         )
         persistBoardState()
@@ -1140,6 +1333,23 @@ final class KanbanBoardViewModel: ObservableObject {
         skillsText: String,
         maxConcurrentTasks: Int
     ) -> Bool {
+        updateAgent(
+            agentID,
+            name: name,
+            skillsText: skillsText,
+            maxConcurrentTasks: maxConcurrentTasks,
+            runtimeProfile: nil
+        )
+    }
+
+    @discardableResult
+    func updateAgent(
+        _ agentID: UUID,
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int,
+        runtimeProfile: AgentRuntimeProfile? = nil
+    ) -> Bool {
         guard let agentIndex = agents.firstIndex(where: { $0.id == agentID }) else { return false }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1164,7 +1374,8 @@ final class KanbanBoardViewModel: ObservableObject {
             id: agentID,
             name: trimmedName,
             skills: skills,
-            maxConcurrentTasks: normalizedCapacity
+            maxConcurrentTasks: normalizedCapacity,
+            runtimeProfile: runtimeProfile
         )
 
         for index in tasks.indices where tasks[index].assignedAgentID == agentID && tasks[index].status == .todo {

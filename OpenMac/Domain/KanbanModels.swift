@@ -46,6 +46,24 @@ enum AgentRuntimeProvider: String, CaseIterable, Codable, Identifiable {
     case openAICompatible
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .localMock:
+            return "Local Mock"
+        case .openAICompatible:
+            return "OpenAI Compatible"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .localMock:
+            return "mock-dispatch-v1"
+        case .openAICompatible:
+            return "gpt-4.1-mini"
+        }
+    }
 }
 
 struct AgentRuntimeProfile: Equatable, Codable {
@@ -56,12 +74,13 @@ struct AgentRuntimeProfile: Equatable, Codable {
 
     init(
         provider: AgentRuntimeProvider = .localMock,
-        model: String = "mock-dispatch-v1",
+        model: String? = nil,
         endpoint: String? = nil,
         tools: [String] = []
     ) {
         self.provider = provider
-        self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = trimmedModel.isEmpty ? provider.defaultModel : trimmedModel
         self.endpoint = endpoint?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.tools = Set(tools.map(Self.normalizeTool))
     }

@@ -31,10 +31,20 @@ struct ContentView: View {
     @State private var newAgentName = ""
     @State private var newAgentSkills = ""
     @State private var newAgentCapacity = 3
+    @State private var newAgentRuntimeEnabled = false
+    @State private var newAgentRuntimeProvider: AgentRuntimeProvider = .localMock
+    @State private var newAgentRuntimeModel = ""
+    @State private var newAgentRuntimeEndpoint = ""
+    @State private var newAgentRuntimeTools = ""
     @State private var editingAgentID: UUID?
     @State private var editAgentName = ""
     @State private var editAgentSkills = ""
     @State private var editAgentCapacity = 3
+    @State private var editAgentRuntimeEnabled = false
+    @State private var editAgentRuntimeProvider: AgentRuntimeProvider = .localMock
+    @State private var editAgentRuntimeModel = ""
+    @State private var editAgentRuntimeEndpoint = ""
+    @State private var editAgentRuntimeTools = ""
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
@@ -53,6 +63,7 @@ struct ContentView: View {
                     AgentRowView(
                         name: agent.name,
                         skillsText: agent.skills.sorted().joined(separator: ", "),
+                        runtimeText: runtimeSummary(for: agent),
                         loadCount: viewModel.activeTaskCount(for: agent.id),
                         maxLoad: agent.maxConcurrentTasks,
                         loadPercent: viewModel.loadPercent(for: agent.id),
@@ -411,6 +422,11 @@ struct ContentView: View {
                 name: $newAgentName,
                 skills: $newAgentSkills,
                 maxConcurrentTasks: $newAgentCapacity,
+                runtimeEnabled: $newAgentRuntimeEnabled,
+                runtimeProvider: $newAgentRuntimeProvider,
+                runtimeModel: $newAgentRuntimeModel,
+                runtimeEndpoint: $newAgentRuntimeEndpoint,
+                runtimeTools: $newAgentRuntimeTools,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetAgentDraftAndClose,
@@ -418,7 +434,14 @@ struct ContentView: View {
                     let added = viewModel.addAgent(
                         name: newAgentName,
                         skillsText: newAgentSkills,
-                        maxConcurrentTasks: newAgentCapacity
+                        maxConcurrentTasks: newAgentCapacity,
+                        runtimeProfile: buildRuntimeProfile(
+                            isEnabled: newAgentRuntimeEnabled,
+                            provider: newAgentRuntimeProvider,
+                            model: newAgentRuntimeModel,
+                            endpoint: newAgentRuntimeEndpoint,
+                            toolsText: newAgentRuntimeTools
+                        )
                     )
                     if added {
                         resetAgentDraftAndClose()
@@ -431,6 +454,11 @@ struct ContentView: View {
                 name: $editAgentName,
                 skills: $editAgentSkills,
                 maxConcurrentTasks: $editAgentCapacity,
+                runtimeEnabled: $editAgentRuntimeEnabled,
+                runtimeProvider: $editAgentRuntimeProvider,
+                runtimeModel: $editAgentRuntimeModel,
+                runtimeEndpoint: $editAgentRuntimeEndpoint,
+                runtimeTools: $editAgentRuntimeTools,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditAgentSheet,
@@ -502,6 +530,11 @@ struct ContentView: View {
         newAgentName = ""
         newAgentSkills = ""
         newAgentCapacity = 3
+        newAgentRuntimeEnabled = false
+        newAgentRuntimeProvider = .localMock
+        newAgentRuntimeModel = ""
+        newAgentRuntimeEndpoint = ""
+        newAgentRuntimeTools = ""
         isShowingNewAgentSheet = false
     }
 
@@ -897,6 +930,11 @@ struct ContentView: View {
         editAgentName = agent.name
         editAgentSkills = agent.skills.sorted().joined(separator: ", ")
         editAgentCapacity = agent.maxConcurrentTasks
+        editAgentRuntimeEnabled = agent.runtimeProfile != nil
+        editAgentRuntimeProvider = agent.runtimeProfile?.provider ?? .localMock
+        editAgentRuntimeModel = agent.runtimeProfile?.model ?? ""
+        editAgentRuntimeEndpoint = agent.runtimeProfile?.endpoint ?? ""
+        editAgentRuntimeTools = agent.runtimeProfile?.tools.sorted().joined(separator: ", ") ?? ""
         isShowingEditAgentSheet = true
     }
 
@@ -905,6 +943,11 @@ struct ContentView: View {
         editAgentName = ""
         editAgentSkills = ""
         editAgentCapacity = 3
+        editAgentRuntimeEnabled = false
+        editAgentRuntimeProvider = .localMock
+        editAgentRuntimeModel = ""
+        editAgentRuntimeEndpoint = ""
+        editAgentRuntimeTools = ""
         isShowingEditAgentSheet = false
     }
 
@@ -915,7 +958,14 @@ struct ContentView: View {
             editingAgentID,
             name: editAgentName,
             skillsText: editAgentSkills,
-            maxConcurrentTasks: editAgentCapacity
+            maxConcurrentTasks: editAgentCapacity,
+            runtimeProfile: buildRuntimeProfile(
+                isEnabled: editAgentRuntimeEnabled,
+                provider: editAgentRuntimeProvider,
+                model: editAgentRuntimeModel,
+                endpoint: editAgentRuntimeEndpoint,
+                toolsText: editAgentRuntimeTools
+            )
         )
 
         if updated {
@@ -989,6 +1039,34 @@ struct ContentView: View {
         viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
     }
 
+    private func runtimeSummary(for agent: AgentProfile) -> String {
+        guard let runtimeProfile = agent.runtimeProfile else {
+            return "Runtime: Disabled"
+        }
+        return "Runtime: \(runtimeProfile.provider.displayName) / \(runtimeProfile.model)"
+    }
+
+    private func buildRuntimeProfile(
+        isEnabled: Bool,
+        provider: AgentRuntimeProvider,
+        model: String,
+        endpoint: String,
+        toolsText: String
+    ) -> AgentRuntimeProfile? {
+        guard isEnabled else { return nil }
+        let resolvedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedTools = toolsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return AgentRuntimeProfile(
+            provider: provider,
+            model: resolvedModel.isEmpty ? provider.defaultModel : resolvedModel,
+            endpoint: endpoint,
+            tools: parsedTools
+        )
+    }
+
     private var detailBackgroundColors: [Color] {
         BoardSurfacePalette.detailGradientTokens(for: effectiveColorScheme).map(\.color)
     }
@@ -1037,6 +1115,7 @@ private struct AgentRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     let name: String
     let skillsText: String
+    let runtimeText: String
     let loadCount: Int
     let maxLoad: Int
     let loadPercent: Int
@@ -1049,6 +1128,9 @@ private struct AgentRowView: View {
                 .font(.headline)
             Text("Skills: \(skillsText)")
                 .font(.caption)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+            Text(runtimeText)
+                .font(.caption2)
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             HStack(spacing: 8) {
                 ProgressView(value: loadProgress, total: 1.0)
@@ -1805,6 +1887,11 @@ private struct NewAgentSheet: View {
     @Binding var name: String
     @Binding var skills: String
     @Binding var maxConcurrentTasks: Int
+    @Binding var runtimeEnabled: Bool
+    @Binding var runtimeProvider: AgentRuntimeProvider
+    @Binding var runtimeModel: String
+    @Binding var runtimeEndpoint: String
+    @Binding var runtimeTools: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -1823,6 +1910,17 @@ private struct NewAgentSheet: View {
             TextField("Name", text: $name)
             TextField("Skills (comma separated)", text: $skills)
             Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+            Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
+            if runtimeEnabled {
+                Picker("Runtime Provider", selection: $runtimeProvider) {
+                    ForEach(AgentRuntimeProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
+                TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                TextField("Tools (comma separated)", text: $runtimeTools)
+            }
 
             HStack {
                 Spacer()
@@ -1840,6 +1938,11 @@ private struct EditAgentSheet: View {
     @Binding var name: String
     @Binding var skills: String
     @Binding var maxConcurrentTasks: Int
+    @Binding var runtimeEnabled: Bool
+    @Binding var runtimeProvider: AgentRuntimeProvider
+    @Binding var runtimeModel: String
+    @Binding var runtimeEndpoint: String
+    @Binding var runtimeTools: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -1858,6 +1961,17 @@ private struct EditAgentSheet: View {
             TextField("Name", text: $name)
             TextField("Skills (comma separated)", text: $skills)
             Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+            Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
+            if runtimeEnabled {
+                Picker("Runtime Provider", selection: $runtimeProvider) {
+                    ForEach(AgentRuntimeProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
+                TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                TextField("Tools (comma separated)", text: $runtimeTools)
+            }
 
             HStack {
                 Spacer()

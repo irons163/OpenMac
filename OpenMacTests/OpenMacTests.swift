@@ -111,6 +111,72 @@ struct AutoAssignmentEngineTests {
     }
 }
 
+struct AgentTaskExecutorTests {
+
+    @Test("default executor local mock returns success summary")
+    func localMockReturnsSuccessSummary() {
+        let task = WorkTask(
+            title: "Summarize sprint",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Mock Agent",
+            skills: ["swiftui"],
+            runtimeProfile: AgentRuntimeProfile(provider: .localMock)
+        )
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary.contains("Mock Agent"))
+            #expect(summary.contains("Summarize sprint"))
+        case .failure:
+            #expect(Bool(false), "Expected success for local mock runtime")
+        }
+    }
+
+    @Test("default executor openai compatible reports missing API key")
+    func openAICompatibleRequiresAPIKey() {
+        let task = WorkTask(
+            title: "Generate plan",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "OpenAI Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(provider: .openAICompatible, model: "gpt-4.1-mini")
+        )
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "   "] },
+            urlSession: .shared,
+            timeoutSeconds: 1
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected missing key failure for OpenAI-compatible runtime")
+        case let .failure(message):
+            #expect(message == "Missing OPENAI_API_KEY for OpenAI-compatible runtime")
+        }
+    }
+}
+
 struct AppearanceModeTests {
 
     @Test("maps appearance mode to preferred color scheme")
@@ -3789,6 +3855,33 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.last?.agents.count == 1)
     }
 
+    @Test("adds agent with runtime profile and persists normalized runtime fields")
+    func addsAgentWithRuntimeProfileAndPersists() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+        let runtime = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: " ",
+            endpoint: " https://api.example.com/v1 ",
+            tools: [" Browser ", "code", "browser"]
+        )
+
+        let added = viewModel.addAgent(
+            name: "Automation Agent",
+            skillsText: "swiftui, automation",
+            maxConcurrentTasks: 2,
+            runtimeProfile: runtime
+        )
+
+        #expect(added)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents[0].runtimeProfile?.provider == .openAICompatible)
+        #expect(viewModel.agents[0].runtimeProfile?.model == "gpt-4.1-mini")
+        #expect(viewModel.agents[0].runtimeProfile?.endpoint == "https://api.example.com/v1")
+        #expect(viewModel.agents[0].runtimeProfile?.tools == Set(["browser", "code"]))
+        #expect(store.savedSnapshots.count == 1)
+    }
+
     @Test("rejects adding agent with empty name")
     func rejectsAgentWithEmptyName() {
         let store = SpyBoardStore()
@@ -3825,6 +3918,49 @@ struct KanbanPersistenceTests {
         #expect(viewModel.agents[0].skills == Set(["api", "db", "swiftui"]))
         #expect(viewModel.agents[0].maxConcurrentTasks == 4)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("updates agent runtime profile and can disable runtime")
+    func updatesAgentRuntimeProfileAndCanDisable() {
+        let agent = AgentProfile(
+            name: "Ops Agent",
+            skills: ["swiftui"],
+            maxConcurrentTasks: 2,
+            runtimeProfile: AgentRuntimeProfile(provider: .localMock, model: "mock-v2", tools: ["triage"])
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let updatedWithRuntime = viewModel.updateAgent(
+            agent.id,
+            name: "Ops Agent",
+            skillsText: "swiftui",
+            maxConcurrentTasks: 2,
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1",
+                endpoint: "https://proxy.example.com",
+                tools: ["planner", "runner"]
+            )
+        )
+
+        #expect(updatedWithRuntime)
+        #expect(viewModel.agents[0].runtimeProfile?.provider == .openAICompatible)
+        #expect(viewModel.agents[0].runtimeProfile?.model == "gpt-4.1")
+        #expect(viewModel.agents[0].runtimeProfile?.endpoint == "https://proxy.example.com")
+        #expect(viewModel.agents[0].runtimeProfile?.tools == Set(["planner", "runner"]))
+
+        let disabledRuntime = viewModel.updateAgent(
+            agent.id,
+            name: "Ops Agent",
+            skillsText: "swiftui",
+            maxConcurrentTasks: 2,
+            runtimeProfile: nil
+        )
+
+        #expect(disabledRuntime)
+        #expect(viewModel.agents[0].runtimeProfile == nil)
+        #expect(store.savedSnapshots.count == 2)
     }
 
     @Test("updating agent skills can unassign incompatible todo tasks")
