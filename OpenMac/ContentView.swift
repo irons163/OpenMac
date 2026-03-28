@@ -1369,7 +1369,7 @@ enum BoardMessageColorPalette {
         case (.light, .info):
             return BoardMessageColorToken(red: 0.00, green: 0.42, blue: 0.56, opacity: 1.0)
         case (.light, .warning):
-            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.69, green: 0.35, blue: 0.00, opacity: 1.0)
         case (.light, .error):
             return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
         @unknown default:
@@ -1626,7 +1626,7 @@ enum BoardSemanticTextPalette {
         case (.light, .success):
             return BoardMessageColorToken(red: 0.06, green: 0.45, blue: 0.18, opacity: 1.0)
         case (.light, .warning):
-            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.69, green: 0.35, blue: 0.00, opacity: 1.0)
         case (.light, .error):
             return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
         @unknown default:

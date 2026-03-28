@@ -157,9 +157,9 @@ struct AppearanceModeTests {
         let warningContrast = BoardMessageColorPalette.token(for: .warning, scheme: .dark).contrastRatio(against: background)
         let errorContrast = BoardMessageColorPalette.token(for: .error, scheme: .dark).contrastRatio(against: background)
 
-        #expect(infoContrast >= 4.0)
-        #expect(warningContrast >= 4.0)
-        #expect(errorContrast >= 4.0)
+        #expect(infoContrast >= 4.5)
+        #expect(warningContrast >= 4.5)
+        #expect(errorContrast >= 4.5)
     }
 
     @Test("board message palette maintains light mode contrast for all severities")
@@ -169,9 +169,9 @@ struct AppearanceModeTests {
         let warningContrast = BoardMessageColorPalette.token(for: .warning, scheme: .light).contrastRatio(against: background)
         let errorContrast = BoardMessageColorPalette.token(for: .error, scheme: .light).contrastRatio(against: background)
 
-        #expect(infoContrast >= 4.0)
-        #expect(warningContrast >= 4.0)
-        #expect(errorContrast >= 4.0)
+        #expect(infoContrast >= 4.5)
+        #expect(warningContrast >= 4.5)
+        #expect(errorContrast >= 4.5)
     }
 
     @Test("summary badge palette maintains dark mode contrast across all accents")
@@ -208,14 +208,14 @@ struct AppearanceModeTests {
         let errorDark = BoardSemanticTextPalette.token(for: .error, scheme: .dark)
         let errorLight = BoardSemanticTextPalette.token(for: .error, scheme: .light)
 
-        #expect(successDark.contrastRatio(against: darkBackground) >= 4.0)
-        #expect(successLight.contrastRatio(against: lightBackground) >= 4.0)
-        #expect(warningDark.contrastRatio(against: darkBackground) >= 4.0)
-        #expect(warningLight.contrastRatio(against: lightBackground) >= 4.0)
-        #expect(errorDark.contrastRatio(against: darkBackground) >= 4.0)
-        #expect(errorLight.contrastRatio(against: lightBackground) >= 4.0)
-        #expect(errorDark.contrastRatio(against: darkSupplementary) >= 4.0)
-        #expect(errorLight.contrastRatio(against: lightSupplementary) >= 4.0)
+        #expect(successDark.contrastRatio(against: darkBackground) >= 4.5)
+        #expect(successLight.contrastRatio(against: lightBackground) >= 4.5)
+        #expect(warningDark.contrastRatio(against: darkBackground) >= 4.5)
+        #expect(warningLight.contrastRatio(against: lightBackground) >= 4.5)
+        #expect(errorDark.contrastRatio(against: darkBackground) >= 4.5)
+        #expect(errorLight.contrastRatio(against: lightBackground) >= 4.5)
+        #expect(errorDark.contrastRatio(against: darkSupplementary) >= 4.5)
+        #expect(errorLight.contrastRatio(against: lightSupplementary) >= 4.5)
     }
 
     @Test("dark task cards stay visually distinct from each kanban column background")
