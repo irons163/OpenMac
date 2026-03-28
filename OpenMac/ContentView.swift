@@ -175,31 +175,42 @@ struct ContentView: View {
                 Button("Auto Assign AI") {
                     runAutoAssignFromToolbar()
                 }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .help("Auto-assign all eligible To Do tasks (Shift-Command-A)")
                 Button("New Task") {
                     isShowingNewTaskSheet = true
                 }
+                .keyboardShortcut("n", modifiers: [.command])
+                .help("Create a new task (Command-N)")
                 Button("New Agent") {
                     isShowingNewAgentSheet = true
                 }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .help("Create a new agent profile (Option-Command-N)")
                 Menu("Board Actions") {
                     Button("Archive Done") {
                         archiveDoneTasks()
                     }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(viewModel.tasks(in: .done).isEmpty)
 
                     Button("Rebalance Load") {
                         rebalanceTodoAssignments()
                     }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(!viewModel.canRebalanceTodoAssignments())
 
                     Button("WIP Limits") {
                         openWIPSettings()
                     }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
 
                     Button("Manual Triage") {
                         openManualTriage()
                     }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
                 }
+                .help("Archive, rebalance, WIP settings, and manual triage actions")
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
