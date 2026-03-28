@@ -1894,6 +1894,59 @@ struct KanbanPersistenceTests {
         #expect(viewModel.boards.contains(where: { $0.name == "Ops (2)" }))
     }
 
+    @Test("builds workspace import preview counts from snapshot data")
+    func buildsWorkspaceImportPreviewCounts() throws {
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let agentA = AgentProfile(name: "Agent A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let boardA = KanbanBoardRecord(name: "Board A", tasks: [taskA], agents: [agentA], wipLimits: [.inProgress: 3, .review: 2])
+        let boardB = KanbanBoardRecord(name: "Board B", tasks: [taskB], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: boardA.tasks,
+            agents: boardA.agents,
+            wipLimits: boardA.wipLimits,
+            boards: [boardA, boardB],
+            selectedBoardID: boardB.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let preview = viewModel.workspaceImportPreview(from: data)
+
+        #expect(preview != nil)
+        #expect(preview?.boardCount == 2)
+        #expect(preview?.taskCount == 2)
+        #expect(preview?.agentCount == 1)
+    }
+
+    @Test("workspace import preview rejects invalid JSON")
+    func workspaceImportPreviewRejectsInvalidJSON() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let invalidData = Data("not-valid-json".utf8)
+
+        let preview = viewModel.workspaceImportPreview(from: invalidData)
+
+        #expect(preview == nil)
+        #expect(viewModel.lastBoardMessage == "Invalid workspace JSON")
+    }
+
     @Test("rejects invalid workspace JSON import")
     func rejectsInvalidWorkspaceImport() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])

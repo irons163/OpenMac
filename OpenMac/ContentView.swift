@@ -696,17 +696,25 @@ struct ContentView: View {
         panel.message = "Select workspace JSON to import."
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let strategy = chooseWorkspaceImportStrategy() else { return }
+        guard let preview = viewModel.workspaceImportPreview(from: url) else { return }
+        guard let strategy = chooseWorkspaceImportStrategy(preview: preview) else { return }
         let imported = viewModel.importWorkspace(from: url, strategy: strategy)
         if imported {
             handleBoardContextChanged()
         }
     }
 
-    private func chooseWorkspaceImportStrategy() -> WorkspaceImportStrategy? {
+    private func chooseWorkspaceImportStrategy(preview: WorkspaceImportPreview) -> WorkspaceImportStrategy? {
         let alert = NSAlert()
         alert.messageText = "Import Workspace"
-        alert.informativeText = "Choose how to apply this workspace file."
+        alert.informativeText = """
+        Boards: \(preview.boardCount)
+        Tasks: \(preview.taskCount)
+        Agents: \(preview.agentCount)
+
+        Merge keeps current boards and appends imported boards.
+        Replace overwrites current workspace with imported boards.
+        """
         alert.addButton(withTitle: "Merge")
         alert.addButton(withTitle: "Replace")
         alert.addButton(withTitle: "Cancel")

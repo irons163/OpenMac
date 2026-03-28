@@ -36,6 +36,12 @@ enum WorkspaceImportStrategy: Equatable {
     case merge
 }
 
+struct WorkspaceImportPreview: Equatable {
+    let boardCount: Int
+    let taskCount: Int
+    let agentCount: Int
+}
+
 struct BoardHealthRecommendation: Identifiable, Equatable {
     let action: BoardHealthAction
     let title: String
@@ -459,6 +465,46 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    func workspaceImportPreview(from data: Data) -> WorkspaceImportPreview? {
+        guard let snapshot = decodeWorkspaceSnapshot(from: data) else {
+            lastBoardMessage = "Invalid workspace JSON"
+            return nil
+        }
+
+        let importedBoards: [KanbanBoardRecord]
+        if let snapshotBoards = snapshot.boards, !snapshotBoards.isEmpty {
+            importedBoards = normalizedImportedBoardRecords(snapshotBoards)
+        } else {
+            let fallbackBoard = KanbanBoardRecord(
+                name: Self.defaultBoardName,
+                tasks: snapshot.tasks,
+                agents: snapshot.agents,
+                wipLimits: snapshot.wipLimits
+            )
+            importedBoards = normalizedImportedBoardRecords([fallbackBoard])
+        }
+
+        let taskCount = importedBoards.reduce(0) { partialResult, board in
+            partialResult + board.tasks.count
+        }
+        let agentCount = importedBoards.reduce(0) { partialResult, board in
+            partialResult + board.agents.count
+        }
+        return WorkspaceImportPreview(
+            boardCount: importedBoards.count,
+            taskCount: taskCount,
+            agentCount: agentCount
+        )
+    }
+
+    func workspaceImportPreview(from url: URL) -> WorkspaceImportPreview? {
+        guard let data = try? Data(contentsOf: url) else {
+            lastBoardMessage = "Failed to read workspace file"
+            return nil
+        }
+        return workspaceImportPreview(from: data)
+    }
+
     @discardableResult
     func exportWorkspace(to url: URL) -> Bool {
         guard let data = workspaceExportData() else { return false }
@@ -476,10 +522,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     @discardableResult
     func importWorkspaceData(_ data: Data, strategy: WorkspaceImportStrategy = .replace) -> Bool {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-
-        guard let snapshot = try? decoder.decode(KanbanBoardSnapshot.self, from: data) else {
+        guard let snapshot = decodeWorkspaceSnapshot(from: data) else {
             lastBoardMessage = "Invalid workspace JSON"
             return false
         }
@@ -1446,6 +1489,12 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         return mergedBoards
+    }
+
+    private func decodeWorkspaceSnapshot(from data: Data) -> KanbanBoardSnapshot? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return try? decoder.decode(KanbanBoardSnapshot.self, from: data)
     }
 
     private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {
