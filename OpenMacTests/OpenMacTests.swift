@@ -124,6 +124,13 @@ struct AppearanceModeTests {
     func defaultsInvalidStoredAppearanceModeToSystem() {
         #expect(AppAppearanceMode.resolve(rawValue: "invalid") == .system)
     }
+
+    @Test("cycles appearance mode in stable order")
+    func cyclesAppearanceModeInStableOrder() {
+        #expect(AppAppearanceMode.system.next() == .light)
+        #expect(AppAppearanceMode.light.next() == .dark)
+        #expect(AppAppearanceMode.dark.next() == .system)
+    }
 }
 
 struct KanbanFlowTests {

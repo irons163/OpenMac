@@ -32,4 +32,15 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
     static func resolve(rawValue: String) -> AppAppearanceMode {
         AppAppearanceMode(rawValue: rawValue) ?? .system
     }
+
+    func next() -> AppAppearanceMode {
+        switch self {
+        case .system:
+            return .light
+        case .light:
+            return .dark
+        case .dark:
+            return .system
+        }
+    }
 }

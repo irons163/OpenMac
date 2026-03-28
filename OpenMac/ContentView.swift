@@ -229,11 +229,18 @@ struct ContentView: View {
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
                 Menu("Appearance: \(selectedAppearanceMode.title)") {
+                    Button("Cycle Appearance") {
+                        cycleAppearanceMode()
+                    }
+                    .keyboardShortcut("`", modifiers: [.command, .option])
+
+                    Divider()
+
                     ForEach(AppAppearanceMode.allCases) { mode in
                         appearanceMenuButton(for: mode)
                     }
                 }
-                .help("Switch between system, light, and dark appearance (Option-Command-0/L/D)")
+                .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -656,6 +663,10 @@ struct ContentView: View {
                 Text(mode.title)
             }
         }
+    }
+
+    private func cycleAppearanceMode() {
+        appearanceModeRawValue = selectedAppearanceMode.next().rawValue
     }
 }
 
