@@ -792,7 +792,7 @@ private struct BoardHealthRecommendationsView: View {
     }
 
     private var recommendationCardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.92)
+        BoardSurfacePalette.supplementaryCardColor(for: colorScheme)
     }
 
     private var recommendationCardBorder: Color {
@@ -934,7 +934,7 @@ private struct KanbanColumnView: View {
     }
 
     private var emptyStateBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.68)
+        BoardSurfacePalette.emptyStateColor(for: colorScheme)
     }
 
     private var columnBorderColor: Color {
@@ -1317,7 +1317,7 @@ private struct ManualTriageSheet: View {
     }
 
     private var triageCardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.94)
+        BoardSurfacePalette.supplementaryCardColor(for: colorScheme)
     }
 }
 
@@ -1432,12 +1432,42 @@ enum BoardSurfacePalette {
         }
     }
 
+    static func supplementaryCardToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.17, green: 0.20, blue: 0.27, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 0.92)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.17, green: 0.20, blue: 0.27, opacity: 1.0)
+        }
+    }
+
+    static func emptyStateToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.19, green: 0.23, blue: 0.30, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 0.68)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.19, green: 0.23, blue: 0.30, opacity: 1.0)
+        }
+    }
+
     static func color(for status: KanbanStatus, scheme: ColorScheme) -> Color {
         columnToken(for: status, scheme: scheme).color
     }
 
     static func taskCardColor(for scheme: ColorScheme) -> Color {
         taskCardToken(for: scheme).color
+    }
+
+    static func supplementaryCardColor(for scheme: ColorScheme) -> Color {
+        supplementaryCardToken(for: scheme).color
+    }
+
+    static func emptyStateColor(for scheme: ColorScheme) -> Color {
+        emptyStateToken(for: scheme).color
     }
 }
 

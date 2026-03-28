@@ -195,6 +195,24 @@ struct AppearanceModeTests {
             #expect(columnContrast >= 4.5)
         }
     }
+
+    @Test("dark supplementary surfaces keep readable primary text contrast")
+    func darkSupplementarySurfacesKeepReadablePrimaryTextContrast() {
+        let primaryText = BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 1.0)
+        let supplementaryContrast = primaryText.contrastRatio(against: BoardSurfacePalette.supplementaryCardToken(for: .dark))
+        let emptyStateContrast = primaryText.contrastRatio(against: BoardSurfacePalette.emptyStateToken(for: .dark))
+
+        #expect(supplementaryContrast >= 4.5)
+        #expect(emptyStateContrast >= 4.5)
+    }
+
+    @Test("dark empty state remains distinct from dark task card")
+    func darkEmptyStateRemainsDistinctFromTaskCard() {
+        let emptyState = BoardSurfacePalette.emptyStateToken(for: .dark)
+        let taskCard = BoardSurfacePalette.taskCardToken(for: .dark)
+
+        #expect(emptyState.contrastRatio(against: taskCard) >= 1.2)
+    }
 }
 
 struct KanbanFlowTests {
