@@ -57,6 +57,7 @@ struct ContentView: View {
     @State private var globalTaskSearchQuery = ""
     @State private var selectedAssigneeFilterKey = "all"
     @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
+    @State private var isBatchRunning = false
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -314,7 +315,7 @@ struct ContentView: View {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .help("Auto-assign all eligible To Do tasks (Shift-Command-A)")
                 .disabled(!canAutoAssignFromToolbar)
-                Button("Run Assigned") {
+                Button(isBatchRunning ? "Running..." : "Run Assigned") {
                     runAssignedExecutionsFromToolbar()
                 }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
@@ -384,7 +385,7 @@ struct ContentView: View {
                     }
 
                     Section("Board") {
-                        Button("Run Assigned Tasks") {
+                        Button(isBatchRunning ? "Running Assigned Tasks..." : "Run Assigned Tasks") {
                             runAssignedExecutionsFromToolbar()
                         }
                         .disabled(!canBatchRunAssignedTasks)
@@ -849,9 +850,13 @@ struct ContentView: View {
     }
 
     private func runAssignedExecutionsFromToolbar() {
-        let startedCount = viewModel.runAssignedTaskExecutions()
-        if startedCount > 0 {
-            refreshTriageSelections()
+        guard !isBatchRunning else { return }
+        isBatchRunning = true
+        viewModel.runAssignedTaskExecutionsInBackground { startedCount in
+            isBatchRunning = false
+            if startedCount > 0 {
+                refreshTriageSelections()
+            }
         }
     }
 
@@ -1061,16 +1066,18 @@ struct ContentView: View {
     }
 
     private func runTaskExecution(_ taskID: UUID) {
-        let executed = viewModel.runTaskExecution(taskID)
-        if executed {
-            refreshTriageSelections()
+        viewModel.runTaskExecutionInBackground(taskID) { executed in
+            if executed {
+                refreshTriageSelections()
+            }
         }
     }
 
     private func retryTaskExecution(_ taskID: UUID) {
-        let retried = viewModel.retryTaskExecution(taskID)
-        if retried {
-            refreshTriageSelections()
+        viewModel.retryTaskExecutionInBackground(taskID) { retried in
+            if retried {
+                refreshTriageSelections()
+            }
         }
     }
 
@@ -1209,7 +1216,8 @@ struct ContentView: View {
     }
 
     private var canBatchRunAssignedTasks: Bool {
-        viewModel.tasks.contains { task in
+        guard !isBatchRunning else { return false }
+        return viewModel.tasks.contains { task in
             guard (task.status == .todo || task.status == .inProgress),
                   task.assignedAgentID != nil else {
                 return false

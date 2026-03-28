@@ -511,12 +511,15 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             try? FileManager.default.removeItem(at: outputURL)
         }
 
+        let sandboxMode = resolvedCodexBridgeSandboxMode()
         var arguments = [
             "exec",
             "--skip-git-repo-check",
-            "--sandbox", "read-only",
             "--output-last-message", outputURL.path
         ]
+        if let sandboxMode {
+            arguments.append(contentsOf: ["--sandbox", sandboxMode])
+        }
         if !request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             arguments.append(contentsOf: ["--model", request.model])
         }
@@ -631,6 +634,26 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
 
         return nil
+    }
+
+    private static func resolvedCodexBridgeSandboxMode() -> String? {
+        let rawOverride = ProcessInfo.processInfo.environment["OPENMAC_CODEX_SANDBOX"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        if rawOverride.isEmpty {
+            return "danger-full-access"
+        }
+
+        let normalized = rawOverride.replacingOccurrences(of: "_", with: "-")
+        switch normalized {
+        case "danger-full-access", "workspace-write", "read-only":
+            return normalized
+        case "none", "off", "disable", "disabled":
+            return nil
+        default:
+            return "danger-full-access"
+        }
     }
 
 
@@ -1965,117 +1988,39 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks.first(where: { $0.id == taskID })?.executionRecord
     }
 
+    private struct PreparedTaskExecution {
+        let taskID: UUID
+        let taskSnapshot: WorkTask
+        let agent: AgentProfile
+    }
+
     @discardableResult
     func runTaskExecution(_ taskID: UUID) -> Bool {
-        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
-        lastExecutionDebugLog = nil
-        lastCodexLoginCommand = nil
-        guard tasks[taskIndex].status != .done else {
-            lastBoardMessage = "Done tasks cannot be executed"
-            lastBoardMessageSeverity = .warning
+        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
             return false
         }
-        guard let agentID = tasks[taskIndex].assignedAgentID,
-              let agent = agents.first(where: { $0.id == agentID }) else {
-            lastBoardMessage = "Assign an agent before running this task"
-            lastBoardMessageSeverity = .warning
-            return false
-        }
-        guard !tasks[taskIndex].details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            lastBoardMessage = "Task details are required before running this task"
-            lastBoardMessageSeverity = .warning
-            return false
-        }
-
-        if tasks[taskIndex].status == .todo {
-            guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
-                let limit = wipLimits[.inProgress] ?? 0
-                lastBoardMessage = "WIP limit reached for In Progress (\(limit))"
-                lastBoardMessageSeverity = .warning
-                return false
-            }
-            tasks[taskIndex].status = .inProgress
-        }
-
-        var record = tasks[taskIndex].executionRecord ?? TaskExecutionRecord(status: .running)
-        record.status = .running
-        record.runCount = max(0, record.runCount) + 1
-        record.lastStartedAt = Date()
-        record.lastFinishedAt = nil
-        record.lastOutputSummary = nil
-        record.lastError = nil
-        record.lastDebugOutput = nil
-        record.lastAgentID = agent.id
-        tasks[taskIndex].executionRecord = record
-
-        let outcome = taskExecutor.execute(task: tasks[taskIndex], agent: agent)
-        let finishedAt = Date()
-
-        switch outcome {
-        case let .success(summary):
-            let normalizedSummary = normalizeExecutionText(summary)
-            if let normalizedSummary, let blockerMessage = blockedExecutionMessage(from: normalizedSummary) {
-                var blockedRecord = tasks[taskIndex].executionRecord ?? record
-                blockedRecord.status = .failed
-                blockedRecord.lastFinishedAt = finishedAt
-                blockedRecord.lastOutputSummary = normalizedSummary
-                blockedRecord.lastError = blockerMessage
-                blockedRecord.lastDebugOutput = nil
-                blockedRecord.lastAgentID = agent.id
-                tasks[taskIndex].executionRecord = blockedRecord
-                lastExecutionDebugLog = nil
-                lastCodexLoginCommand = nil
-                lastBoardMessage = blockerMessage
-                lastBoardMessageSeverity = .warning
-            } else {
-                var finishedRecord = tasks[taskIndex].executionRecord ?? record
-                finishedRecord.status = .succeeded
-                finishedRecord.lastFinishedAt = finishedAt
-                finishedRecord.lastOutputSummary = normalizedSummary
-                finishedRecord.lastError = nil
-                finishedRecord.lastDebugOutput = nil
-                finishedRecord.lastAgentID = agent.id
-                tasks[taskIndex].executionRecord = finishedRecord
-                lastExecutionDebugLog = nil
-                lastCodexLoginCommand = nil
-
-                if tasks[taskIndex].status == .inProgress {
-                    if isWIPLimitReached(for: .review, excluding: taskID) {
-                        let limit = wipLimits[.review] ?? 0
-                        lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
-                        lastBoardMessageSeverity = .warning
-                    } else {
-                        tasks[taskIndex].status = .review
-                        lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
-                        lastBoardMessageSeverity = .info
-                    }
-                } else {
-                    lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
-                    lastBoardMessageSeverity = .info
-                }
-            }
-
-        case let .failure(message):
-            var failedRecord = tasks[taskIndex].executionRecord ?? record
-            let parsedFailure = parseExecutionFailure(message)
-            failedRecord.status = .failed
-            failedRecord.lastFinishedAt = finishedAt
-            failedRecord.lastOutputSummary = nil
-            failedRecord.lastError = normalizeExecutionText(parsedFailure.userMessage) ?? "Unknown execution error"
-            failedRecord.lastDebugOutput = normalizeExecutionText(parsedFailure.debugLog)
-            failedRecord.lastAgentID = agent.id
-            tasks[taskIndex].executionRecord = failedRecord
-            lastExecutionDebugLog = failedRecord.lastDebugOutput
-            lastCodexLoginCommand = extractCodexLoginCommand(
-                from: failedRecord.lastError,
-                debugLog: failedRecord.lastDebugOutput
-            )
-            lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
-            lastBoardMessageSeverity = .warning
-        }
-
-        persistBoardState()
+        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+        finalizeTaskExecution(prepared, outcome: outcome)
         return true
+    }
+
+    func runTaskExecutionInBackground(_ taskID: UUID, completion: @escaping (Bool) -> Void) {
+        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
+            completion(false)
+            return
+        }
+        let executor = taskExecutor
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                self.finalizeTaskExecution(prepared, outcome: outcome)
+                completion(true)
+            }
+        }
     }
 
     @discardableResult
@@ -2085,7 +2030,37 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return false
         }
-        return runTaskExecution(taskID)
+        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
+            return false
+        }
+        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+        finalizeTaskExecution(prepared, outcome: outcome)
+        return true
+    }
+
+    func retryTaskExecutionInBackground(_ taskID: UUID, completion: @escaping (Bool) -> Void) {
+        guard let record = executionRecord(for: taskID), record.status == .failed else {
+            lastBoardMessage = "Only failed executions can be retried"
+            lastBoardMessageSeverity = .warning
+            completion(false)
+            return
+        }
+        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
+            completion(false)
+            return
+        }
+        let executor = taskExecutor
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                self.finalizeTaskExecution(prepared, outcome: outcome)
+                completion(true)
+            }
+        }
     }
 
     @discardableResult
@@ -2160,6 +2135,93 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessage = summaryParts.joined(separator: " · ")
         lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
         return startedCount
+    }
+
+    func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
+        let assignedQueue = tasks
+            .filter { task in
+                (task.status == .todo || task.status == .inProgress) && task.assignedAgentID != nil
+            }
+            .sorted { lhs, rhs in
+                if lhs.storyPoints != rhs.storyPoints {
+                    return lhs.storyPoints > rhs.storyPoints
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
+
+        let detailsMissingCount = assignedQueue.filter {
+            $0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        let runnableTaskIDs = assignedQueue
+            .filter { !$0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map(\.id)
+
+        guard !runnableTaskIDs.isEmpty else {
+            if detailsMissingCount > 0 {
+                let label = detailsMissingCount == 1 ? "task has" : "tasks have"
+                lastBoardMessage = "\(detailsMissingCount) assigned \(label) empty details. Fill details before batch run."
+            } else {
+                lastBoardMessage = "No assigned tasks are ready to run"
+            }
+            lastBoardMessageSeverity = .warning
+            completion(0)
+            return
+        }
+
+        var startedCount = 0
+        var succeededCount = 0
+        var failedCount = 0
+        var skippedCount = 0
+
+        func finish() {
+            var summaryParts = [
+                "Batch run finished",
+                "\(startedCount) started",
+                "\(succeededCount) succeeded",
+                "\(failedCount) failed"
+            ]
+            if skippedCount > 0 {
+                summaryParts.append("\(skippedCount) skipped")
+            }
+            if detailsMissingCount > 0 {
+                summaryParts.append("\(detailsMissingCount) missing details")
+            }
+            lastBoardMessage = summaryParts.joined(separator: " · ")
+            lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
+            completion(startedCount)
+        }
+
+        func runNext(at index: Int) {
+            guard index < runnableTaskIDs.count else {
+                finish()
+                return
+            }
+
+            let taskID = runnableTaskIDs[index]
+            runTaskExecutionInBackground(taskID) { didRun in
+                if !didRun {
+                    skippedCount += 1
+                    runNext(at: index + 1)
+                    return
+                }
+
+                startedCount += 1
+                if let record = self.executionRecord(for: taskID) {
+                    switch record.status {
+                    case .succeeded:
+                        succeededCount += 1
+                    case .failed:
+                        failedCount += 1
+                    case .running:
+                        break
+                    }
+                }
+
+                runNext(at: index + 1)
+            }
+        }
+
+        runNext(at: 0)
     }
 
     func triageCandidates() -> [WorkTask] {
@@ -2404,6 +2466,126 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func prepareTaskExecution(_ taskID: UUID, requiresTaskDetails: Bool) -> PreparedTaskExecution? {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return nil }
+        lastExecutionDebugLog = nil
+        lastCodexLoginCommand = nil
+        guard tasks[taskIndex].status != .done else {
+            lastBoardMessage = "Done tasks cannot be executed"
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+        guard let agentID = tasks[taskIndex].assignedAgentID,
+              let agent = agents.first(where: { $0.id == agentID }) else {
+            lastBoardMessage = "Assign an agent before running this task"
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+        guard !requiresTaskDetails || !tasks[taskIndex].details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastBoardMessage = "Task details are required before running this task"
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        if tasks[taskIndex].status == .todo {
+            guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
+                let limit = wipLimits[.inProgress] ?? 0
+                lastBoardMessage = "WIP limit reached for In Progress (\(limit))"
+                lastBoardMessageSeverity = .warning
+                return nil
+            }
+            tasks[taskIndex].status = .inProgress
+        }
+
+        var record = tasks[taskIndex].executionRecord ?? TaskExecutionRecord(status: .running)
+        record.status = .running
+        record.runCount = max(0, record.runCount) + 1
+        record.lastStartedAt = Date()
+        record.lastFinishedAt = nil
+        record.lastOutputSummary = nil
+        record.lastError = nil
+        record.lastDebugOutput = nil
+        record.lastAgentID = agent.id
+        tasks[taskIndex].executionRecord = record
+
+        return PreparedTaskExecution(
+            taskID: taskID,
+            taskSnapshot: tasks[taskIndex],
+            agent: agent
+        )
+    }
+
+    private func finalizeTaskExecution(_ prepared: PreparedTaskExecution, outcome: AgentTaskExecutionOutcome) {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == prepared.taskID }) else { return }
+        let baselineRecord = tasks[taskIndex].executionRecord ?? TaskExecutionRecord(status: .running)
+        let finishedAt = Date()
+
+        switch outcome {
+        case let .success(summary):
+            let normalizedSummary = normalizeExecutionText(summary)
+            if let normalizedSummary, let blockerMessage = blockedExecutionMessage(from: normalizedSummary) {
+                var blockedRecord = baselineRecord
+                blockedRecord.status = .failed
+                blockedRecord.lastFinishedAt = finishedAt
+                blockedRecord.lastOutputSummary = normalizedSummary
+                blockedRecord.lastError = blockerMessage
+                blockedRecord.lastDebugOutput = nil
+                blockedRecord.lastAgentID = prepared.agent.id
+                tasks[taskIndex].executionRecord = blockedRecord
+                lastExecutionDebugLog = nil
+                lastCodexLoginCommand = nil
+                lastBoardMessage = blockerMessage
+                lastBoardMessageSeverity = .warning
+            } else {
+                var finishedRecord = baselineRecord
+                finishedRecord.status = .succeeded
+                finishedRecord.lastFinishedAt = finishedAt
+                finishedRecord.lastOutputSummary = normalizedSummary
+                finishedRecord.lastError = nil
+                finishedRecord.lastDebugOutput = nil
+                finishedRecord.lastAgentID = prepared.agent.id
+                tasks[taskIndex].executionRecord = finishedRecord
+                lastExecutionDebugLog = nil
+                lastCodexLoginCommand = nil
+
+                if tasks[taskIndex].status == .inProgress {
+                    if isWIPLimitReached(for: .review, excluding: prepared.taskID) {
+                        let limit = wipLimits[.review] ?? 0
+                        lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
+                        lastBoardMessageSeverity = .warning
+                    } else {
+                        tasks[taskIndex].status = .review
+                        lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                        lastBoardMessageSeverity = .info
+                    }
+                } else {
+                    lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                    lastBoardMessageSeverity = .info
+                }
+            }
+
+        case let .failure(message):
+            var failedRecord = baselineRecord
+            let parsedFailure = parseExecutionFailure(message)
+            failedRecord.status = .failed
+            failedRecord.lastFinishedAt = finishedAt
+            failedRecord.lastOutputSummary = nil
+            failedRecord.lastError = normalizeExecutionText(parsedFailure.userMessage) ?? "Unknown execution error"
+            failedRecord.lastDebugOutput = normalizeExecutionText(parsedFailure.debugLog)
+            failedRecord.lastAgentID = prepared.agent.id
+            tasks[taskIndex].executionRecord = failedRecord
+            lastExecutionDebugLog = failedRecord.lastDebugOutput
+            lastCodexLoginCommand = extractCodexLoginCommand(
+                from: failedRecord.lastError,
+                debugLog: failedRecord.lastDebugOutput
+            )
+            lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
+            lastBoardMessageSeverity = .warning
+        }
+
+        persistBoardState()
     }
 
     private func parseExecutionFailure(_ value: String) -> (userMessage: String, debugLog: String?) {
