@@ -630,15 +630,17 @@ private struct BoardHealthSummaryView: View {
     let reviewPressure: Int
 
     var body: some View {
-        HStack(spacing: 8) {
-            SummaryBadge(title: "Total", value: "\(totalTasks)", color: .blue)
-            SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
-            SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
-            SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
-            SummaryBadge(title: "Health (\(healthLabel))", value: "\(healthScore)", color: healthScoreColor)
-            SummaryBadge(title: "In Progress WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
-            SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
-            Spacer()
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                SummaryBadge(title: "Total", value: "\(totalTasks)", color: .blue)
+                SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
+                SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
+                SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
+                SummaryBadge(title: "Health", value: "\(healthScore) \(healthLabel)", color: healthScoreColor)
+                SummaryBadge(title: "InProg WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
+                SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -745,10 +747,15 @@ private struct SummaryBadge: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Text(value)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
+        .frame(minWidth: 78, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(color.opacity(colorScheme == .dark ? 0.22 : 0.12), in: RoundedRectangle(cornerRadius: 8))
