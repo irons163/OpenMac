@@ -314,6 +314,12 @@ struct ContentView: View {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .help("Auto-assign all eligible To Do tasks (Shift-Command-A)")
                 .disabled(!canAutoAssignFromToolbar)
+                Button("Run Assigned") {
+                    runAssignedExecutionsFromToolbar()
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .help("Batch-run assigned To Do/In Progress tasks (Shift-Command-G)")
+                .disabled(!canBatchRunAssignedTasks)
                 Button("New Task") {
                     isShowingNewTaskSheet = true
                 }
@@ -378,6 +384,13 @@ struct ContentView: View {
                     }
 
                     Section("Board") {
+                        Button("Run Assigned Tasks") {
+                            runAssignedExecutionsFromToolbar()
+                        }
+                        .disabled(!canBatchRunAssignedTasks)
+
+                        Divider()
+
                         Button("Archive Done") {
                             archiveDoneTasks()
                         }
@@ -835,6 +848,13 @@ struct ContentView: View {
         }
     }
 
+    private func runAssignedExecutionsFromToolbar() {
+        let startedCount = viewModel.runAssignedTaskExecutions()
+        if startedCount > 0 {
+            refreshTriageSelections()
+        }
+    }
+
     private func applyHealthRecommendation(_ action: BoardHealthAction) {
         let applied = viewModel.applyHealthRecommendation(action)
         guard applied else { return }
@@ -1186,6 +1206,16 @@ struct ContentView: View {
 
     private var canAutoAssignFromToolbar: Bool {
         viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
+    }
+
+    private var canBatchRunAssignedTasks: Bool {
+        viewModel.tasks.contains { task in
+            guard (task.status == .todo || task.status == .inProgress),
+                  task.assignedAgentID != nil else {
+                return false
+            }
+            return !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     private func runtimeSummary(for agent: AgentProfile) -> String {

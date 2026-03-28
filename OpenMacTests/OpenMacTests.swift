@@ -3724,6 +3724,75 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("batch run executes assigned runnable tasks and skips empty details")
+    func batchRunAssignedExecutionsSkipsEmptyDetails() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let runnableTask = WorkTask(
+            title: "Runnable",
+            details: "Implement card view",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let missingDetailsTask = WorkTask(
+            title: "Missing details",
+            details: "   ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [runnableTask.id: .success(summary: "Done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [runnableTask, missingDetailsTask],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let started = viewModel.runAssignedTaskExecutions()
+        let updatedRunnable = viewModel.tasks.first(where: { $0.id == runnableTask.id })
+        let untouchedTask = viewModel.tasks.first(where: { $0.id == missingDetailsTask.id })
+
+        #expect(started == 1)
+        #expect(updatedRunnable?.executionRecord?.status == .succeeded)
+        #expect(untouchedTask?.executionRecord == nil)
+        #expect(untouchedTask?.status == .todo)
+        #expect(viewModel.lastBoardMessage?.contains("1 missing details") == true)
+    }
+
+    @Test("batch run reports when assigned tasks are not runnable")
+    func batchRunAssignedExecutionsReportsNoRunnableTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Blocked",
+            details: "  ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor(),
+            boardStore: store
+        )
+
+        let started = viewModel.runAssignedTaskExecutions()
+
+        #expect(started == 0)
+        #expect(viewModel.lastBoardMessage == "1 assigned task has empty details. Fill details before batch run.")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(viewModel.tasks.first?.executionRecord == nil)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("run task execution failure writes failed record and keeps task in progress")
     func runTaskExecutionFailureWritesRecord() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)

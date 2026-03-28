@@ -2088,6 +2088,80 @@ final class KanbanBoardViewModel: ObservableObject {
         return runTaskExecution(taskID)
     }
 
+    @discardableResult
+    func runAssignedTaskExecutions() -> Int {
+        let assignedQueue = tasks
+            .filter { task in
+                (task.status == .todo || task.status == .inProgress) && task.assignedAgentID != nil
+            }
+            .sorted { lhs, rhs in
+                if lhs.storyPoints != rhs.storyPoints {
+                    return lhs.storyPoints > rhs.storyPoints
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
+
+        let detailsMissingCount = assignedQueue.filter {
+            $0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        let runnableTaskIDs = assignedQueue
+            .filter { !$0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map(\.id)
+
+        guard !runnableTaskIDs.isEmpty else {
+            if detailsMissingCount > 0 {
+                let label = detailsMissingCount == 1 ? "task has" : "tasks have"
+                lastBoardMessage = "\(detailsMissingCount) assigned \(label) empty details. Fill details before batch run."
+            } else {
+                lastBoardMessage = "No assigned tasks are ready to run"
+            }
+            lastBoardMessageSeverity = .warning
+            return 0
+        }
+
+        var startedCount = 0
+        var succeededCount = 0
+        var failedCount = 0
+        var skippedCount = 0
+
+        for taskID in runnableTaskIDs {
+            let didRun = runTaskExecution(taskID)
+            guard didRun else {
+                skippedCount += 1
+                continue
+            }
+
+            startedCount += 1
+            if let record = executionRecord(for: taskID) {
+                switch record.status {
+                case .succeeded:
+                    succeededCount += 1
+                case .failed:
+                    failedCount += 1
+                case .running:
+                    break
+                }
+            }
+        }
+
+        var summaryParts = [
+            "Batch run finished",
+            "\(startedCount) started",
+            "\(succeededCount) succeeded",
+            "\(failedCount) failed"
+        ]
+        if skippedCount > 0 {
+            summaryParts.append("\(skippedCount) skipped")
+        }
+        if detailsMissingCount > 0 {
+            summaryParts.append("\(detailsMissingCount) missing details")
+        }
+
+        lastBoardMessage = summaryParts.joined(separator: " · ")
+        lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
+        return startedCount
+    }
+
     func triageCandidates() -> [WorkTask] {
         tasks
             .filter { $0.status == .todo && $0.assignedAgentID == nil }
