@@ -177,6 +177,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .help("Auto-assign all eligible To Do tasks (Shift-Command-A)")
+                .disabled(!canAutoAssignFromToolbar)
                 Button("New Task") {
                     isShowingNewTaskSheet = true
                 }
@@ -209,6 +210,7 @@ struct ContentView: View {
                         openManualTriage()
                     }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(viewModel.triageCandidates().isEmpty)
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
             }
@@ -296,7 +298,7 @@ struct ContentView: View {
                 onClose: { isShowingManualTriageSheet = false }
             )
         }
-        .onChange(of: viewModel.agents) { _ in
+        .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
         }
     }
@@ -584,6 +586,10 @@ struct ContentView: View {
         if !validKeys.contains(selectedAssigneeFilterKey) {
             selectedAssigneeFilterKey = "all"
         }
+    }
+
+    private var canAutoAssignFromToolbar: Bool {
+        viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
     }
 
     private var detailBackgroundColors: [Color] {
