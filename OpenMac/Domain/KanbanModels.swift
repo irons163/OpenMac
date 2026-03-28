@@ -185,6 +185,7 @@ struct TaskExecutionRecord: Equatable, Codable {
     var lastFinishedAt: Date?
     var lastOutputSummary: String?
     var lastError: String?
+    var lastDebugOutput: String?
     var lastAgentID: UUID?
 
     init(
@@ -194,6 +195,7 @@ struct TaskExecutionRecord: Equatable, Codable {
         lastFinishedAt: Date? = nil,
         lastOutputSummary: String? = nil,
         lastError: String? = nil,
+        lastDebugOutput: String? = nil,
         lastAgentID: UUID? = nil
     ) {
         self.status = status
@@ -202,6 +204,7 @@ struct TaskExecutionRecord: Equatable, Codable {
         self.lastFinishedAt = lastFinishedAt
         self.lastOutputSummary = lastOutputSummary
         self.lastError = lastError
+        self.lastDebugOutput = lastDebugOutput
         self.lastAgentID = lastAgentID
     }
 }

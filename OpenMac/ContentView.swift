@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
+    @AppStorage("developerModeEnabled") private var developerModeEnabled = false
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -154,9 +155,96 @@ struct ContentView: View {
                 }
 
                 if let message = viewModel.lastBoardMessage {
-                    Text(message)
-                        .font(.callout)
-                        .foregroundStyle(BoardMessageColorPalette.color(for: viewModel.lastBoardMessageSeverity, scheme: effectiveColorScheme))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(message)
+                                .font(.callout)
+                                .foregroundStyle(
+                                    BoardMessageColorPalette.color(
+                                        for: viewModel.lastBoardMessageSeverity,
+                                        scheme: effectiveColorScheme
+                                    )
+                                )
+                                .textSelection(.enabled)
+                            if developerModeEnabled {
+                                Spacer()
+                                Button("Copy") {
+                                    copyToPasteboard(message)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+
+                        if developerModeEnabled,
+                           let loginCommand = viewModel.lastCodexLoginCommand,
+                           !loginCommand.isEmpty {
+                            HStack {
+                                Text("Codex Login Command")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                                Spacer()
+                                Button("Copy Command") {
+                                    copyToPasteboard(loginCommand)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            Text(loginCommand)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(
+                                    BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
+                                    in: RoundedRectangle(cornerRadius: 10)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(
+                                            BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+
+                        if developerModeEnabled,
+                           let debugLog = viewModel.lastExecutionDebugLog,
+                           !debugLog.isEmpty {
+                            HStack {
+                                Text("Execution Debug Log")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                                Spacer()
+                                Button("Copy Log") {
+                                    copyToPasteboard(debugLog)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            ScrollView {
+                                Text(debugLog)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 190)
+                            .padding(10)
+                            .background(
+                                BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                    }
                 }
 
                 ScrollView(.horizontal) {
@@ -360,6 +448,25 @@ struct ContentView: View {
                     }
                 }
                 .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
+                Menu("Developer") {
+                    Toggle("Developer Mode", isOn: $developerModeEnabled)
+                    if let message = viewModel.lastBoardMessage, !message.isEmpty {
+                        Button("Copy Board Message") {
+                            copyToPasteboard(message)
+                        }
+                    }
+                    if let debugLog = viewModel.lastExecutionDebugLog, !debugLog.isEmpty {
+                        Button("Copy Last Debug Log") {
+                            copyToPasteboard(debugLog)
+                        }
+                    }
+                    if let loginCommand = viewModel.lastCodexLoginCommand, !loginCommand.isEmpty {
+                        Button("Copy Codex Login Command") {
+                            copyToPasteboard(loginCommand)
+                        }
+                    }
+                }
+                .help("Enable developer diagnostics and quick-copy execution logs")
             }
         }
         .sheet(isPresented: $isShowingNewBoardSheet) {
@@ -516,6 +623,12 @@ struct ContentView: View {
         newTaskSkills = ""
         newTaskPoints = 1
         isShowingNewTaskSheet = false
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
     }
 
     private func openEditTask(_ task: WorkTask) {
@@ -1552,11 +1665,13 @@ private struct TaskCardView: View {
                         .font(.caption2)
                         .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
                         .lineLimit(3)
+                        .textSelection(.enabled)
                 } else if let lastError = executionRecord.lastError, executionRecord.status == .failed {
                     Text("Error: \(lastError)")
                         .font(.caption2)
                         .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
                         .lineLimit(3)
+                        .textSelection(.enabled)
                 }
             }
 
@@ -1963,7 +2078,7 @@ private struct NewAgentSheet: View {
                             .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField("Codex Profile (optional)", text: $codexProfile)
-                        Text("Uses local `codex login` session to execute the task through Codex CLI.")
+                        Text("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -2035,7 +2150,7 @@ private struct EditAgentSheet: View {
                             .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField("Codex Profile (optional)", text: $codexProfile)
-                        Text("Uses local `codex login` session to execute the task through Codex CLI.")
+                        Text("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

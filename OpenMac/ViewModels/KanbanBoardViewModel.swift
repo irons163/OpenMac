@@ -89,6 +89,8 @@ protocol AgentTaskExecuting {
 }
 
 struct DefaultAgentTaskExecutor: AgentTaskExecuting {
+    static let debugLogDelimiter = "\n\n--- debug ---\n"
+
     struct CodexBridgeRequest: Equatable {
         let prompt: String
         let model: String
@@ -220,6 +222,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             model: runtimeProfile.model,
             profile: runtimeProfile.codexProfile
         )
+        let trimmedModel = runtimeProfile.model.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try codexBridgePreflight()
             let summary = try codexBridgeRunner(request).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -228,8 +231,116 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             }
             return .success(summary: summary)
         } catch {
-            return .failure(message: "Codex Bridge run failed: \(error.localizedDescription)")
+            let initialRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // ChatGPT account login with Codex may reject some API models (for example gpt-4.1-mini).
+            // Retry once without --model so Codex profile default can be used automatically.
+            if !trimmedModel.isEmpty,
+               Self.isCodexChatGPTModelUnsupported(initialRawFailure) {
+                let fallbackRequest = CodexBridgeRequest(
+                    prompt: prompt,
+                    model: "",
+                    profile: runtimeProfile.codexProfile
+                )
+                do {
+                    let fallbackSummary = try codexBridgeRunner(fallbackRequest)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !fallbackSummary.isEmpty else {
+                        return .failure(message: "Codex Bridge returned empty output")
+                    }
+                    return .success(summary: fallbackSummary)
+                } catch {
+                    let fallbackRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawFailure = """
+                    Initial run rejected configured model "\(trimmedModel)".
+                    \(initialRawFailure)
+
+                    Fallback run without explicit model failed.
+                    \(fallbackRawFailure)
+                    """
+                    return codexBridgeFailureOutcome(from: rawFailure)
+                }
+            }
+
+            return codexBridgeFailureOutcome(from: initialRawFailure)
         }
+    }
+
+    private func codexBridgeFailureOutcome(from rawFailure: String) -> AgentTaskExecutionOutcome {
+        let summary = Self.summarizeCodexBridgeFailure(rawFailure)
+        if rawFailure.isEmpty || summary == rawFailure {
+            return .failure(message: "Codex Bridge run failed: \(summary)")
+        }
+        return .failure(
+            message: "Codex Bridge run failed: \(summary)\(Self.debugLogDelimiter)\(rawFailure)"
+        )
+    }
+
+    private static func isCodexChatGPTModelUnsupported(_ rawFailure: String) -> Bool {
+        let normalized = rawFailure.lowercased()
+        return normalized.contains("model is not supported when using codex with a chatgpt account")
+    }
+
+    private static func summarizeCodexBridgeFailure(_ rawFailure: String) -> String {
+        let trimmed = rawFailure.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Unknown Codex Bridge error"
+        }
+
+        let normalized = trimmed.lowercased()
+        if isCodexChatGPTModelUnsupported(trimmed) {
+            return "Configured model is not supported for Codex Bridge with ChatGPT login. Leave model blank to use Codex default, or switch to a Codex-supported model."
+        }
+        if normalized.contains("401 unauthorized") || normalized.contains("missing bearer or basic authentication") {
+            let loginCommand = codexLoginCommandForCurrentProfile()
+            return "Codex Bridge authentication missing. Run this once in Terminal: \(loginCommand)"
+        }
+        if normalized.contains("operation not permitted") {
+            let loginCommand = codexLoginCommandForCurrentProfile()
+            return "Permission denied while accessing Codex profile. Run this once in Terminal with the app container profile: \(loginCommand)"
+        }
+        if normalized.contains("failed to connect to websocket"),
+           normalized.contains("lookup address information") || normalized.contains("nodename nor servname provided") {
+            return "Network/DNS lookup failed while Codex Bridge contacted OpenAI. Check internet, DNS/proxy settings, and outgoing network permission."
+        }
+        if normalized.contains("failed to connect to websocket") {
+            return "Codex Bridge could not connect to OpenAI. Check internet/proxy settings and retry."
+        }
+        if normalized.contains("codex login") || normalized.contains("not logged in") {
+            let loginCommand = codexLoginCommandForCurrentProfile()
+            return "Codex Bridge requires login. Run this once in Terminal: \(loginCommand)"
+        }
+        if normalized.contains("no such file or directory"), normalized.contains("codex") {
+            return "Codex CLI not found. Install Codex CLI or set CODEX_CLI_PATH."
+        }
+
+        let candidateLine = trimmed
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { line in
+                let lowered = line.lowercased()
+                guard !line.isEmpty else { return false }
+                if lowered.hasPrefix("openai codex v") { return false }
+                if lowered == "-" || lowered.hasPrefix("------") { return false }
+                if lowered.hasPrefix("workdir:") || lowered.hasPrefix("model:") || lowered.hasPrefix("provider:") {
+                    return false
+                }
+                if lowered.hasPrefix("approval:") || lowered.hasPrefix("sandbox:") || lowered.hasPrefix("reasoning") {
+                    return false
+                }
+                if lowered.hasPrefix("session id:") || lowered == "user" { return false }
+                return true
+            }
+
+        if let candidateLine, !candidateLine.isEmpty {
+            return candidateLine.count > 220
+                ? "\(candidateLine.prefix(220))..."
+                : candidateLine
+        }
+
+        return trimmed.count > 220
+            ? "\(trimmed.prefix(220))..."
+            : trimmed
     }
 
     private func resolvedAPIKey(from environment: [String: String]) -> String? {
@@ -409,6 +520,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let process = Process()
         process.executableURL = codexExecutable
         process.arguments = arguments
+        process.environment = codexBridgeProcessEnvironment()
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -444,6 +556,15 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
             )
         }
+
+        let loginStatus = try runCodex(arguments: ["login", "status"])
+        let normalized = loginStatus.output.lowercased()
+        guard loginStatus.code == 0, normalized.contains("logged in") else {
+            let loginCommand = codexLoginCommandForCurrentProfile()
+            throw ExecutorError.codexBridgeFailed(
+                "Codex Bridge profile is not logged in. Run this once in Terminal: \(loginCommand)"
+            )
+        }
     }
 
     private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
@@ -456,6 +577,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.environment = codexBridgeProcessEnvironment()
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -502,6 +624,22 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
         return nil
     }
+
+
+    private static func codexBridgeProcessEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        if let codexHome = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           codexHome.isEmpty {
+            environment["CODEX_HOME"] = nil
+        }
+        return environment
+    }
+
+    private static func codexLoginCommandForCurrentProfile() -> String {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"] ?? "\(home)/.codex"
+        return "HOME=\"\(home)\" CODEX_HOME=\"\(codexHome)\" codex login --device-auth"
+    }
 }
 
 final class KanbanBoardViewModel: ObservableObject {
@@ -520,6 +658,8 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
     @Published private(set) var lastBoardMessageSeverity: BoardMessageSeverity?
+    @Published private(set) var lastExecutionDebugLog: String?
+    @Published private(set) var lastCodexLoginCommand: String?
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
 
@@ -1820,6 +1960,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func runTaskExecution(_ taskID: UUID) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        lastExecutionDebugLog = nil
+        lastCodexLoginCommand = nil
         guard tasks[taskIndex].status != .done else {
             lastBoardMessage = "Done tasks cannot be executed"
             lastBoardMessageSeverity = .warning
@@ -1849,6 +1991,7 @@ final class KanbanBoardViewModel: ObservableObject {
         record.lastFinishedAt = nil
         record.lastOutputSummary = nil
         record.lastError = nil
+        record.lastDebugOutput = nil
         record.lastAgentID = agent.id
         tasks[taskIndex].executionRecord = record
 
@@ -1862,8 +2005,11 @@ final class KanbanBoardViewModel: ObservableObject {
             finishedRecord.lastFinishedAt = finishedAt
             finishedRecord.lastOutputSummary = normalizeExecutionText(summary)
             finishedRecord.lastError = nil
+            finishedRecord.lastDebugOutput = nil
             finishedRecord.lastAgentID = agent.id
             tasks[taskIndex].executionRecord = finishedRecord
+            lastExecutionDebugLog = nil
+            lastCodexLoginCommand = nil
 
             if tasks[taskIndex].status == .inProgress {
                 if isWIPLimitReached(for: .review, excluding: taskID) {
@@ -1882,12 +2028,19 @@ final class KanbanBoardViewModel: ObservableObject {
 
         case let .failure(message):
             var failedRecord = tasks[taskIndex].executionRecord ?? record
+            let parsedFailure = parseExecutionFailure(message)
             failedRecord.status = .failed
             failedRecord.lastFinishedAt = finishedAt
             failedRecord.lastOutputSummary = nil
-            failedRecord.lastError = normalizeExecutionText(message) ?? "Unknown execution error"
+            failedRecord.lastError = normalizeExecutionText(parsedFailure.userMessage) ?? "Unknown execution error"
+            failedRecord.lastDebugOutput = normalizeExecutionText(parsedFailure.debugLog)
             failedRecord.lastAgentID = agent.id
             tasks[taskIndex].executionRecord = failedRecord
+            lastExecutionDebugLog = failedRecord.lastDebugOutput
+            lastCodexLoginCommand = extractCodexLoginCommand(
+                from: failedRecord.lastError,
+                debugLog: failedRecord.lastDebugOutput
+            )
             lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
             lastBoardMessageSeverity = .warning
         }
@@ -2150,6 +2303,56 @@ final class KanbanBoardViewModel: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func parseExecutionFailure(_ value: String) -> (userMessage: String, debugLog: String?) {
+        let delimiter = DefaultAgentTaskExecutor.debugLogDelimiter
+        guard let range = value.range(of: delimiter) else {
+            return (value, nil)
+        }
+        let userMessage = String(value[..<range.lowerBound])
+        let debugLog = String(value[range.upperBound...])
+        return (userMessage, debugLog)
+    }
+
+    private func extractCodexLoginCommand(from userMessage: String?, debugLog: String?) -> String? {
+        [userMessage, debugLog]
+            .compactMap { $0 }
+            .compactMap { extractCodexLoginCommand(from: $0) }
+            .first
+    }
+
+    private func extractCodexLoginCommand(from value: String) -> String? {
+        value
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line -> String? in
+                let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmedLine.localizedCaseInsensitiveContains("codex login") else {
+                    return nil
+                }
+
+                let start: String.Index
+                if let homeRange = trimmedLine.range(of: "HOME=") {
+                    start = homeRange.lowerBound
+                } else if let codexHomeRange = trimmedLine.range(of: "CODEX_HOME=") {
+                    start = codexHomeRange.lowerBound
+                } else if let codexRange = trimmedLine.range(of: "codex login", options: .caseInsensitive) {
+                    start = codexRange.lowerBound
+                } else {
+                    start = trimmedLine.startIndex
+                }
+
+                var command = String(trimmedLine[start...])
+                if command.hasPrefix("`"), command.hasSuffix("`"), command.count > 1 {
+                    command.removeFirst()
+                    command.removeLast()
+                } else {
+                    command = command.trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                }
+                command = command.trimmingCharacters(in: CharacterSet(charactersIn: " \t."))
+                return command.isEmpty ? nil : command
+            }
+            .first
+    }
+
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {
         guard let limit = wipLimits[destination] else { return false }
         let currentCount = tasks.filter { $0.status == destination && $0.id != taskID }.count
@@ -2178,6 +2381,8 @@ final class KanbanBoardViewModel: ObservableObject {
         lastAssignmentReasons = [:]
         lastBoardMessage = nil
         lastBoardMessageSeverity = nil
+        lastExecutionDebugLog = nil
+        lastCodexLoginCommand = nil
     }
 
     private func uniqueBoardCopyName(for sourceName: String) -> String {

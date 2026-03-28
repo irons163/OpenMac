@@ -262,6 +262,56 @@ struct AgentTaskExecutorTests {
         }
     }
 
+    @Test("default executor summarizes codex bridge websocket DNS failures and keeps debug log")
+    func openAICompatibleCodexBridgeNetworkFailureSummary() {
+        let task = WorkTask(
+            title: "Bridge network failure",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { _ in
+                struct BridgeError: LocalizedError {
+                    var errorDescription: String? {
+                        """
+                        OpenAI Codex v0.118.0-alpha.2
+                        workdir: /tmp
+                        ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: failed to lookup address information: nodename nor servname provided, or not known, url: wss://api.openai.com/v1/responses
+                        """
+                    }
+                }
+                throw BridgeError()
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected Codex Bridge network failure")
+        case let .failure(message):
+            #expect(message.contains("Network/DNS lookup failed while Codex Bridge contacted OpenAI"))
+            #expect(message.contains("--- debug ---"))
+            #expect(message.contains("failed to connect to websocket"))
+        }
+    }
+
     @Test("default executor codex bridge preflight failure stops execution")
     func openAICompatibleCodexBridgePreflightFailure() {
         let task = WorkTask(
@@ -308,6 +358,58 @@ struct AgentTaskExecutorTests {
             #expect(message.contains("please run codex login"))
         }
         #expect(runnerCalled == false)
+    }
+
+    @Test("default executor retries codex bridge without model when ChatGPT account rejects configured model")
+    func openAICompatibleCodexBridgeRetriesWithoutModelForChatGPTAccount() {
+        let task = WorkTask(
+            title: "Bridge unsupported model",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var seenRequests: [DefaultAgentTaskExecutor.CodexBridgeRequest] = []
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request in
+                seenRequests.append(request)
+                if seenRequests.count == 1 {
+                    struct UnsupportedModelError: LocalizedError {
+                        var errorDescription: String? {
+                            "The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account."
+                        }
+                    }
+                    throw UnsupportedModelError()
+                }
+                return "Fallback model execution succeeded"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Fallback model execution succeeded")
+        case .failure:
+            #expect(Bool(false), "Expected fallback success for unsupported ChatGPT-account model")
+        }
+        #expect(seenRequests.count == 2)
+        #expect(seenRequests.first?.model == "gpt-4.1-mini")
+        #expect(seenRequests.last?.model == "")
     }
 }
 
@@ -3626,6 +3728,81 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Execution failed: Tool timeout")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("run task execution extracts debug log from failure delimiter")
+    func runTaskExecutionFailureExtractsDebugLog() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Run command",
+            details: "Expect failure",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                task.id: .failure(
+                    message: "Codex Bridge run failed: Network issue\n\n--- debug ---\nRAW DEBUG"
+                )
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+
+        #expect(executed)
+        #expect(record?.status == .failed)
+        #expect(record?.lastError == "Codex Bridge run failed: Network issue")
+        #expect(record?.lastDebugOutput == "RAW DEBUG")
+        #expect(viewModel.lastExecutionDebugLog == "RAW DEBUG")
+        #expect(viewModel.lastCodexLoginCommand == nil)
+        #expect(viewModel.lastBoardMessage == "Execution failed: Codex Bridge run failed: Network issue")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("run task execution exposes codex login command for quick copy")
+    func runTaskExecutionExtractsCodexLoginCommand() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Run command",
+            details: "Expect auth failure",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let loginCommand = "HOME=\"/tmp/home\" CODEX_HOME=\"/tmp/home/.codex\" codex login --device-auth"
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                task.id: .failure(
+                    message: "Codex Bridge run failed: Codex Bridge authentication missing. Run this once in Terminal: \(loginCommand)\n\n--- debug ---\n401 Unauthorized"
+                )
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(executed)
+        #expect(viewModel.lastCodexLoginCommand == loginCommand)
+        #expect(viewModel.lastExecutionDebugLog == "401 Unauthorized")
+        #expect(viewModel.lastBoardMessage?.contains("Codex Bridge authentication missing") == true)
     }
 
     @Test("retry task execution requires previous failed run")
