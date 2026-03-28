@@ -1518,6 +1518,117 @@ struct KanbanPersistenceTests {
         #expect(resolved[lowPriorityTask.id] == betaAgent.id)
     }
 
+    @Test("bulk triage assignable count follows capacity-aware selection planning")
+    func bulkTriageAssignableCountFollowsCapacityAwarePlan() {
+        let highPriorityTask = WorkTask(
+            title: "Task High",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let lowPriorityTask = WorkTask(
+            title: "Task Low",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alphaAgent = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let betaAgent = AgentProfile(name: "Beta Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let viewModel = KanbanBoardViewModel(tasks: [highPriorityTask, lowPriorityTask], agents: [alphaAgent, betaAgent])
+
+        let count = viewModel.bulkAssignableTriageTaskCount(using: [
+            highPriorityTask.id: alphaAgent.id,
+            lowPriorityTask.id: alphaAgent.id
+        ])
+
+        #expect(count == 2)
+    }
+
+    @Test("bulk triage plan matches capacity-aware fallback decisions")
+    func bulkTriagePlanMatchesCapacityAwareFallback() {
+        let highPriorityTask = WorkTask(
+            title: "Task High",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let lowPriorityTask = WorkTask(
+            title: "Task Low",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alphaAgent = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let betaAgent = AgentProfile(name: "Beta Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let viewModel = KanbanBoardViewModel(tasks: [highPriorityTask, lowPriorityTask], agents: [alphaAgent, betaAgent])
+
+        let plan = viewModel.bulkTriageAssignmentPlan(using: [
+            highPriorityTask.id: alphaAgent.id,
+            lowPriorityTask.id: alphaAgent.id
+        ])
+
+        #expect(plan[highPriorityTask.id] == alphaAgent.id)
+        #expect(plan[lowPriorityTask.id] == betaAgent.id)
+        #expect(plan.count == 2)
+    }
+
+    @Test("bulk triage assignable count matches executable assignment plan size")
+    func bulkTriageAssignableCountMatchesPlanSize() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [firstTask, secondTask], agents: [uiAgent])
+
+        let count = viewModel.bulkAssignableTriageTaskCount()
+        let plan = viewModel.bulkTriageAssignmentPlan()
+
+        #expect(count == plan.count)
+        #expect(count == 1)
+    }
+
+    @Test("bulk triage assignable count is a read-only preview")
+    func bulkTriageAssignableCountDoesNotMutateBoardState() {
+        let task = WorkTask(
+            title: "ML task",
+            details: "",
+            requiredSkills: ["ml"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let count = viewModel.bulkAssignableTriageTaskCount()
+
+        #expect(count == 0)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.id == task.id)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
     @Test("bulk triage assigns all currently eligible unassigned todo tasks")
     func bulkTriageAssignsEligibleTasks() {
         let uiTask = WorkTask(

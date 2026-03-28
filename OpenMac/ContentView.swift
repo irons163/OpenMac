@@ -317,6 +317,7 @@ struct ContentView: View {
                 tasks: viewModel.triageCandidates(),
                 boardMessage: viewModel.lastBoardMessage,
                 selectedAgentByTaskID: $triageSelectionByTaskID,
+                assignAllEligibleCount: viewModel.bulkAssignableTriageTaskCount(using: triageSelectionByTaskID),
                 assignableAgents: { task in
                     viewModel.assignableAgents(for: task.id)
                 },
@@ -1252,6 +1253,7 @@ private struct ManualTriageSheet: View {
     let tasks: [WorkTask]
     let boardMessage: String?
     @Binding var selectedAgentByTaskID: [UUID: UUID]
+    let assignAllEligibleCount: Int
     let assignableAgents: (WorkTask) -> [AgentProfile]
     let loadText: (AgentProfile) -> String
     let onAssign: (UUID) -> Void
@@ -1271,8 +1273,9 @@ private struct ManualTriageSheet: View {
 
             HStack {
                 Spacer()
-                Button("Assign All Eligible", action: onAssignAll)
+                Button("Assign All Eligible (\(assignAllEligibleCount))", action: onAssignAll)
                     .buttonStyle(.bordered)
+                    .disabled(assignAllEligibleCount == 0)
             }
 
             if tasks.isEmpty {

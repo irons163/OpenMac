@@ -777,25 +777,33 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func resolvedTriageAssignments(existing: [UUID: UUID] = [:]) -> [UUID: UUID] {
+        bulkTriageAssignmentPlan(using: existing)
+    }
+
+    func bulkAssignableTriageTaskCount(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
+        bulkTriageAssignmentPlan(using: preferredAssignments).count
+    }
+
+    func bulkTriageAssignmentPlan(using preferredAssignments: [UUID: UUID] = [:]) -> [UUID: UUID] {
         let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
-        var resolved: [UUID: UUID] = [:]
+        var plan: [UUID: UUID] = [:]
 
         for task in triageCandidates() {
             guard let selectedAgent = selectBulkTriageAgent(
                 for: task,
-                preferredAgentID: existing[task.id],
+                preferredAgentID: preferredAssignments[task.id],
                 agentsByID: agentsByID,
                 loadsByAgentID: loadsByAgentID
             ) else {
                 continue
             }
 
-            resolved[task.id] = selectedAgent.id
+            plan[task.id] = selectedAgent.id
             loadsByAgentID[selectedAgent.id, default: 0] += 1
         }
 
-        return resolved
+        return plan
     }
 
     @discardableResult
@@ -833,21 +841,15 @@ final class KanbanBoardViewModel: ObservableObject {
 
     @discardableResult
     func bulkAssignTriageTasks(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
+        let assignmentPlan = bulkTriageAssignmentPlan(using: preferredAssignments)
         let candidates = triageCandidates()
-        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
         var assignedCount = 0
 
         for task in candidates {
+            guard let selectedAgentID = assignmentPlan[task.id] else { continue }
             guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else { continue }
-            guard let selectedAgent = selectBulkTriageAgent(
-                for: tasks[taskIndex],
-                preferredAgentID: preferredAssignments[task.id],
-                agentsByID: agentsByID,
-                loadsByAgentID: loadsByAgentID
-            ) else {
-                continue
-            }
+            guard let selectedAgent = agents.first(where: { $0.id == selectedAgentID }) else { continue }
 
             let currentLoad = loadsByAgentID[selectedAgent.id, default: 0]
             tasks[taskIndex].assignedAgentID = selectedAgent.id
