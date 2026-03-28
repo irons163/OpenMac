@@ -1017,7 +1017,7 @@ struct KanbanFlowTests {
         #expect(viewModel.activeTaskCount(for: overloaded.id) == 1)
         #expect(viewModel.healthRecommendations().isEmpty)
         #expect(viewModel.lastBoardMessage == "Applied 4 health recommendation(s)")
-        #expect(viewModel.lastBoardMessageSeverity == .info)
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "info")
     }
 
     @Test("reports when apply-all has no automatic fixes available")
@@ -1036,7 +1036,7 @@ struct KanbanFlowTests {
 
         #expect(appliedCount == 0)
         #expect(viewModel.lastBoardMessage == "No automatic fixes available for current recommendations")
-        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
     }
 
     @Test("reports info tone when board is already stable during apply-all")
@@ -1056,7 +1056,7 @@ struct KanbanFlowTests {
 
         #expect(appliedCount == 0)
         #expect(viewModel.lastBoardMessage == "Board health already stable")
-        #expect(viewModel.lastBoardMessageSeverity == .info)
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "info")
     }
 
     @Test("returns no health recommendations when board is healthy")
@@ -1740,7 +1740,7 @@ struct KanbanPersistenceTests {
 
         #expect(assignedCount == 1)
         #expect(viewModel.lastBoardMessage == "Assigned 1 triage task. 1 task still needs manual attention")
-        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
     }
 
     @Test("bulk triage clears summary message when all triage tasks are assigned")
@@ -1865,7 +1865,7 @@ struct KanbanPersistenceTests {
 
         #expect(assignedCount == 0)
         #expect(viewModel.lastBoardMessage == "No eligible agents available for pending triage tasks")
-        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
         #expect(store.savedSnapshots.isEmpty)
     }
 
@@ -2100,6 +2100,7 @@ struct KanbanPersistenceTests {
 
         #expect(removedCount == 0)
         #expect(viewModel.lastBoardMessage == "No done tasks to archive")
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
         #expect(store.savedSnapshots.isEmpty)
     }
 
@@ -2170,6 +2171,7 @@ struct KanbanPersistenceTests {
         #expect(movedCount == 0)
         #expect(viewModel.tasks.first?.assignedAgentID == overloaded.id)
         #expect(viewModel.lastBoardMessage == "No todo rebalancing needed")
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
         #expect(store.savedSnapshots.isEmpty)
     }
 
@@ -2230,6 +2232,7 @@ struct KanbanPersistenceTests {
 
         #expect(count == 0)
         #expect(viewModel.lastBoardMessage == "No todo tasks assigned to selected agent")
+        #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
         #expect(store.savedSnapshots.isEmpty)
     }
 

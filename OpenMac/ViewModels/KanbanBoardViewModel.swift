@@ -25,7 +25,7 @@ enum BoardHealthAction: Equatable {
     }
 }
 
-enum BoardMessageSeverity: Equatable {
+enum BoardMessageSeverity: String, Equatable {
     case info
     case warning
     case error
@@ -354,6 +354,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard count > 0 else {
             lastBoardMessage = "No todo tasks assigned to selected agent"
+            lastBoardMessageSeverity = .warning
             return 0
         }
 
@@ -367,6 +368,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let doneTaskIDs = Set(tasks.filter { $0.status == .done }.map { $0.id })
         guard !doneTaskIDs.isEmpty else {
             lastBoardMessage = "No done tasks to archive"
+            lastBoardMessageSeverity = .warning
             return 0
         }
 
@@ -436,6 +438,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard movedCount > 0 else {
             lastBoardMessage = "No todo rebalancing needed"
+            lastBoardMessageSeverity = .warning
             return 0
         }
 
