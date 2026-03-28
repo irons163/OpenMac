@@ -1470,6 +1470,82 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.count == 1)
     }
 
+    @Test("bulk triage prefers selected agents from manual triage choices")
+    func bulkTriagePrefersSelectedAgents() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alphaAgent = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let betaAgent = AgentProfile(name: "Beta Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [firstTask, secondTask],
+            agents: [alphaAgent, betaAgent],
+            boardStore: store
+        )
+
+        let assignedCount = viewModel.bulkAssignTriageTasks(using: [
+            firstTask.id: betaAgent.id,
+            secondTask.id: alphaAgent.id
+        ])
+
+        #expect(assignedCount == 2)
+        #expect(viewModel.tasks.first(where: { $0.id == firstTask.id })?.assignedAgentID == betaAgent.id)
+        #expect(viewModel.tasks.first(where: { $0.id == secondTask.id })?.assignedAgentID == alphaAgent.id)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("bulk triage falls back when selected agent is no longer eligible")
+    func bulkTriageFallsBackWhenSelectionIsInvalid() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alphaAgent = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let betaAgent = AgentProfile(name: "Beta Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [firstTask, secondTask],
+            agents: [alphaAgent, betaAgent],
+            boardStore: store
+        )
+
+        let assignedCount = viewModel.bulkAssignTriageTasks(using: [
+            firstTask.id: alphaAgent.id,
+            secondTask.id: alphaAgent.id
+        ])
+
+        #expect(assignedCount == 2)
+        #expect(viewModel.tasks.first(where: { $0.id == firstTask.id })?.assignedAgentID == alphaAgent.id)
+        #expect(viewModel.tasks.first(where: { $0.id == secondTask.id })?.assignedAgentID == betaAgent.id)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
     @Test("bulk triage reports when no eligible assignment can be made")
     func bulkTriageReportsNoEligibleAssignments() {
         let task = WorkTask(

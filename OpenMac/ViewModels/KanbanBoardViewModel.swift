@@ -810,19 +810,28 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func bulkAssignTriageTasks() -> Int {
+    func bulkAssignTriageTasks(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
         let candidates = triageCandidates()
+        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
         var assignedCount = 0
 
         for task in candidates {
-            guard let agentID = assignableAgents(for: task.id).first?.id else { continue }
             guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else { continue }
-            guard let agent = agents.first(where: { $0.id == agentID }) else { continue }
+            guard let selectedAgent = selectBulkTriageAgent(
+                for: tasks[taskIndex],
+                preferredAgentID: preferredAssignments[task.id],
+                agentsByID: agentsByID,
+                loadsByAgentID: loadsByAgentID
+            ) else {
+                continue
+            }
 
-            let currentLoad = activeTaskCount(for: agentID)
-            tasks[taskIndex].assignedAgentID = agentID
+            let currentLoad = loadsByAgentID[selectedAgent.id, default: 0]
+            tasks[taskIndex].assignedAgentID = selectedAgent.id
+            loadsByAgentID[selectedAgent.id] = currentLoad + 1
             lastUnassignedTaskIDs.remove(task.id)
-            lastAssignmentReasons[task.id] = "manual-bulk[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+            lastAssignmentReasons[task.id] = "manual-bulk[\(selectedAgent.name)] load[\(currentLoad + 1)/\(selectedAgent.maxConcurrentTasks)]"
             assignedCount += 1
         }
 
@@ -836,6 +845,43 @@ final class KanbanBoardViewModel: ObservableObject {
         persistBoardState()
         lastBoardMessage = nil
         return assignedCount
+    }
+
+    private func selectBulkTriageAgent(
+        for task: WorkTask,
+        preferredAgentID: UUID?,
+        agentsByID: [UUID: AgentProfile],
+        loadsByAgentID: [UUID: Int]
+    ) -> AgentProfile? {
+        if let preferredAgentID,
+           let preferredAgent = agentsByID[preferredAgentID],
+           isEligibleForBulkTriage(preferredAgent, task: task, loadsByAgentID: loadsByAgentID) {
+            return preferredAgent
+        }
+
+        return agents
+            .filter { agent in
+                isEligibleForBulkTriage(agent, task: task, loadsByAgentID: loadsByAgentID)
+            }
+            .sorted { lhs, rhs in
+                let leftLoad = loadsByAgentID[lhs.id, default: 0]
+                let rightLoad = loadsByAgentID[rhs.id, default: 0]
+
+                if leftLoad != rightLoad {
+                    return leftLoad < rightLoad
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            .first
+    }
+
+    private func isEligibleForBulkTriage(
+        _ agent: AgentProfile,
+        task: WorkTask,
+        loadsByAgentID: [UUID: Int]
+    ) -> Bool {
+        guard agent.hasSkills(for: task) else { return false }
+        return loadsByAgentID[agent.id, default: 0] < agent.maxConcurrentTasks
     }
 
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {

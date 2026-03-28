@@ -470,7 +470,7 @@ struct ContentView: View {
     }
 
     private func assignAllManually() {
-        _ = viewModel.bulkAssignTriageTasks()
+        _ = viewModel.bulkAssignTriageTasks(using: triageSelectionByTaskID)
         refreshTriageSelections()
         if viewModel.triageCandidates().isEmpty {
             isShowingManualTriageSheet = false
