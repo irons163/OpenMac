@@ -216,6 +216,11 @@ struct ContentView: View {
                     }
                     .disabled(viewModel.boards.count <= 1)
 
+                    Button("Duplicate Current Board") {
+                        duplicateSelectedBoard()
+                    }
+                    .disabled(viewModel.boards.isEmpty)
+
                     Divider()
 
                     ForEach(viewModel.boards) { board in
@@ -278,6 +283,11 @@ struct ContentView: View {
                             isShowingDeleteBoardAlert = true
                         }
                         .disabled(viewModel.boards.count <= 1)
+
+                        Button("Duplicate Board") {
+                            duplicateSelectedBoard()
+                        }
+                        .disabled(viewModel.boards.isEmpty)
                     }
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
@@ -493,6 +503,13 @@ struct ContentView: View {
     private func removeSelectedBoard() {
         let removed = viewModel.removeBoard(viewModel.selectedBoardID)
         if removed {
+            handleBoardContextChanged()
+        }
+    }
+
+    private func duplicateSelectedBoard() {
+        let duplicated = viewModel.duplicateBoard(viewModel.selectedBoardID)
+        if duplicated {
             handleBoardContextChanged()
         }
     }

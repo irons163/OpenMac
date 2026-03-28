@@ -257,6 +257,46 @@ final class KanbanBoardViewModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func duplicateBoard(_ boardID: UUID, name: String? = nil) -> Bool {
+        guard let sourceIndex = boards.firstIndex(where: { $0.id == boardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        let sourceBoard = boards[sourceIndex]
+
+        let resolvedName: String
+        if let name {
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else {
+                lastBoardMessage = "Board name is required"
+                return false
+            }
+            resolvedName = trimmedName
+        } else {
+            resolvedName = uniqueBoardCopyName(for: sourceBoard.name)
+        }
+
+        if boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(resolvedName) == .orderedSame }) {
+            lastBoardMessage = "Board name already exists"
+            return false
+        }
+
+        let copiedBoard = KanbanBoardRecord(
+            name: resolvedName,
+            tasks: sourceBoard.tasks,
+            agents: sourceBoard.agents,
+            wipLimits: sourceBoard.wipLimits
+        )
+        boards.append(copiedBoard)
+        loadBoard(copiedBoard.id)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
     func tasks(in status: KanbanStatus) -> [WorkTask] {
         tasks
             .filter { $0.status == status }
@@ -1102,6 +1142,18 @@ final class KanbanBoardViewModel: ObservableObject {
         lastAssignmentReasons = [:]
         lastBoardMessage = nil
         lastBoardMessageSeverity = nil
+    }
+
+    private func uniqueBoardCopyName(for sourceName: String) -> String {
+        let normalizedSourceName = sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName = normalizedSourceName.isEmpty ? Self.defaultBoardName : normalizedSourceName
+        var candidate = "\(baseName) Copy"
+        var suffix = 2
+        while boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(candidate) == .orderedSame }) {
+            candidate = "\(baseName) Copy \(suffix)"
+            suffix += 1
+        }
+        return candidate
     }
 
     private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {

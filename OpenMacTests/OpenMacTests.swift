@@ -1534,6 +1534,53 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "At least one board is required")
     }
 
+    @Test("duplicates board with copied state and switches context")
+    func duplicatesBoardAndSwitchesContext() {
+        let baselineTask = WorkTask(
+            title: "Baseline",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let baselineAgent = AgentProfile(name: "Baseline Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [baselineTask],
+            agents: [baselineAgent],
+            wipLimits: [.inProgress: 4, .review: 3],
+            boardStore: store
+        )
+        let sourceBoardID = viewModel.selectedBoardID
+
+        let duplicated = viewModel.duplicateBoard(sourceBoardID)
+
+        #expect(duplicated)
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.selectedBoardID != sourceBoardID)
+        #expect(viewModel.selectedBoardName == "Default Board Copy")
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "Baseline")
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents.first?.name == "Baseline Agent")
+        #expect(viewModel.wipLimit(for: .inProgress) == 4)
+        #expect(store.savedSnapshots.last?.boards?.count == 2)
+        #expect(store.savedSnapshots.last?.selectedBoardID == viewModel.selectedBoardID)
+    }
+
+    @Test("rejects board duplication when explicit target name already exists")
+    func rejectsDuplicateBoardCopyName() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Research Board")
+
+        let duplicated = viewModel.duplicateBoard(sourceBoardID, name: "Research Board")
+
+        #expect(!duplicated)
+        #expect(viewModel.lastBoardMessage == "Board name already exists")
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
