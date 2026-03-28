@@ -702,29 +702,29 @@ private struct BoardHealthSummaryView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                SummaryBadge(title: "Total", value: "\(totalTasks)", color: .blue)
-                SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
-                SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
-                SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
+                SummaryBadge(title: "Total", value: "\(totalTasks)", accent: .blue)
+                SummaryBadge(title: "To Do", value: "\(todoTasks)", accent: .indigo)
+                SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", accent: .amber)
+                SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", accent: overloadedAgents > 0 ? .red : .green)
                 SummaryBadge(
                     title: "Health",
                     value: "\(healthScore) \(healthLabel)",
-                    color: healthScoreColor,
+                    accent: healthScoreAccent,
                     helpText: healthBreakdownText
                 )
-                SummaryBadge(title: "InProg WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
-                SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
+                SummaryBadge(title: "InProg WIP", value: "\(inProgressPressure)%", accent: inProgressPressure >= 100 ? .red : .teal)
+                SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", accent: reviewPressure >= 100 ? .red : .mint)
                 Spacer(minLength: 0)
             }
         }
     }
 
-    private var healthScoreColor: Color {
+    private var healthScoreAccent: SummaryBadgeAccent {
         if healthScore >= 85 {
             return .green
         }
         if healthScore >= 60 {
-            return .orange
+            return .amber
         }
         return .red
     }
@@ -808,7 +808,7 @@ private struct SummaryBadge: View {
     @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
-    let color: Color
+    let accent: SummaryBadgeAccent
     var helpText: String?
 
     var body: some View {
@@ -827,7 +827,7 @@ private struct SummaryBadge: View {
         .frame(minWidth: 78, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(color.opacity(colorScheme == .dark ? 0.32 : 0.2), in: RoundedRectangle(cornerRadius: 8))
+        .background(SummaryBadgePalette.color(for: accent, scheme: colorScheme), in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(BoardChromePalette.summaryBadgeBorderColor(for: colorScheme), lineWidth: 1)
@@ -1553,6 +1553,57 @@ enum BoardChromePalette {
 
     static func summaryBadgeBorderColor(for scheme: ColorScheme) -> Color {
         summaryBadgeBorderToken(for: scheme).color
+    }
+}
+
+enum SummaryBadgeAccent: CaseIterable {
+    case blue
+    case indigo
+    case amber
+    case red
+    case green
+    case teal
+    case mint
+}
+
+enum SummaryBadgePalette {
+    static func token(for accent: SummaryBadgeAccent, scheme: ColorScheme) -> BoardMessageColorToken {
+        switch (scheme, accent) {
+        case (.dark, .blue):
+            return BoardMessageColorToken(red: 0.19, green: 0.31, blue: 0.47, opacity: 1.0)
+        case (.dark, .indigo):
+            return BoardMessageColorToken(red: 0.24, green: 0.26, blue: 0.48, opacity: 1.0)
+        case (.dark, .amber):
+            return BoardMessageColorToken(red: 0.43, green: 0.30, blue: 0.12, opacity: 1.0)
+        case (.dark, .red):
+            return BoardMessageColorToken(red: 0.48, green: 0.20, blue: 0.20, opacity: 1.0)
+        case (.dark, .green):
+            return BoardMessageColorToken(red: 0.20, green: 0.39, blue: 0.28, opacity: 1.0)
+        case (.dark, .teal):
+            return BoardMessageColorToken(red: 0.16, green: 0.36, blue: 0.36, opacity: 1.0)
+        case (.dark, .mint):
+            return BoardMessageColorToken(red: 0.15, green: 0.34, blue: 0.29, opacity: 1.0)
+        case (.light, .blue):
+            return BoardMessageColorToken(red: 0.84, green: 0.92, blue: 0.99, opacity: 1.0)
+        case (.light, .indigo):
+            return BoardMessageColorToken(red: 0.87, green: 0.89, blue: 0.98, opacity: 1.0)
+        case (.light, .amber):
+            return BoardMessageColorToken(red: 0.99, green: 0.92, blue: 0.80, opacity: 1.0)
+        case (.light, .red):
+            return BoardMessageColorToken(red: 0.98, green: 0.86, blue: 0.86, opacity: 1.0)
+        case (.light, .green):
+            return BoardMessageColorToken(red: 0.86, green: 0.95, blue: 0.89, opacity: 1.0)
+        case (.light, .teal):
+            return BoardMessageColorToken(red: 0.84, green: 0.95, blue: 0.95, opacity: 1.0)
+        case (.light, .mint):
+            return BoardMessageColorToken(red: 0.86, green: 0.96, blue: 0.92, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.19, green: 0.31, blue: 0.47, opacity: 1.0)
+        }
+    }
+
+    static func color(for accent: SummaryBadgeAccent, scheme: ColorScheme) -> Color {
+        token(for: accent, scheme: scheme).color
     }
 }
 

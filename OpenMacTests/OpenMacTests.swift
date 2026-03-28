@@ -174,6 +174,26 @@ struct AppearanceModeTests {
         #expect(errorContrast >= 4.0)
     }
 
+    @Test("summary badge palette maintains dark mode contrast across all accents")
+    func summaryBadgePaletteDarkContrast() {
+        let primaryText = BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 1.0)
+
+        for accent in SummaryBadgeAccent.allCases {
+            let token = SummaryBadgePalette.token(for: accent, scheme: .dark)
+            #expect(primaryText.contrastRatio(against: token) >= 4.5)
+        }
+    }
+
+    @Test("summary badge palette maintains light mode contrast across all accents")
+    func summaryBadgePaletteLightContrast() {
+        let primaryText = BoardMessageColorToken(red: 0.0, green: 0.0, blue: 0.0, opacity: 1.0)
+
+        for accent in SummaryBadgeAccent.allCases {
+            let token = SummaryBadgePalette.token(for: accent, scheme: .light)
+            #expect(primaryText.contrastRatio(against: token) >= 7.0)
+        }
+    }
+
     @Test("dark task cards stay visually distinct from each kanban column background")
     func darkTaskCardsRemainDistinctFromColumns() {
         let taskCard = BoardSurfacePalette.taskCardToken(for: .dark)
