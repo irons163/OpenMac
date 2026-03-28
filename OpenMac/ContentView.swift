@@ -193,7 +193,7 @@ struct ContentView: View {
                 Menu("Board Actions") {
                     Section("Health") {
                         if viewModel.hasAutoFixableHealthRecommendations {
-                            Button("Apply Health Fixes") {
+                            Button("Apply Health Fixes (\(viewModel.autoFixableHealthRecommendationCount))") {
                                 applyAllHealthRecommendations()
                             }
                             .keyboardShortcut("h", modifiers: [.command, .shift])
@@ -735,8 +735,8 @@ private struct BoardHealthRecommendationsView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if hasMutatingRecommendations {
-                        Button("Apply All") {
+                    if autoFixRecommendationCount > 0 {
+                        Button("Apply All (\(autoFixRecommendationCount))") {
                             onApplyAll()
                         }
                         .buttonStyle(.borderedProminent)
@@ -786,10 +786,8 @@ private struct BoardHealthRecommendationsView: View {
         colorScheme == .dark ? Color.white.opacity(0.20) : Color.black.opacity(0.12)
     }
 
-    private var hasMutatingRecommendations: Bool {
-        recommendations.contains { recommendation in
-            recommendation.action.isAutoFixable
-        }
+    private var autoFixRecommendationCount: Int {
+        recommendations.filter { $0.action.isAutoFixable }.count
     }
 }
 
