@@ -238,6 +238,31 @@ struct AppearanceModeTests {
         #expect(taskBorder.contrastRatio(against: BoardSurfacePalette.taskCardToken(for: .dark)) >= 1.3)
         #expect(supplementaryBorder.contrastRatio(against: BoardSurfacePalette.supplementaryCardToken(for: .dark)) >= 1.3)
     }
+
+    @Test("light chrome surfaces keep readable primary text contrast")
+    func lightChromeSurfacesKeepReadablePrimaryTextContrast() {
+        let primaryText = BoardMessageColorToken(red: 0.0, green: 0.0, blue: 0.0, opacity: 1.0)
+        let counterContrast = primaryText.contrastRatio(against: BoardChromePalette.counterToken(for: .light))
+        let storyPointContrast = primaryText.contrastRatio(against: BoardChromePalette.storyPointToken(for: .light))
+
+        #expect(counterContrast >= 7.0)
+        #expect(storyPointContrast >= 7.0)
+    }
+
+    @Test("light chrome borders remain visible against their host surfaces")
+    func lightChromeBordersRemainVisibleAgainstHostSurfaces() {
+        let columnBorder = BoardChromePalette.columnBorderToken(for: .light)
+        let taskBorder = BoardChromePalette.taskCardBorderToken(for: .light)
+        let supplementaryBorder = BoardChromePalette.supplementaryCardBorderToken(for: .light)
+
+        for status in KanbanStatus.allCases {
+            let column = BoardSurfacePalette.columnToken(for: status, scheme: .light)
+            #expect(columnBorder.contrastRatio(against: column) >= 1.25)
+        }
+
+        #expect(taskBorder.contrastRatio(against: BoardSurfacePalette.taskCardToken(for: .light)) >= 1.25)
+        #expect(supplementaryBorder.contrastRatio(against: BoardSurfacePalette.supplementaryCardToken(for: .light)) >= 1.25)
+    }
 }
 
 struct KanbanFlowTests {

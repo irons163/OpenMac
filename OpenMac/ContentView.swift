@@ -1499,7 +1499,7 @@ enum BoardChromePalette {
         case .dark:
             return BoardMessageColorToken(red: 0.31, green: 0.36, blue: 0.46, opacity: 1.0)
         case .light:
-            return BoardMessageColorToken(red: 0.84, green: 0.87, blue: 0.93, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.72, green: 0.77, blue: 0.84, opacity: 1.0)
         @unknown default:
             return BoardMessageColorToken(red: 0.31, green: 0.36, blue: 0.46, opacity: 1.0)
         }
@@ -1510,7 +1510,7 @@ enum BoardChromePalette {
         case .dark:
             return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.44, opacity: 1.0)
         case .light:
-            return BoardMessageColorToken(red: 0.84, green: 0.87, blue: 0.93, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.72, green: 0.77, blue: 0.84, opacity: 1.0)
         @unknown default:
             return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.44, opacity: 1.0)
         }
@@ -1521,7 +1521,7 @@ enum BoardChromePalette {
         case .dark:
             return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.45, opacity: 1.0)
         case .light:
-            return BoardMessageColorToken(red: 0.83, green: 0.86, blue: 0.92, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.71, green: 0.76, blue: 0.83, opacity: 1.0)
         @unknown default:
             return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.45, opacity: 1.0)
         }
