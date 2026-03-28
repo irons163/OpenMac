@@ -382,6 +382,46 @@ struct KanbanFlowTests {
         #expect(onlyUnassigned.first?.id == unassigned.id)
     }
 
+    @Test("matches multi-word search query across mixed fields")
+    func matchesMultiWordSearchAcrossMixedFields() {
+        let agent = AgentProfile(name: "Panel Crew", skills: ["ux"], maxConcurrentTasks: 2)
+        let crossFieldMatch = WorkTask(
+            title: "Polish panel layout",
+            details: "Add better search parser",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let assigneeMatch = WorkTask(
+            title: "Accessibility fixes",
+            details: "Improve search support",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let partialMatch = WorkTask(
+            title: "Search only",
+            details: "No layout term here",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [crossFieldMatch, assigneeMatch, partialMatch],
+            agents: [agent]
+        )
+
+        let filtered = viewModel.filteredTasks(in: .todo, query: "search panel", assigneeFilter: .all)
+
+        #expect(filtered.count == 2)
+        #expect(filtered.contains(where: { $0.id == crossFieldMatch.id }))
+        #expect(filtered.contains(where: { $0.id == assigneeMatch.id }))
+        #expect(!filtered.contains(where: { $0.id == partialMatch.id }))
+    }
+
     @Test("computes agent load ratio and overload state")
     func computesAgentLoadMetrics() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)

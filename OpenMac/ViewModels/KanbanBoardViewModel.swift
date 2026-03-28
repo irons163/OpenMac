@@ -129,17 +129,26 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func filteredTasks(in status: KanbanStatus, query: String, assigneeFilter: TaskAssigneeFilter) -> [WorkTask] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let queryTerms = normalizedQuery
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
 
         return tasks(in: status).filter { task in
             let matchesQuery: Bool
-            if normalizedQuery.isEmpty {
+            if queryTerms.isEmpty {
                 matchesQuery = true
             } else {
-                let titleMatch = task.title.lowercased().contains(normalizedQuery)
-                let detailsMatch = task.details.lowercased().contains(normalizedQuery)
-                let skillsMatch = task.requiredSkills.contains { $0.lowercased().contains(normalizedQuery) }
-                let assigneeNameMatch = agentName(for: task.assignedAgentID).lowercased().contains(normalizedQuery)
-                matchesQuery = titleMatch || detailsMatch || skillsMatch || assigneeNameMatch
+                let searchableValues = [
+                    task.title.lowercased(),
+                    task.details.lowercased(),
+                    agentName(for: task.assignedAgentID).lowercased()
+                ] + task.requiredSkills.map { $0.lowercased() }
+
+                matchesQuery = queryTerms.allSatisfy { term in
+                    searchableValues.contains { value in
+                        value.contains(term)
+                    }
+                }
             }
 
             let matchesAssignee: Bool
