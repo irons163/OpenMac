@@ -204,6 +204,59 @@ final class KanbanBoardViewModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func renameBoard(_ boardID: UUID, to name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Board name is required"
+            return false
+        }
+
+        guard let index = boards.firstIndex(where: { $0.id == boardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+
+        if boards.contains(where: {
+            $0.id != boardID && $0.name.localizedCaseInsensitiveCompare(trimmedName) == .orderedSame
+        }) {
+            lastBoardMessage = "Board name already exists"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        boards[index].name = trimmedName
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func removeBoard(_ boardID: UUID) -> Bool {
+        guard boards.count > 1 else {
+            lastBoardMessage = "At least one board is required"
+            return false
+        }
+
+        guard let removeIndex = boards.firstIndex(where: { $0.id == boardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        let wasSelectedBoard = boards[removeIndex].id == selectedBoardID
+        boards.remove(at: removeIndex)
+
+        if wasSelectedBoard {
+            let fallbackIndex = min(removeIndex, boards.count - 1)
+            loadBoard(boards[fallbackIndex].id)
+        }
+
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
     func tasks(in status: KanbanStatus) -> [WorkTask] {
         tasks
             .filter { $0.status == status }

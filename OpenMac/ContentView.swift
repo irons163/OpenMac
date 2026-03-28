@@ -10,9 +10,12 @@ struct ContentView: View {
     @State private var isShowingNewAgentSheet = false
     @State private var isShowingEditAgentSheet = false
     @State private var isShowingNewBoardSheet = false
+    @State private var isShowingRenameBoardSheet = false
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
+    @State private var isShowingDeleteBoardAlert = false
     @State private var newBoardName = ""
+    @State private var renameBoardName = ""
     @State private var newTaskTitle = ""
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
@@ -203,6 +206,16 @@ struct ContentView: View {
                     }
                     .keyboardShortcut("b", modifiers: [.command, .option])
 
+                    Button("Rename Current Board") {
+                        openRenameBoardSheet()
+                    }
+                    .disabled(viewModel.boards.isEmpty)
+
+                    Button("Delete Current Board") {
+                        isShowingDeleteBoardAlert = true
+                    }
+                    .disabled(viewModel.boards.count <= 1)
+
                     Divider()
 
                     ForEach(viewModel.boards) { board in
@@ -253,6 +266,18 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
                         .disabled(viewModel.triageCandidates().isEmpty)
+
+                        Divider()
+
+                        Button("Rename Board") {
+                            openRenameBoardSheet()
+                        }
+                        .disabled(viewModel.boards.isEmpty)
+
+                        Button("Delete Board") {
+                            isShowingDeleteBoardAlert = true
+                        }
+                        .disabled(viewModel.boards.count <= 1)
                     }
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
@@ -278,6 +303,15 @@ struct ContentView: View {
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeNewBoardSheet,
                 onCreate: createBoardFromSheet
+            )
+        }
+        .sheet(isPresented: $isShowingRenameBoardSheet) {
+            RenameBoardSheet(
+                name: $renameBoardName,
+                boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+                onCancel: closeRenameBoardSheet,
+                onRename: renameBoardFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -376,6 +410,14 @@ struct ContentView: View {
         .onChange(of: viewModel.selectedBoardID) { _, _ in
             handleBoardContextChanged()
         }
+        .alert("Delete Board?", isPresented: $isShowingDeleteBoardAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                removeSelectedBoard()
+            }
+        } message: {
+            Text("Delete \"\(viewModel.selectedBoardName)\" and all tasks/agents in it? This cannot be undone.")
+        }
         .environment(\.colorScheme, effectiveColorScheme)
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
     }
@@ -423,10 +465,34 @@ struct ContentView: View {
         isShowingNewBoardSheet = false
     }
 
+    private func openRenameBoardSheet() {
+        renameBoardName = viewModel.selectedBoardName
+        isShowingRenameBoardSheet = true
+    }
+
+    private func closeRenameBoardSheet() {
+        renameBoardName = ""
+        isShowingRenameBoardSheet = false
+    }
+
     private func createBoardFromSheet() {
         let created = viewModel.createBoard(name: newBoardName)
         if created {
             closeNewBoardSheet()
+            handleBoardContextChanged()
+        }
+    }
+
+    private func renameBoardFromSheet() {
+        let renamed = viewModel.renameBoard(viewModel.selectedBoardID, to: renameBoardName)
+        if renamed {
+            closeRenameBoardSheet()
+        }
+    }
+
+    private func removeSelectedBoard() {
+        let removed = viewModel.removeBoard(viewModel.selectedBoardID)
+        if removed {
             handleBoardContextChanged()
         }
     }
@@ -1152,6 +1218,37 @@ private struct NewBoardSheet: View {
                 Spacer()
                 Button("Cancel", action: onCancel)
                 Button("Create", action: onCreate)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
+    }
+}
+
+private struct RenameBoardSheet: View {
+    @Binding var name: String
+    let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
+    let onCancel: () -> Void
+    let onRename: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename Board")
+                .font(.title3.weight(.semibold))
+
+            TextField("Board Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            if let boardMessage, !boardMessage.isEmpty {
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Rename", action: onRename)
                     .keyboardShortcut(.defaultAction)
             }
         }

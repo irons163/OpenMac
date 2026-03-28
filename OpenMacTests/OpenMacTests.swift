@@ -1464,6 +1464,76 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.title == "QA task")
     }
 
+    @Test("renames selected board and persists updated board metadata")
+    func renamesSelectedBoardAndPersists() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+        _ = viewModel.createBoard(name: "Research Board")
+        let selectedBoardID = viewModel.selectedBoardID
+
+        let renamed = viewModel.renameBoard(selectedBoardID, to: "Strategy Board")
+
+        #expect(renamed)
+        #expect(viewModel.selectedBoardName == "Strategy Board")
+        #expect(viewModel.boards.contains(where: { $0.id == selectedBoardID && $0.name == "Strategy Board" }))
+        #expect(store.savedSnapshots.last?.boards?.contains(where: { $0.id == selectedBoardID && $0.name == "Strategy Board" }) == true)
+    }
+
+    @Test("rejects board rename when target name already exists")
+    func rejectsDuplicateBoardRename() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let defaultBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Research Board")
+
+        let renamed = viewModel.renameBoard(defaultBoardID, to: "research board")
+
+        #expect(!renamed)
+        #expect(viewModel.lastBoardMessage == "Board name already exists")
+    }
+
+    @Test("removes selected board and switches to remaining board")
+    func removesSelectedBoardAndSwitchesContext() {
+        let baselineTask = WorkTask(
+            title: "Baseline",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [baselineTask], agents: [], boardStore: store)
+        let defaultBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Research Board")
+        let researchBoardID = viewModel.selectedBoardID
+        _ = viewModel.addTask(
+            title: "Research Task",
+            details: "",
+            requiredSkillsText: "analysis",
+            storyPoints: 2
+        )
+
+        let removed = viewModel.removeBoard(researchBoardID)
+
+        #expect(removed)
+        #expect(viewModel.boards.count == 1)
+        #expect(viewModel.selectedBoardID == defaultBoardID)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "Baseline")
+        #expect(store.savedSnapshots.last?.boards?.count == 1)
+    }
+
+    @Test("prevents removing the last remaining board")
+    func preventsRemovingLastBoard() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let removed = viewModel.removeBoard(viewModel.selectedBoardID)
+
+        #expect(!removed)
+        #expect(viewModel.boards.count == 1)
+        #expect(viewModel.lastBoardMessage == "At least one board is required")
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
