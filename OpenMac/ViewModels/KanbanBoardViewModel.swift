@@ -86,6 +86,21 @@ enum AgentTaskExecutionOutcome: Equatable {
 
 protocol AgentTaskExecuting {
     func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome
+}
+
+extension AgentTaskExecuting {
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent)
+    }
 }
 
 struct DefaultAgentTaskExecutor: AgentTaskExecuting {
@@ -103,8 +118,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     var codexBridgePreflight: () throws -> Void = {
         try Self.defaultCodexBridgePreflight()
     }
-    var codexBridgeRunner: (CodexBridgeRequest) throws -> String = { request in
-        try Self.defaultCodexBridgeRunner(request: request)
+    var codexBridgeRunner: (CodexBridgeRequest, @escaping (_ update: String) -> Void) throws -> String = { request, onProgress in
+        try Self.defaultCodexBridgeRunner(request: request, onProgress: onProgress)
+    }
+    var codexBridgeRecovery: (_ reason: String, _ onProgress: @escaping (_ update: String) -> Void) throws -> Void = { reason, onProgress in
+        try Self.defaultCodexBridgeRecovery(reason: reason, onProgress: onProgress)
     }
 
     init(
@@ -114,8 +132,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         codexBridgePreflight: @escaping () throws -> Void = {
             try Self.defaultCodexBridgePreflight()
         },
-        codexBridgeRunner: @escaping (CodexBridgeRequest) throws -> String = { request in
-            try Self.defaultCodexBridgeRunner(request: request)
+        codexBridgeRunner: @escaping (CodexBridgeRequest, @escaping (_ update: String) -> Void) throws -> String = { request, onProgress in
+            try Self.defaultCodexBridgeRunner(request: request, onProgress: onProgress)
+        },
+        codexBridgeRecovery: @escaping (_ reason: String, _ onProgress: @escaping (_ update: String) -> Void) throws -> Void = { reason, onProgress in
+            try Self.defaultCodexBridgeRecovery(reason: reason, onProgress: onProgress)
         }
     ) {
         self.environmentProvider = environmentProvider
@@ -123,6 +144,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         self.timeoutSeconds = timeoutSeconds
         self.codexBridgePreflight = codexBridgePreflight
         self.codexBridgeRunner = codexBridgeRunner
+        self.codexBridgeRecovery = codexBridgeRecovery
     }
 
     init(
@@ -137,13 +159,24 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             codexBridgePreflight: {
                 try Self.defaultCodexBridgePreflight()
             },
-            codexBridgeRunner: { request in
-                try Self.defaultCodexBridgeRunner(request: request)
+            codexBridgeRunner: { request, onProgress in
+                try Self.defaultCodexBridgeRunner(request: request, onProgress: onProgress)
+            },
+            codexBridgeRecovery: { reason, onProgress in
+                try Self.defaultCodexBridgeRecovery(reason: reason, onProgress: onProgress)
             }
         )
     }
 
     func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent) { _ in }
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
         let runtimeProfile = agent.runtimeProfile ?? AgentRuntimeProfile(provider: .localMock)
         let provider = runtimeProfile.provider
         switch provider {
@@ -151,28 +184,46 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             let summary = "Mock run completed by \(agent.name) for \"\(task.title)\""
             return .success(summary: summary)
         case .openAICompatible:
-            return runOpenAICompatible(task: task, agent: agent, runtimeProfile: runtimeProfile)
+            return runOpenAICompatible(
+                task: task,
+                agent: agent,
+                runtimeProfile: runtimeProfile,
+                onProgress: onProgress
+            )
         }
     }
 
     private func runOpenAICompatible(
         task: WorkTask,
         agent: AgentProfile,
-        runtimeProfile: AgentRuntimeProfile
+        runtimeProfile: AgentRuntimeProfile,
+        onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
         switch runtimeProfile.openAIAuthMode {
         case .apiKey:
-            return runOpenAICompatibleWithAPIKey(task: task, agent: agent, runtimeProfile: runtimeProfile)
+            return runOpenAICompatibleWithAPIKey(
+                task: task,
+                agent: agent,
+                runtimeProfile: runtimeProfile,
+                onProgress: onProgress
+            )
         case .codexBridge:
-            return runOpenAICompatibleWithCodexBridge(task: task, agent: agent, runtimeProfile: runtimeProfile)
+            return runOpenAICompatibleWithCodexBridge(
+                task: task,
+                agent: agent,
+                runtimeProfile: runtimeProfile,
+                onProgress: onProgress
+            )
         }
     }
 
     private func runOpenAICompatibleWithAPIKey(
         task: WorkTask,
         agent: AgentProfile,
-        runtimeProfile: AgentRuntimeProfile
+        runtimeProfile: AgentRuntimeProfile,
+        onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
+        onProgress("OpenAI request started for \"\(task.title)\"")
         let environment = environmentProvider()
         let apiKey = resolvedAPIKey(from: environment)
         guard let apiKey else {
@@ -205,6 +256,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             guard let summary, !summary.isEmpty else {
                 return .failure(message: "OpenAI-compatible runtime returned empty output")
             }
+            onProgress("OpenAI response received")
             return .success(summary: summary)
         } catch {
             return .failure(message: "OpenAI-compatible run failed: \(error.localizedDescription)")
@@ -214,8 +266,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     private func runOpenAICompatibleWithCodexBridge(
         task: WorkTask,
         agent: AgentProfile,
-        runtimeProfile: AgentRuntimeProfile
+        runtimeProfile: AgentRuntimeProfile,
+        onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
+        onProgress("Codex Bridge started for \"\(task.title)\"")
         let prompt = buildCodexBridgePrompt(task: task, agent: agent)
         let request = CodexBridgeRequest(
             prompt: prompt,
@@ -225,13 +279,36 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let trimmedModel = runtimeProfile.model.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try codexBridgePreflight()
-            let summary = try codexBridgeRunner(request).trimmingCharacters(in: .whitespacesAndNewlines)
+            let summary = try codexBridgeRunner(request, onProgress).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !summary.isEmpty else {
                 return .failure(message: "Codex Bridge returned empty output")
             }
             return .success(summary: summary)
         } catch {
             let initialRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if Self.isCodexUsageLimitError(initialRawFailure) {
+                do {
+                    try codexBridgeRecovery(initialRawFailure, onProgress)
+                    onProgress("Codex app restarted. Retrying interrupted run...")
+                    let recoveredSummary = try codexBridgeRunner(request, onProgress)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !recoveredSummary.isEmpty else {
+                        return .failure(message: "Codex Bridge returned empty output")
+                    }
+                    return .success(summary: recoveredSummary)
+                } catch {
+                    let recoveryRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawFailure = """
+                    Initial run failed due to Codex usage limit or quota.
+                    \(initialRawFailure)
+
+                    Automatic Codex app restart retry failed.
+                    \(recoveryRawFailure)
+                    """
+                    return codexBridgeFailureOutcome(from: rawFailure)
+                }
+            }
 
             // ChatGPT account login with Codex may reject some API models (for example gpt-4.1-mini).
             // Retry once without --model so Codex profile default can be used automatically.
@@ -243,7 +320,8 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                     profile: runtimeProfile.codexProfile
                 )
                 do {
-                    let fallbackSummary = try codexBridgeRunner(fallbackRequest)
+                    onProgress("Configured model rejected by Codex account. Retrying without explicit model.")
+                    let fallbackSummary = try codexBridgeRunner(fallbackRequest, onProgress)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !fallbackSummary.isEmpty else {
                         return .failure(message: "Codex Bridge returned empty output")
@@ -281,6 +359,18 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         return normalized.contains("model is not supported when using codex with a chatgpt account")
     }
 
+    private static func isCodexUsageLimitError(_ rawFailure: String) -> Bool {
+        let normalized = rawFailure.lowercased()
+        if normalized.contains("insufficient_quota") { return true }
+        if normalized.contains("quota exceeded") { return true }
+        if normalized.contains("usage limit") { return true }
+        if normalized.contains("rate limit exceeded") { return true }
+        if normalized.contains("remaining usage") && normalized.contains("insufficient") { return true }
+        if normalized.contains("insufficient") && normalized.contains("credit") { return true }
+        if normalized.contains("billing hard limit") { return true }
+        return false
+    }
+
     private static func summarizeCodexBridgeFailure(_ rawFailure: String) -> String {
         let trimmed = rawFailure.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -290,6 +380,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let normalized = trimmed.lowercased()
         if isCodexChatGPTModelUnsupported(trimmed) {
             return "Configured model is not supported for Codex Bridge with ChatGPT login. Leave model blank to use Codex default, or switch to a Codex-supported model."
+        }
+        if isCodexUsageLimitError(trimmed) {
+            return "Codex usage limit/quota appears exhausted. OpenMac attempted a Codex app restart and retry once. Please wait for quota reset or top up usage, then retry."
         }
         if normalized.contains("401 unauthorized") || normalized.contains("missing bearer or basic authentication") {
             let loginCommand = codexLoginCommandForCurrentProfile()
@@ -498,7 +591,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
     }
 
-    private static func defaultCodexBridgeRunner(request: CodexBridgeRequest) throws -> String {
+    private static func defaultCodexBridgeRunner(
+        request: CodexBridgeRequest,
+        onProgress: @escaping (_ update: String) -> Void
+    ) throws -> String {
         guard let codexExecutable = resolvedCodexExecutableURL() else {
             throw ExecutorError.codexBridgeFailed(
                 "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
@@ -536,13 +632,32 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = outputPipe
+        let outputHandle = outputPipe.fileHandleForReading
+        var streamedChunks: [String] = []
+        outputHandle.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
+            let trimmedChunk = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedChunk.isEmpty else { return }
+            streamedChunks.append(trimmedChunk)
+            onProgress(trimmedChunk)
+        }
 
         try process.run()
         process.waitUntilExit()
+        outputHandle.readabilityHandler = nil
 
-        let rawOutputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let rawOutput = String(data: rawOutputData, encoding: .utf8)?
+        let trailingOutputData = outputHandle.readDataToEndOfFile()
+        let trailingOutput = String(data: trailingOutputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var rawOutputParts = streamedChunks
+        if !trailingOutput.isEmpty {
+            rawOutputParts.append(trailingOutput)
+        }
+        let rawOutput = rawOutputParts
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard process.terminationStatus == 0 else {
             let message = rawOutput.isEmpty ? "codex exited with code \(process.terminationStatus)" : rawOutput
@@ -578,6 +693,32 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
     }
 
+    private static func defaultCodexBridgeRecovery(
+        reason: String,
+        onProgress: @escaping (_ update: String) -> Void
+    ) throws {
+        onProgress("Codex usage limit detected. Restarting Codex app...")
+
+        _ = try? runSystemCommand(
+            executablePath: "/usr/bin/osascript",
+            arguments: ["-e", "tell application \"Codex\" to quit"]
+        )
+
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let launch = try runSystemCommand(
+            executablePath: "/usr/bin/open",
+            arguments: ["-a", "Codex"]
+        )
+        guard launch.code == 0 else {
+            let output = launch.output.isEmpty ? "open exited with code \(launch.code)" : launch.output
+            throw ExecutorError.codexBridgeFailed("Codex app restart failed: \(output)")
+        }
+
+        Thread.sleep(forTimeInterval: 1.5)
+        onProgress("Codex app restart complete. Resuming task...")
+    }
+
     private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
         guard let executableURL = resolvedCodexExecutableURL() else {
             throw ExecutorError.codexBridgeFailed(
@@ -587,6 +728,28 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
         let process = Process()
         process.executableURL = executableURL
+        process.arguments = arguments
+        process.environment = codexBridgeProcessEnvironment()
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (process.terminationStatus, output)
+    }
+
+    private static func runSystemCommand(
+        executablePath: String,
+        arguments: [String]
+    ) throws -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
         process.environment = codexBridgeProcessEnvironment()
 
@@ -2052,7 +2215,9 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
             return false
         }
-        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+            self.captureExecutionProgress(update, for: prepared)
+        }
         finalizeTaskExecution(prepared, outcome: outcome)
         return true
     }
@@ -2064,7 +2229,11 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         let executor = taskExecutor
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+                DispatchQueue.main.async { [weak self] in
+                    self?.captureExecutionProgress(update, for: prepared)
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
                     completion(false)
@@ -2086,7 +2255,9 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
             return false
         }
-        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+            self.captureExecutionProgress(update, for: prepared)
+        }
         finalizeTaskExecution(prepared, outcome: outcome)
         return true
     }
@@ -2104,7 +2275,11 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         let executor = taskExecutor
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent)
+            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+                DispatchQueue.main.async { [weak self] in
+                    self?.captureExecutionProgress(update, for: prepared)
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
                     completion(false)
@@ -2544,6 +2719,37 @@ final class KanbanBoardViewModel: ObservableObject {
             events.removeFirst(events.count - Self.maxAgentExecutionEventsPerAgent)
         }
         agentExecutionEventsByAgentID[agentID] = events
+    }
+
+    private func captureExecutionProgress(_ update: String, for prepared: PreparedTaskExecution) {
+        let normalized = normalizeExecutionText(update)
+        guard let normalized else { return }
+
+        let lines = normalized
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if lines.isEmpty {
+            appendAgentExecutionEvent(
+                agentID: prepared.agent.id,
+                taskID: prepared.taskID,
+                taskTitle: prepared.taskSnapshot.title,
+                status: .running,
+                message: normalized
+            )
+            return
+        }
+
+        for line in lines {
+            appendAgentExecutionEvent(
+                agentID: prepared.agent.id,
+                taskID: prepared.taskID,
+                taskTitle: prepared.taskSnapshot.title,
+                status: .running,
+                message: line
+            )
+        }
     }
 
     private func prepareTaskExecution(_ taskID: UUID, requiresTaskDetails: Bool) -> PreparedTaskExecution? {

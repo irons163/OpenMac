@@ -201,7 +201,7 @@ struct AgentTaskExecutorTests {
             urlSession: .shared,
             timeoutSeconds: 1,
             codexBridgePreflight: {},
-            codexBridgeRunner: { request in
+            codexBridgeRunner: { request, _ in
                 #expect(request.model == "gpt-5.2")
                 #expect(request.profile == "default")
                 #expect(request.prompt.contains("Generate dispatch notes"))
@@ -243,7 +243,7 @@ struct AgentTaskExecutorTests {
             urlSession: .shared,
             timeoutSeconds: 1,
             codexBridgePreflight: {},
-            codexBridgeRunner: { _ in
+            codexBridgeRunner: { _, _ in
                 struct BridgeError: LocalizedError {
                     var errorDescription: String? { "codex unavailable" }
                 }
@@ -286,7 +286,7 @@ struct AgentTaskExecutorTests {
             urlSession: .shared,
             timeoutSeconds: 1,
             codexBridgePreflight: {},
-            codexBridgeRunner: { _ in
+            codexBridgeRunner: { _, _ in
                 struct BridgeError: LocalizedError {
                     var errorDescription: String? {
                         """
@@ -310,6 +310,68 @@ struct AgentTaskExecutorTests {
             #expect(message.contains("--- debug ---"))
             #expect(message.contains("failed to connect to websocket"))
         }
+    }
+
+    @Test("default executor restarts codex and retries when quota is exhausted")
+    func openAICompatibleCodexBridgeRecoversFromQuotaError() {
+        let task = WorkTask(
+            title: "Bridge quota recovery",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var runAttemptCount = 0
+        var recoveryCalled = false
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { _, _ in
+                runAttemptCount += 1
+                if runAttemptCount == 1 {
+                    struct QuotaError: LocalizedError {
+                        var errorDescription: String? {
+                            "usage limit exceeded: insufficient_quota"
+                        }
+                    }
+                    throw QuotaError()
+                }
+                return "Recovered after restart"
+            },
+            codexBridgeRecovery: { reason, onProgress in
+                recoveryCalled = true
+                #expect(reason.contains("insufficient_quota"))
+                onProgress("Restarted Codex app")
+            }
+        )
+
+        var progressEvents: [String] = []
+        let outcome = executor.execute(task: task, agent: agent) { update in
+            progressEvents.append(update)
+        }
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Recovered after restart")
+        case .failure:
+            #expect(Bool(false), "Expected Codex quota auto-recovery to succeed")
+        }
+        #expect(recoveryCalled)
+        #expect(runAttemptCount == 2)
+        #expect(progressEvents.contains(where: { $0.contains("Codex Bridge started") }))
+        #expect(progressEvents.contains(where: { $0.contains("Retrying interrupted run") }))
     }
 
     @Test("default executor codex bridge preflight failure stops execution")
@@ -342,7 +404,7 @@ struct AgentTaskExecutorTests {
                 }
                 throw PreflightError()
             },
-            codexBridgeRunner: { _ in
+            codexBridgeRunner: { _, _ in
                 runnerCalled = true
                 return "should not run"
             }
@@ -385,7 +447,7 @@ struct AgentTaskExecutorTests {
             urlSession: .shared,
             timeoutSeconds: 1,
             codexBridgePreflight: {},
-            codexBridgeRunner: { request in
+            codexBridgeRunner: { request, _ in
                 seenRequests.append(request)
                 if seenRequests.count == 1 {
                     struct UnsupportedModelError: LocalizedError {
@@ -3881,6 +3943,38 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
+    @Test("run task execution captures streaming progress updates for agent console")
+    func runTaskExecutionCapturesStreamingProgressUpdates() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Streaming task",
+            details: "Track progress logs",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Done")],
+            progressUpdatesByTaskID: [task.id: ["Planning changes", "Applying patch"]]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let events = viewModel.executionEvents(for: agent.id)
+
+        #expect(executed)
+        #expect(events.contains(where: { $0.message == "Planning changes" }))
+        #expect(events.contains(where: { $0.message == "Applying patch" }))
+        #expect(events.contains(where: { $0.status == .succeeded }))
+    }
+
     @Test("run task execution marks blocker summaries as failed")
     func runTaskExecutionMarksBlockerSummaryAsFailed() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -4560,18 +4654,33 @@ struct KanbanPersistenceTests {
 
 private struct StubTaskExecutor: AgentTaskExecuting {
     let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
+    let progressUpdatesByTaskID: [UUID: [String]]
     let fallbackOutcome: AgentTaskExecutionOutcome
 
     init(
         outcomesByTaskID: [UUID: AgentTaskExecutionOutcome] = [:],
+        progressUpdatesByTaskID: [UUID: [String]] = [:],
         fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok")
     ) {
         self.outcomesByTaskID = outcomesByTaskID
+        self.progressUpdatesByTaskID = progressUpdatesByTaskID
         self.fallbackOutcome = fallbackOutcome
     }
 
     func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
         outcomesByTaskID[task.id] ?? fallbackOutcome
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        let updates = progressUpdatesByTaskID[task.id] ?? []
+        for update in updates {
+            onProgress(update)
+        }
+        return execute(task: task, agent: agent)
     }
 }
 
