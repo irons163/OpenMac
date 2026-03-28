@@ -3328,6 +3328,165 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.contains(where: { $0.title == "Task Copy 3" }))
     }
 
+    @Test("run task execution success moves todo task to review and persists execution record")
+    func runTaskExecutionSuccessMovesTaskToReview() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Generate UI spec",
+            details: "Produce handoff notes",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Spec generated")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+
+        #expect(executed)
+        #expect(updatedTask?.status == .review)
+        #expect(record?.status == .succeeded)
+        #expect(record?.runCount == 1)
+        #expect(record?.lastOutputSummary == "Spec generated")
+        #expect(record?.lastError == nil)
+        #expect(record?.lastAgentID == agent.id)
+        #expect(record?.lastStartedAt != nil)
+        #expect(record?.lastFinishedAt != nil)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("run task execution rejects unassigned task")
+    func runTaskExecutionRejectsUnassignedTask() {
+        let task = WorkTask(
+            title: "Unassigned execution",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(!executed)
+        #expect(viewModel.tasks.first?.status == .todo)
+        #expect(viewModel.tasks.first?.executionRecord == nil)
+        #expect(viewModel.lastBoardMessage == "Assign an agent before running this task")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("run task execution failure writes failed record and keeps task in progress")
+    func runTaskExecutionFailureWritesRecord() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Run command",
+            details: "Expect failure",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .failure(message: "Tool timeout")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+
+        #expect(executed)
+        #expect(updatedTask?.status == .inProgress)
+        #expect(record?.status == .failed)
+        #expect(record?.runCount == 1)
+        #expect(record?.lastError == "Tool timeout")
+        #expect(record?.lastOutputSummary == nil)
+        #expect(record?.lastFinishedAt != nil)
+        #expect(viewModel.lastBoardMessage == "Execution failed: Tool timeout")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("retry task execution requires previous failed run")
+    func retryTaskExecutionRequiresFailedRun() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Already passed",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(status: .succeeded, runCount: 1)
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let retried = viewModel.retryTaskExecution(task.id)
+
+        #expect(!retried)
+        #expect(viewModel.lastBoardMessage == "Only failed executions can be retried")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("retry task execution reruns failed task and increments run count")
+    func retryTaskExecutionRerunsFailedTask() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Retry me",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(status: .failed, runCount: 1, lastError: "network")
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Retry succeeded")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let retried = viewModel.retryTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+
+        #expect(retried)
+        #expect(updatedTask?.status == .review)
+        #expect(record?.status == .succeeded)
+        #expect(record?.runCount == 2)
+        #expect(record?.lastOutputSummary == "Retry succeeded")
+        #expect(record?.lastError == nil)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
     @Test("removing unknown task returns false and does not persist")
     func rejectsRemovingUnknownTask() {
         let task = WorkTask(
@@ -3802,6 +3961,23 @@ struct KanbanPersistenceTests {
         #expect(!removed)
         #expect(viewModel.agents.count == 1)
         #expect(store.savedSnapshots.isEmpty)
+    }
+}
+
+private struct StubTaskExecutor: AgentTaskExecuting {
+    let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
+    let fallbackOutcome: AgentTaskExecutionOutcome
+
+    init(
+        outcomesByTaskID: [UUID: AgentTaskExecutionOutcome] = [:],
+        fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok")
+    ) {
+        self.outcomesByTaskID = outcomesByTaskID
+        self.fallbackOutcome = fallbackOutcome
+    }
+
+    func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
+        outcomesByTaskID[task.id] ?? fallbackOutcome
     }
 }
 

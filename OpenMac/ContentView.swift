@@ -170,6 +170,8 @@ struct ContentView: View {
                                 onDuplicateTask: duplicateTask,
                                 onUnassignTask: unassignTask,
                                 onAutoAssignTask: autoAssignTask,
+                                onRunTaskExecution: runTaskExecution,
+                                onRetryTaskExecution: retryTaskExecution,
                                 assignableAgents: { task in
                                     viewModel.assignableAgents(for: task.id)
                                 },
@@ -862,6 +864,20 @@ struct ContentView: View {
         }
     }
 
+    private func runTaskExecution(_ taskID: UUID) {
+        let executed = viewModel.runTaskExecution(taskID)
+        if executed {
+            refreshTriageSelections()
+        }
+    }
+
+    private func retryTaskExecution(_ taskID: UUID) {
+        let retried = viewModel.retryTaskExecution(taskID)
+        if retried {
+            refreshTriageSelections()
+        }
+    }
+
     private func assignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
         let assigned = viewModel.manuallyAssignTask(taskID, to: agentID)
         if assigned {
@@ -1224,6 +1240,8 @@ private struct KanbanColumnView: View {
     let onDuplicateTask: (UUID) -> Void
     let onUnassignTask: (UUID) -> Void
     let onAutoAssignTask: (UUID) -> Void
+    let onRunTaskExecution: (UUID) -> Void
+    let onRetryTaskExecution: (UUID) -> Void
     let assignableAgents: (WorkTask) -> [AgentProfile]
     let reassignableAgents: (WorkTask) -> [AgentProfile]
     let onManualAssignTask: (UUID, UUID) -> Void
@@ -1273,11 +1291,16 @@ private struct KanbanColumnView: View {
                         canMoveForward: status.next != nil,
                         canUnassign: task.assignedAgentID != nil && task.status != .done,
                         canAutoAssign: task.status == .todo && task.assignedAgentID == nil,
+                        canRunAgent: task.assignedAgentID != nil && task.status != .done,
+                        canRetryAgent: task.assignedAgentID != nil && task.executionRecord?.status == .failed && task.status != .done,
+                        executionRecord: task.executionRecord,
                         manualAssignableAgents: assignableAgents(task),
                         reassignableAgents: reassignableAgents(task),
                         moveToBoardTargets: moveToBoardTargets,
                         onEdit: { onEditTask(task) },
                         onAutoAssign: { onAutoAssignTask(task.id) },
+                        onRunAgent: { onRunTaskExecution(task.id) },
+                        onRetryAgent: { onRetryTaskExecution(task.id) },
                         onManualAssign: { agentID in
                             onManualAssignTask(task.id, agentID)
                         },
@@ -1347,11 +1370,16 @@ private struct TaskCardView: View {
     let canMoveForward: Bool
     let canUnassign: Bool
     let canAutoAssign: Bool
+    let canRunAgent: Bool
+    let canRetryAgent: Bool
+    let executionRecord: TaskExecutionRecord?
     let manualAssignableAgents: [AgentProfile]
     let reassignableAgents: [AgentProfile]
     let moveToBoardTargets: [KanbanBoardRecord]
     let onEdit: () -> Void
     let onAutoAssign: () -> Void
+    let onRunAgent: () -> Void
+    let onRetryAgent: () -> Void
     let onManualAssign: (UUID) -> Void
     let onReassign: (UUID) -> Void
     let onUnassign: () -> Void
@@ -1399,6 +1427,29 @@ private struct TaskCardView: View {
                     .lineLimit(3)
             }
 
+            if let executionRecord {
+                HStack(spacing: 8) {
+                    Text("Runs: \(executionRecord.runCount)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                    Text(executionStatusLabel(for: executionRecord.status))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(executionStatusColor(for: executionRecord.status))
+                }
+
+                if let output = executionRecord.lastOutputSummary, executionRecord.status == .succeeded {
+                    Text("Output: \(output)")
+                        .font(.caption2)
+                        .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
+                        .lineLimit(3)
+                } else if let lastError = executionRecord.lastError, executionRecord.status == .failed {
+                    Text("Error: \(lastError)")
+                        .font(.caption2)
+                        .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
+                        .lineLimit(3)
+                }
+            }
+
             HStack(spacing: 8) {
                 if canMoveBackward {
                     Button {
@@ -1431,6 +1482,12 @@ private struct TaskCardView: View {
             Button("Edit Task", action: onEdit)
             if canAutoAssign {
                 Button("Auto Assign This Task", action: onAutoAssign)
+            }
+            if canRunAgent {
+                Button("Run Agent", action: onRunAgent)
+            }
+            if canRetryAgent {
+                Button("Retry Last Run", action: onRetryAgent)
             }
             if !manualAssignableAgents.isEmpty {
                 Menu("Assign To Agent") {
@@ -1485,6 +1542,28 @@ private struct TaskCardView: View {
 
     private var taskCardBorder: Color {
         BoardChromePalette.taskCardBorderColor(for: colorScheme)
+    }
+
+    private func executionStatusLabel(for status: TaskExecutionStatus) -> String {
+        switch status {
+        case .running:
+            return "Running"
+        case .succeeded:
+            return "Succeeded"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private func executionStatusColor(for status: TaskExecutionStatus) -> Color {
+        switch status {
+        case .running:
+            return BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
+        case .succeeded:
+            return BoardSemanticTextPalette.color(for: .success, scheme: colorScheme)
+        case .failed:
+            return BoardSemanticTextPalette.color(for: .error, scheme: colorScheme)
+        }
     }
 }
 

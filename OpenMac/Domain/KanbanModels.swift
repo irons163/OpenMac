@@ -41,22 +41,89 @@ enum KanbanStatus: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum AgentRuntimeProvider: String, CaseIterable, Codable, Identifiable {
+    case localMock
+    case openAICompatible
+
+    var id: String { rawValue }
+}
+
+struct AgentRuntimeProfile: Equatable, Codable {
+    var provider: AgentRuntimeProvider
+    var model: String
+    var endpoint: String?
+    var tools: Set<String>
+
+    init(
+        provider: AgentRuntimeProvider = .localMock,
+        model: String = "mock-dispatch-v1",
+        endpoint: String? = nil,
+        tools: [String] = []
+    ) {
+        self.provider = provider
+        self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.endpoint = endpoint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.tools = Set(tools.map(Self.normalizeTool))
+    }
+
+    nonisolated private static func normalizeTool(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+enum TaskExecutionStatus: String, Codable, Equatable {
+    case running
+    case succeeded
+    case failed
+}
+
+struct TaskExecutionRecord: Equatable, Codable {
+    var status: TaskExecutionStatus
+    var runCount: Int
+    var lastStartedAt: Date?
+    var lastFinishedAt: Date?
+    var lastOutputSummary: String?
+    var lastError: String?
+    var lastAgentID: UUID?
+
+    init(
+        status: TaskExecutionStatus,
+        runCount: Int = 0,
+        lastStartedAt: Date? = nil,
+        lastFinishedAt: Date? = nil,
+        lastOutputSummary: String? = nil,
+        lastError: String? = nil,
+        lastAgentID: UUID? = nil
+    ) {
+        self.status = status
+        self.runCount = max(0, runCount)
+        self.lastStartedAt = lastStartedAt
+        self.lastFinishedAt = lastFinishedAt
+        self.lastOutputSummary = lastOutputSummary
+        self.lastError = lastError
+        self.lastAgentID = lastAgentID
+    }
+}
+
 struct AgentProfile: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
     var skills: Set<String>
     var maxConcurrentTasks: Int
+    var runtimeProfile: AgentRuntimeProfile?
 
     init(
         id: UUID = UUID(),
         name: String,
         skills: [String],
-        maxConcurrentTasks: Int = 3
+        maxConcurrentTasks: Int = 3,
+        runtimeProfile: AgentRuntimeProfile? = nil
     ) {
         self.id = id
         self.name = name
         self.skills = Set(skills.map(Self.normalizeSkill))
         self.maxConcurrentTasks = max(1, maxConcurrentTasks)
+        self.runtimeProfile = runtimeProfile
     }
 
     func hasSkills(for task: WorkTask) -> Bool {
@@ -76,6 +143,7 @@ struct WorkTask: Identifiable, Equatable, Codable {
     var storyPoints: Int
     var status: KanbanStatus
     var assignedAgentID: UUID?
+    var executionRecord: TaskExecutionRecord?
     let createdAt: Date
 
     init(
@@ -86,6 +154,7 @@ struct WorkTask: Identifiable, Equatable, Codable {
         storyPoints: Int,
         status: KanbanStatus,
         assignedAgentID: UUID?,
+        executionRecord: TaskExecutionRecord? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -95,6 +164,7 @@ struct WorkTask: Identifiable, Equatable, Codable {
         self.storyPoints = max(1, storyPoints)
         self.status = status
         self.assignedAgentID = assignedAgentID
+        self.executionRecord = executionRecord
         self.createdAt = createdAt
     }
 

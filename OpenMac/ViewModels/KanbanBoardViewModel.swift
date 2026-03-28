@@ -79,6 +79,28 @@ struct GlobalTaskSearchResult: Identifiable, Equatable {
     }
 }
 
+enum AgentTaskExecutionOutcome: Equatable {
+    case success(summary: String)
+    case failure(message: String)
+}
+
+protocol AgentTaskExecuting {
+    func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome
+}
+
+struct DefaultAgentTaskExecutor: AgentTaskExecuting {
+    func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
+        let provider = agent.runtimeProfile?.provider ?? .localMock
+        switch provider {
+        case .localMock:
+            let summary = "Mock run completed by \(agent.name) for \"\(task.title)\""
+            return .success(summary: summary)
+        case .openAICompatible:
+            return .failure(message: "OpenAI-compatible runtime is not configured yet")
+        }
+    }
+}
+
 final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
@@ -99,6 +121,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published var agents: [AgentProfile]
 
     private let assignmentEngine: AutoAssignmentEngine
+    private let taskExecutor: any AgentTaskExecuting
     private let boardStore: KanbanBoardStore?
     private static let defaultBoardName = "Default Board"
 
@@ -151,6 +174,7 @@ final class KanbanBoardViewModel: ObservableObject {
         agents: [AgentProfile],
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil
     ) {
         let normalizedLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
@@ -168,6 +192,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.agents = agents
         self.wipLimits = normalizedLimits
         self.assignmentEngine = assignmentEngine
+        self.taskExecutor = taskExecutor
         self.boardStore = boardStore
     }
 
@@ -175,6 +200,7 @@ final class KanbanBoardViewModel: ObservableObject {
         boards: [KanbanBoardRecord],
         selectedBoardID: UUID,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil
     ) {
         let resolvedBoard: KanbanBoardRecord
@@ -192,6 +218,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.agents = resolvedBoard.agents
         self.wipLimits = resolvedBoard.wipLimits
         self.assignmentEngine = assignmentEngine
+        self.taskExecutor = taskExecutor
         self.boardStore = boardStore
     }
 
@@ -1349,6 +1376,99 @@ final class KanbanBoardViewModel: ObservableObject {
         lastAssignmentReasons[taskID]
     }
 
+    func executionRecord(for taskID: UUID) -> TaskExecutionRecord? {
+        tasks.first(where: { $0.id == taskID })?.executionRecord
+    }
+
+    @discardableResult
+    func runTaskExecution(_ taskID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        guard tasks[taskIndex].status != .done else {
+            lastBoardMessage = "Done tasks cannot be executed"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        guard let agentID = tasks[taskIndex].assignedAgentID,
+              let agent = agents.first(where: { $0.id == agentID }) else {
+            lastBoardMessage = "Assign an agent before running this task"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        if tasks[taskIndex].status == .todo {
+            guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
+                let limit = wipLimits[.inProgress] ?? 0
+                lastBoardMessage = "WIP limit reached for In Progress (\(limit))"
+                lastBoardMessageSeverity = .warning
+                return false
+            }
+            tasks[taskIndex].status = .inProgress
+        }
+
+        var record = tasks[taskIndex].executionRecord ?? TaskExecutionRecord(status: .running)
+        record.status = .running
+        record.runCount = max(0, record.runCount) + 1
+        record.lastStartedAt = Date()
+        record.lastFinishedAt = nil
+        record.lastOutputSummary = nil
+        record.lastError = nil
+        record.lastAgentID = agent.id
+        tasks[taskIndex].executionRecord = record
+
+        let outcome = taskExecutor.execute(task: tasks[taskIndex], agent: agent)
+        let finishedAt = Date()
+
+        switch outcome {
+        case let .success(summary):
+            var finishedRecord = tasks[taskIndex].executionRecord ?? record
+            finishedRecord.status = .succeeded
+            finishedRecord.lastFinishedAt = finishedAt
+            finishedRecord.lastOutputSummary = normalizeExecutionText(summary)
+            finishedRecord.lastError = nil
+            finishedRecord.lastAgentID = agent.id
+            tasks[taskIndex].executionRecord = finishedRecord
+
+            if tasks[taskIndex].status == .inProgress {
+                if isWIPLimitReached(for: .review, excluding: taskID) {
+                    let limit = wipLimits[.review] ?? 0
+                    lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
+                    lastBoardMessageSeverity = .warning
+                } else {
+                    tasks[taskIndex].status = .review
+                    lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                    lastBoardMessageSeverity = .info
+                }
+            } else {
+                lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                lastBoardMessageSeverity = .info
+            }
+
+        case let .failure(message):
+            var failedRecord = tasks[taskIndex].executionRecord ?? record
+            failedRecord.status = .failed
+            failedRecord.lastFinishedAt = finishedAt
+            failedRecord.lastOutputSummary = nil
+            failedRecord.lastError = normalizeExecutionText(message) ?? "Unknown execution error"
+            failedRecord.lastAgentID = agent.id
+            tasks[taskIndex].executionRecord = failedRecord
+            lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
+            lastBoardMessageSeverity = .warning
+        }
+
+        persistBoardState()
+        return true
+    }
+
+    @discardableResult
+    func retryTaskExecution(_ taskID: UUID) -> Bool {
+        guard let record = executionRecord(for: taskID), record.status == .failed else {
+            lastBoardMessage = "Only failed executions can be retried"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        return runTaskExecution(taskID)
+    }
+
     func triageCandidates() -> [WorkTask] {
         tasks
             .filter { $0.status == .todo && $0.assignedAgentID == nil }
@@ -1585,6 +1705,12 @@ final class KanbanBoardViewModel: ObservableObject {
         let assignedLabel = assignedCount == 1 ? "task" : "tasks"
         let remainingLabel = remainingCount == 1 ? "task still needs" : "tasks still need"
         return "Assigned \(assignedCount) triage \(assignedLabel). \(remainingCount) \(remainingLabel) manual attention"
+    }
+
+    private func normalizeExecutionText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {
