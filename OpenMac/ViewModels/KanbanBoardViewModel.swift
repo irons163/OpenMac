@@ -686,6 +686,44 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func copyTask(_ taskID: UUID, toBoard targetBoardID: UUID) -> Bool {
+        guard let sourceBoardIndex = selectedBoardIndex else { return false }
+        guard let targetBoardIndex = boards.firstIndex(where: { $0.id == targetBoardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+        guard sourceBoardIndex != targetBoardIndex else {
+            lastBoardMessage = "Select a different board"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        guard let sourceTask = boards[sourceBoardIndex].tasks.first(where: { $0.id == taskID }) else {
+            lastBoardMessage = "Task not found"
+            return false
+        }
+
+        var copiedTask = WorkTask(
+            title: sourceTask.title,
+            details: sourceTask.details,
+            requiredSkills: Array(sourceTask.requiredSkills),
+            storyPoints: sourceTask.storyPoints,
+            status: sourceTask.status,
+            assignedAgentID: sourceTask.assignedAgentID
+        )
+        if let assignedAgentID = copiedTask.assignedAgentID,
+           !boards[targetBoardIndex].agents.contains(where: { $0.id == assignedAgentID }) {
+            copiedTask.assignedAgentID = nil
+        }
+        boards[targetBoardIndex].tasks.append(copiedTask)
+
+        loadBoard(boards[sourceBoardIndex].id)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
     func handleDrop(_ taskID: UUID, to status: KanbanStatus) -> Bool {
         moveTask(taskID, to: status)
     }
@@ -702,11 +740,45 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func autoAssignTask(_ taskID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        guard tasks[taskIndex].status == .todo else {
+            lastBoardMessage = "Only To Do tasks can be auto-assigned"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        guard tasks[taskIndex].assignedAgentID == nil else {
+            lastBoardMessage = "Task already assigned"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        guard let decision = assignmentEngine.bestAgent(
+            for: tasks[taskIndex],
+            among: tasks,
+            agents: agents
+        ) else {
+            lastUnassignedTaskIDs.insert(taskID)
+            lastBoardMessage = "No eligible agent for task"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        tasks[taskIndex].assignedAgentID = decision.agentID
+        lastAssignmentReasons[taskID] = decision.reason
+        lastUnassignedTaskIDs.remove(taskID)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
     func addTask(
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int = 1
+        storyPoints: Int = 1,
+        autoAssign: Bool = false
     ) -> Bool {
         let skills = requiredSkillsText
             .split(separator: ",")
@@ -719,16 +791,31 @@ final class KanbanBoardViewModel: ObservableObject {
             return false
         }
 
-        tasks.append(
-            WorkTask(
-                title: trimmedTitle,
-                details: details,
-                requiredSkills: skills,
-                storyPoints: storyPoints,
-                status: .todo,
-                assignedAgentID: nil
-            )
+        let task = WorkTask(
+            title: trimmedTitle,
+            details: details,
+            requiredSkills: skills,
+            storyPoints: storyPoints,
+            status: .todo,
+            assignedAgentID: nil
         )
+        tasks.append(task)
+
+        if autoAssign {
+            if let decision = assignmentEngine.bestAgent(
+                for: task,
+                among: tasks,
+                agents: agents
+            ),
+               let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) {
+                tasks[taskIndex].assignedAgentID = decision.agentID
+                lastAssignmentReasons[task.id] = decision.reason
+                lastUnassignedTaskIDs.remove(task.id)
+            } else {
+                lastUnassignedTaskIDs.insert(task.id)
+            }
+        }
+
         persistBoardState()
         lastBoardMessage = nil
         return true
@@ -783,6 +870,24 @@ final class KanbanBoardViewModel: ObservableObject {
             lastUnassignedTaskIDs.insert(taskID)
         }
 
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func duplicateTask(_ taskID: UUID) -> Bool {
+        guard let sourceTask = tasks.first(where: { $0.id == taskID }) else { return false }
+
+        let duplicatedTask = WorkTask(
+            title: uniqueTaskCopyTitle(for: sourceTask.title),
+            details: sourceTask.details,
+            requiredSkills: Array(sourceTask.requiredSkills),
+            storyPoints: sourceTask.storyPoints,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        tasks.append(duplicatedTask)
         persistBoardState()
         lastBoardMessage = nil
         return true
@@ -1274,6 +1379,26 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
+    func reassignableAgents(for taskID: UUID) -> [AgentProfile] {
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return [] }
+        guard task.status == .todo, let currentAssigneeID = task.assignedAgentID else { return [] }
+
+        return agents
+            .filter { agent in
+                guard agent.id != currentAssigneeID else { return false }
+                return agent.hasSkills(for: task) && activeTaskCount(for: agent.id) < agent.maxConcurrentTasks
+            }
+            .sorted { lhs, rhs in
+                let leftLoad = activeTaskCount(for: lhs.id)
+                let rightLoad = activeTaskCount(for: rhs.id)
+
+                if leftLoad != rightLoad {
+                    return leftLoad < rightLoad
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+    }
+
     func resolvedTriageAssignments(existing: [UUID: UUID] = [:]) -> [UUID: UUID] {
         bulkTriageAssignmentPlan(using: existing)
     }
@@ -1320,6 +1445,43 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         guard tasks[taskIndex].assignedAgentID == nil else {
             lastBoardMessage = "Task is already assigned"
+            return false
+        }
+
+        guard agent.hasSkills(for: tasks[taskIndex]) else {
+            lastBoardMessage = "Agent \(agent.name) does not match required skills"
+            return false
+        }
+
+        let currentLoad = activeTaskCount(for: agentID)
+        guard currentLoad < agent.maxConcurrentTasks else {
+            lastBoardMessage = "Agent \(agent.name) is at max load (\(agent.maxConcurrentTasks))"
+            return false
+        }
+
+        tasks[taskIndex].assignedAgentID = agentID
+        lastUnassignedTaskIDs.remove(taskID)
+        lastAssignmentReasons[taskID] = "manual[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func reassignTask(_ taskID: UUID, to agentID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        guard let agent = agents.first(where: { $0.id == agentID }) else { return false }
+
+        guard tasks[taskIndex].status == .todo else {
+            lastBoardMessage = "Only To Do tasks can be reassigned"
+            return false
+        }
+        guard let currentAgentID = tasks[taskIndex].assignedAgentID else {
+            lastBoardMessage = "Task is unassigned"
+            return false
+        }
+        guard currentAgentID != agentID else {
+            lastBoardMessage = "Task already assigned to \(agent.name)"
             return false
         }
 
@@ -1462,6 +1624,21 @@ final class KanbanBoardViewModel: ObservableObject {
         var suffix = 2
         while boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(candidate) == .orderedSame }) {
             candidate = "\(baseName) Copy \(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func uniqueTaskCopyTitle(for sourceTitle: String) -> String {
+        let normalizedSourceTitle = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseTitle = normalizedSourceTitle.isEmpty ? "Task" : normalizedSourceTitle
+        let baseCandidate = "\(baseTitle) Copy"
+        let existingTitles = Set(tasks.map { $0.title.lowercased() })
+
+        var candidate = baseCandidate
+        var suffix = 2
+        while existingTitles.contains(candidate.lowercased()) {
+            candidate = "\(baseCandidate) \(suffix)"
             suffix += 1
         }
         return candidate

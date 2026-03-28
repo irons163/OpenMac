@@ -515,6 +515,73 @@ struct KanbanFlowTests {
         #expect(viewModel.assignmentReason(for: task.id) != nil)
     }
 
+    @Test("single-task auto assign only mutates requested task")
+    func autoAssignSingleTaskOnlyMutatesRequestedTask() {
+        let requestedTask = WorkTask(
+            title: "Requested Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let otherTask = WorkTask(
+            title: "Other Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let viewModel = KanbanBoardViewModel(tasks: [requestedTask, otherTask], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(requestedTask.id)
+
+        #expect(assigned)
+        #expect(viewModel.tasks.first(where: { $0.id == requestedTask.id })?.assignedAgentID == agent.id)
+        #expect(viewModel.tasks.first(where: { $0.id == otherTask.id })?.assignedAgentID == nil)
+    }
+
+    @Test("single-task auto assign rejects already assigned task")
+    func autoAssignSingleTaskRejectsAlreadyAssignedTask() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Already assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(task.id)
+
+        #expect(!assigned)
+        #expect(viewModel.lastBoardMessage == "Task already assigned")
+    }
+
+    @Test("single-task auto assign reports when no eligible agent exists")
+    func autoAssignSingleTaskReportsWhenNoEligibleAgentExists() {
+        let task = WorkTask(
+            title: "No match task",
+            details: "",
+            requiredSkills: ["backend"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(task.id)
+
+        #expect(!assigned)
+        #expect(viewModel.lastBoardMessage == "No eligible agent for task")
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
     @Test("filters tasks by search query across title details skills and assignee name")
     func filtersTasksBySearchQuery() {
         let searchAgent = AgentProfile(name: "Search Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -1635,6 +1702,89 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
+    @Test("copies task to another board while keeping source task intact")
+    func copiesTaskToAnotherBoardAndKeepsSourceTask() {
+        let task = WorkTask(
+            title: "Shared backlog item",
+            details: "Track in both boards",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Copied Target")
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let copied = viewModel.copyTask(task.id, toBoard: targetBoardID)
+
+        #expect(copied)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.id == task.id)
+        #expect(store.savedSnapshots.last?.boards?.count == 2)
+
+        let switched = viewModel.switchBoard(to: targetBoardID)
+        #expect(switched)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.id != task.id)
+        #expect(viewModel.tasks.first?.title == task.title)
+        #expect(viewModel.tasks.first?.details == task.details)
+        #expect(viewModel.tasks.first?.requiredSkills == task.requiredSkills)
+        #expect(viewModel.tasks.first?.storyPoints == task.storyPoints)
+    }
+
+    @Test("copying task to board without assigned agent unassigns copied task only")
+    func copyingTaskToBoardWithoutAgentUnassignsCopiedTaskOnly() {
+        let agent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned shared task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Agentless Copy Target")
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let copied = viewModel.copyTask(task.id, toBoard: targetBoardID)
+
+        #expect(copied)
+        #expect(viewModel.tasks.first?.assignedAgentID == agent.id)
+
+        let switched = viewModel.switchBoard(to: targetBoardID)
+        #expect(switched)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
+    @Test("rejects copying task to the same board")
+    func rejectsCopyingTaskToSameBoard() {
+        let task = WorkTask(
+            title: "Same board",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+
+        let copied = viewModel.copyTask(task.id, toBoard: viewModel.selectedBoardID)
+
+        #expect(!copied)
+        #expect(viewModel.lastBoardMessage == "Select a different board")
+        #expect(viewModel.tasks.count == 1)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("global task search finds tasks across boards with board metadata")
     func globalTaskSearchFindsTasksAcrossBoards() {
         let sourceTask = WorkTask(
@@ -2391,6 +2541,95 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("reassigns todo task to another eligible agent and persists")
+    func reassignsTodoTaskToAnotherEligibleAgent() {
+        let sourceAgent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let targetAgent = AgentProfile(name: "Target Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: sourceAgent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [sourceAgent, targetAgent], boardStore: store)
+
+        let reassigned = viewModel.reassignTask(task.id, to: targetAgent.id)
+
+        #expect(reassigned)
+        #expect(viewModel.tasks.first?.assignedAgentID == targetAgent.id)
+        #expect(viewModel.assignmentReason(for: task.id)?.contains("manual[Target Agent]") == true)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rejects reassignment when target agent is already at max load")
+    func rejectsReassigningTaskForOverloadedAgent() {
+        let sourceAgent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let overloadedAgent = AgentProfile(name: "Busy Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let alreadyAssigned = WorkTask(
+            title: "Already active",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: overloadedAgent.id
+        )
+        let targetTask = WorkTask(
+            title: "Need move",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: sourceAgent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [alreadyAssigned, targetTask],
+            agents: [sourceAgent, overloadedAgent],
+            boardStore: store
+        )
+
+        let reassigned = viewModel.reassignTask(targetTask.id, to: overloadedAgent.id)
+
+        #expect(!reassigned)
+        #expect(viewModel.tasks.first(where: { $0.id == targetTask.id })?.assignedAgentID == sourceAgent.id)
+        #expect(viewModel.lastBoardMessage == "Agent Busy Agent is at max load (1)")
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("reassignable agents list excludes current assignee and overloaded candidates")
+    func reassignableAgentsExcludeCurrentAndOverloadedAgents() {
+        let sourceAgent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let eligibleAgent = AgentProfile(name: "Eligible Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let overloadedAgent = AgentProfile(name: "Overloaded Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let supportingTask = WorkTask(
+            title: "Busy",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: overloadedAgent.id
+        )
+        let assignedTask = WorkTask(
+            title: "To reassign",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: sourceAgent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [supportingTask, assignedTask],
+            agents: [sourceAgent, overloadedAgent, eligibleAgent]
+        )
+
+        let candidates = viewModel.reassignableAgents(for: assignedTask.id)
+
+        #expect(candidates.map(\.id) == [eligibleAgent.id])
+    }
+
     @Test("triage candidates include todo tasks that remain unassigned without auto-assign")
     func triageCandidatesIncludePlainUnassignedTodoTasks() {
         let todoUnassigned = WorkTask(
@@ -2888,6 +3127,50 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.count == 1)
     }
 
+    @Test("adds task with create-and-auto-assign flow when eligible agent exists")
+    func addsTaskAndAutoAssigns() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui", "ui"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let added = viewModel.addTask(
+            title: "Implement card",
+            details: "Task should be auto assigned",
+            requiredSkillsText: "swiftui",
+            storyPoints: 3,
+            autoAssign: true
+        )
+
+        #expect(added)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].assignedAgentID == agent.id)
+        #expect(viewModel.assignmentReason(for: viewModel.tasks[0].id) != nil)
+        #expect(!viewModel.lastUnassignedTaskIDs.contains(viewModel.tasks[0].id))
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("create-and-auto-assign leaves task unassigned when no eligible agent exists")
+    func addTaskAutoAssignFallsBackToUnassigned() {
+        let agent = AgentProfile(name: "Backend Agent", skills: ["api"], maxConcurrentTasks: 2)
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent], boardStore: store)
+
+        let added = viewModel.addTask(
+            title: "Design view",
+            details: "",
+            requiredSkillsText: "swiftui",
+            storyPoints: 2,
+            autoAssign: true
+        )
+
+        #expect(added)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.lastUnassignedTaskIDs.contains(viewModel.tasks[0].id))
+        #expect(viewModel.lastBoardMessage == nil)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
     @Test("rejects adding task with empty title")
     func rejectsAddingTaskWithEmptyTitle() {
         let store = SpyBoardStore()
@@ -2981,6 +3264,68 @@ struct KanbanPersistenceTests {
         #expect(removed)
         #expect(viewModel.tasks.isEmpty)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("duplicates task into a new unassigned todo copy and persists")
+    func duplicatesTaskAndPersists() {
+        let agent = AgentProfile(name: "Reviewer", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Review flow",
+            details: "Current implementation",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .review,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent], boardStore: store)
+
+        let duplicated = viewModel.duplicateTask(task.id)
+
+        #expect(duplicated)
+        #expect(viewModel.tasks.count == 2)
+        let copy = viewModel.tasks.first(where: { $0.id != task.id })
+        #expect(copy?.title == "Review flow Copy")
+        #expect(copy?.details == task.details)
+        #expect(copy?.requiredSkills == task.requiredSkills)
+        #expect(copy?.storyPoints == task.storyPoints)
+        #expect(copy?.status == .todo)
+        #expect(copy?.assignedAgentID == nil)
+        #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("duplicate task increments copy suffix when copy names already exist")
+    func duplicateTaskIncrementsCopySuffix() {
+        let original = WorkTask(
+            title: "Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let copyOne = WorkTask(
+            title: "Task Copy",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let copyTwo = WorkTask(
+            title: "Task Copy 2",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [original, copyOne, copyTwo], agents: [])
+
+        let duplicated = viewModel.duplicateTask(original.id)
+
+        #expect(duplicated)
+        #expect(viewModel.tasks.contains(where: { $0.title == "Task Copy 3" }))
     }
 
     @Test("removing unknown task returns false and does not persist")

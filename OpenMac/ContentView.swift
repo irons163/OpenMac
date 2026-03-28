@@ -167,9 +167,20 @@ struct ContentView: View {
                                 },
                                 onEditTask: openEditTask,
                                 onDeleteTask: removeTask,
+                                onDuplicateTask: duplicateTask,
                                 onUnassignTask: unassignTask,
+                                onAutoAssignTask: autoAssignTask,
+                                assignableAgents: { task in
+                                    viewModel.assignableAgents(for: task.id)
+                                },
+                                reassignableAgents: { task in
+                                    viewModel.reassignableAgents(for: task.id)
+                                },
+                                onManualAssignTask: assignTaskToAgent,
+                                onReassignTask: reassignTaskToAgent,
                                 moveToBoardTargets: moveTaskBoardTargets,
                                 onMoveTaskToBoard: moveTaskToBoard,
+                                onCopyTaskToBoard: copyTaskToBoard,
                                 onDropTask: { taskID in
                                     viewModel.handleDrop(taskID, to: status)
                                 }
@@ -369,17 +380,8 @@ struct ContentView: View {
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetDraftAndClose,
-                onCreate: {
-                    let added = viewModel.addTask(
-                        title: newTaskTitle,
-                        details: newTaskDetails,
-                        requiredSkillsText: newTaskSkills,
-                        storyPoints: newTaskPoints
-                    )
-                    if added {
-                        resetDraftAndClose()
-                    }
-                }
+                onCreate: { createTaskFromSheet(autoAssign: false) },
+                onCreateAutoAssign: { createTaskFromSheet(autoAssign: true) }
             )
         }
         .sheet(isPresented: $isShowingWIPSettingsSheet) {
@@ -619,6 +621,20 @@ struct ContentView: View {
         }
     }
 
+    private func createTaskFromSheet(autoAssign: Bool) {
+        let added = viewModel.addTask(
+            title: newTaskTitle,
+            details: newTaskDetails,
+            requiredSkillsText: newTaskSkills,
+            storyPoints: newTaskPoints,
+            autoAssign: autoAssign
+        )
+        if added {
+            refreshTriageSelections()
+            resetDraftAndClose()
+        }
+    }
+
     private func archiveDoneTasks() {
         let removedCount = viewModel.clearDoneTasks()
         if removedCount > 0 {
@@ -811,6 +827,13 @@ struct ContentView: View {
         }
     }
 
+    private func duplicateTask(_ taskID: UUID) {
+        let duplicated = viewModel.duplicateTask(taskID)
+        if duplicated {
+            refreshTriageSelections()
+        }
+    }
+
     private func unassignTask(_ taskID: UUID) {
         let unassigned = viewModel.unassignTask(taskID)
         if unassigned {
@@ -821,6 +844,34 @@ struct ContentView: View {
     private func moveTaskToBoard(_ taskID: UUID, _ boardID: UUID) {
         let moved = viewModel.moveTask(taskID, toBoard: boardID)
         if moved {
+            refreshTriageSelections()
+        }
+    }
+
+    private func copyTaskToBoard(_ taskID: UUID, _ boardID: UUID) {
+        let copied = viewModel.copyTask(taskID, toBoard: boardID)
+        if copied {
+            refreshTriageSelections()
+        }
+    }
+
+    private func autoAssignTask(_ taskID: UUID) {
+        let assigned = viewModel.autoAssignTask(taskID)
+        if assigned {
+            refreshTriageSelections()
+        }
+    }
+
+    private func assignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
+        let assigned = viewModel.manuallyAssignTask(taskID, to: agentID)
+        if assigned {
+            refreshTriageSelections()
+        }
+    }
+
+    private func reassignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
+        let reassigned = viewModel.reassignTask(taskID, to: agentID)
+        if reassigned {
             refreshTriageSelections()
         }
     }
@@ -1170,9 +1221,16 @@ private struct KanbanColumnView: View {
     let moveForward: (WorkTask) -> Void
     let onEditTask: (WorkTask) -> Void
     let onDeleteTask: (UUID) -> Void
+    let onDuplicateTask: (UUID) -> Void
     let onUnassignTask: (UUID) -> Void
+    let onAutoAssignTask: (UUID) -> Void
+    let assignableAgents: (WorkTask) -> [AgentProfile]
+    let reassignableAgents: (WorkTask) -> [AgentProfile]
+    let onManualAssignTask: (UUID, UUID) -> Void
+    let onReassignTask: (UUID, UUID) -> Void
     let moveToBoardTargets: [KanbanBoardRecord]
     let onMoveTaskToBoard: (UUID, UUID) -> Void
+    let onCopyTaskToBoard: (UUID, UUID) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -1214,12 +1272,26 @@ private struct KanbanColumnView: View {
                         canMoveBackward: status.previous != nil,
                         canMoveForward: status.next != nil,
                         canUnassign: task.assignedAgentID != nil && task.status != .done,
+                        canAutoAssign: task.status == .todo && task.assignedAgentID == nil,
+                        manualAssignableAgents: assignableAgents(task),
+                        reassignableAgents: reassignableAgents(task),
                         moveToBoardTargets: moveToBoardTargets,
                         onEdit: { onEditTask(task) },
+                        onAutoAssign: { onAutoAssignTask(task.id) },
+                        onManualAssign: { agentID in
+                            onManualAssignTask(task.id, agentID)
+                        },
+                        onReassign: { agentID in
+                            onReassignTask(task.id, agentID)
+                        },
                         onUnassign: { onUnassignTask(task.id) },
+                        onDuplicate: { onDuplicateTask(task.id) },
                         onDelete: { onDeleteTask(task.id) },
                         onMoveToBoard: { boardID in
                             onMoveTaskToBoard(task.id, boardID)
+                        },
+                        onCopyToBoard: { boardID in
+                            onCopyTaskToBoard(task.id, boardID)
                         },
                         onMoveBackward: { moveBackward(task) },
                         onMoveForward: { moveForward(task) }
@@ -1274,11 +1346,19 @@ private struct TaskCardView: View {
     let canMoveBackward: Bool
     let canMoveForward: Bool
     let canUnassign: Bool
+    let canAutoAssign: Bool
+    let manualAssignableAgents: [AgentProfile]
+    let reassignableAgents: [AgentProfile]
     let moveToBoardTargets: [KanbanBoardRecord]
     let onEdit: () -> Void
+    let onAutoAssign: () -> Void
+    let onManualAssign: (UUID) -> Void
+    let onReassign: (UUID) -> Void
     let onUnassign: () -> Void
+    let onDuplicate: () -> Void
     let onDelete: () -> Void
     let onMoveToBoard: (UUID) -> Void
+    let onCopyToBoard: (UUID) -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -1349,6 +1429,27 @@ private struct TaskCardView: View {
         )
         .contextMenu {
             Button("Edit Task", action: onEdit)
+            if canAutoAssign {
+                Button("Auto Assign This Task", action: onAutoAssign)
+            }
+            if !manualAssignableAgents.isEmpty {
+                Menu("Assign To Agent") {
+                    ForEach(manualAssignableAgents) { agent in
+                        Button(agent.name) {
+                            onManualAssign(agent.id)
+                        }
+                    }
+                }
+            }
+            if !reassignableAgents.isEmpty {
+                Menu("Reassign To Agent") {
+                    ForEach(reassignableAgents) { agent in
+                        Button(agent.name) {
+                            onReassign(agent.id)
+                        }
+                    }
+                }
+            }
             if canUnassign {
                 Button("Unassign Task", action: onUnassign)
             }
@@ -1360,7 +1461,15 @@ private struct TaskCardView: View {
                         }
                     }
                 }
+                Menu("Copy To Board") {
+                    ForEach(moveToBoardTargets) { board in
+                        Button(board.name) {
+                            onCopyToBoard(board.id)
+                        }
+                    }
+                }
             }
+            Button("Duplicate Task", action: onDuplicate)
             Button("Delete Task", role: .destructive, action: onDelete)
         }
         .draggable(task.id.uuidString)
@@ -1515,6 +1624,7 @@ private struct NewTaskSheet: View {
 
     let onCancel: () -> Void
     let onCreate: () -> Void
+    let onCreateAutoAssign: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1536,6 +1646,7 @@ private struct NewTaskSheet: View {
                 Button("Cancel", action: onCancel)
                 Button("Create", action: onCreate)
                     .keyboardShortcut(.defaultAction)
+                Button("Create + Auto Assign", action: onCreateAutoAssign)
             }
         }
         .padding(18)

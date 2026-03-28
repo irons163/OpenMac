@@ -81,6 +81,53 @@ struct AutoAssignmentEngine {
         return AssignmentResult(tasks: updatedTasks, unassignedTaskIDs: unassigned, decisions: decisions)
     }
 
+    func bestAgent(
+        for task: WorkTask,
+        among tasks: [WorkTask],
+        agents: [AgentProfile]
+    ) -> AssignmentDecision? {
+        let workload = currentWorkload(for: tasks)
+        let contextTokens = tokenize("\(task.title) \(task.details)")
+
+        let scoredCandidates = agents
+            .filter {
+                $0.hasSkills(for: task)
+                && workload[$0.id, default: 0] < $0.maxConcurrentTasks
+            }
+            .map { agent in
+                let load = workload[agent.id, default: 0]
+                let score = score(task: task, agent: agent, currentLoad: load, contextTokens: contextTokens)
+                return (agent: agent, score: score)
+            }
+            .sorted {
+                if $0.score != $1.score {
+                    return $0.score > $1.score
+                }
+
+                let leftLoad = workload[$0.agent.id, default: 0]
+                let rightLoad = workload[$1.agent.id, default: 0]
+
+                if leftLoad != rightLoad {
+                    return leftLoad < rightLoad
+                }
+                return $0.agent.name.localizedCaseInsensitiveCompare($1.agent.name) == .orderedAscending
+            }
+
+        guard let selected = scoredCandidates.first else { return nil }
+        let projectedLoad = workload[selected.agent.id, default: 0] + 1
+        return AssignmentDecision(
+            agentID: selected.agent.id,
+            score: selected.score,
+            reason: buildReason(
+                task: task,
+                agent: selected.agent,
+                currentLoad: projectedLoad,
+                contextTokens: contextTokens,
+                score: selected.score
+            )
+        )
+    }
+
     private func currentWorkload(for tasks: [WorkTask]) -> [UUID: Int] {
         var workload: [UUID: Int] = [:]
         for task in tasks where task.status != .done {
