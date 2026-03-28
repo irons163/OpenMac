@@ -228,20 +228,12 @@ struct ContentView: View {
                     }
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
-                Menu("Appearance") {
+                Menu("Appearance: \(selectedAppearanceMode.title)") {
                     ForEach(AppAppearanceMode.allCases) { mode in
-                        Button {
-                            appearanceModeRawValue = mode.rawValue
-                        } label: {
-                            if selectedAppearanceMode == mode {
-                                Label(mode.title, systemImage: "checkmark")
-                            } else {
-                                Text(mode.title)
-                            }
-                        }
+                        appearanceMenuButton(for: mode)
                     }
                 }
-                .help("Switch between system, light, and dark appearance")
+                .help("Switch between system, light, and dark appearance (Option-Command-0/L/D)")
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -637,6 +629,33 @@ struct ContentView: View {
 
     private var selectedAppearanceMode: AppAppearanceMode {
         AppAppearanceMode.resolve(rawValue: appearanceModeRawValue)
+    }
+
+    @ViewBuilder
+    private func appearanceMenuButton(for mode: AppAppearanceMode) -> some View {
+        switch mode {
+        case .system:
+            appearanceSelectionButton(for: mode)
+                .keyboardShortcut("0", modifiers: [.command, .option])
+        case .light:
+            appearanceSelectionButton(for: mode)
+                .keyboardShortcut("l", modifiers: [.command, .option])
+        case .dark:
+            appearanceSelectionButton(for: mode)
+                .keyboardShortcut("d", modifiers: [.command, .option])
+        }
+    }
+
+    private func appearanceSelectionButton(for mode: AppAppearanceMode) -> some View {
+        Button {
+            appearanceModeRawValue = mode.rawValue
+        } label: {
+            if selectedAppearanceMode == mode {
+                Label(mode.title, systemImage: "checkmark")
+            } else {
+                Text(mode.title)
+            }
+        }
     }
 }
 
