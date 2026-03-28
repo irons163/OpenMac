@@ -42,6 +42,46 @@ struct WorkspaceImportPreview: Equatable {
     let agentCount: Int
 }
 
+enum CodexProjectsDirectorySettings {
+    static let userDefaultsKey = "codexProjectsDirectoryPath"
+    static let environmentOverrideKey = "OPENMAC_PROJECTS_DIR"
+    private static let defaultRelativePath = "Library/Application Support/OpenMac/Projects"
+
+    static func defaultProjectsDirectoryURL(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        homeDirectory.appendingPathComponent(defaultRelativePath, isDirectory: true)
+    }
+
+    static func resolvedProjectsDirectoryPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        userDefaults: UserDefaults = .standard
+    ) -> String {
+        if let override = environment[environmentOverrideKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return (override as NSString).expandingTildeInPath
+        }
+
+        if let stored = userDefaults.string(forKey: userDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return (stored as NSString).expandingTildeInPath
+        }
+
+        return defaultProjectsDirectoryURL().path
+    }
+
+    @discardableResult
+    static func ensureProjectsDirectoryExists(
+        at path: String,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        let expandedPath = (path as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath, isDirectory: true)
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}
+
 struct BoardHealthRecommendation: Identifiable, Equatable {
     let action: BoardHealthAction
     let title: String
@@ -110,6 +150,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let prompt: String
         let model: String
         let profile: String?
+        let workingDirectoryPath: String?
     }
 
     var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
@@ -271,10 +312,14 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     ) -> AgentTaskExecutionOutcome {
         onProgress("Codex Bridge started for \"\(task.title)\"")
         let prompt = buildCodexBridgePrompt(task: task, agent: agent)
+        let workingDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+            environment: environmentProvider()
+        )
         let request = CodexBridgeRequest(
             prompt: prompt,
             model: runtimeProfile.model,
-            profile: runtimeProfile.codexProfile
+            profile: runtimeProfile.codexProfile,
+            workingDirectoryPath: workingDirectoryPath
         )
         let trimmedModel = runtimeProfile.model.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -317,7 +362,8 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 let fallbackRequest = CodexBridgeRequest(
                     prompt: prompt,
                     model: "",
-                    profile: runtimeProfile.codexProfile
+                    profile: runtimeProfile.codexProfile,
+                    workingDirectoryPath: workingDirectoryPath
                 )
                 do {
                     onProgress("Configured model rejected by Codex account. Retrying without explicit model.")
@@ -628,6 +674,20 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         process.executableURL = codexExecutable
         process.arguments = arguments
         process.environment = codexBridgeProcessEnvironment()
+        let configuredWorkdirPath = request.workingDirectoryPath
+            ?? CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+        let workingDirectoryURL: URL
+        do {
+            workingDirectoryURL = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(
+                at: configuredWorkdirPath
+            )
+        } catch {
+            throw ExecutorError.codexBridgeFailed(
+                "Unable to prepare projects folder at \(configuredWorkdirPath): \(error.localizedDescription)"
+            )
+        }
+        process.currentDirectoryURL = workingDirectoryURL
+        onProgress("Codex workdir: \(workingDirectoryURL.path)")
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe

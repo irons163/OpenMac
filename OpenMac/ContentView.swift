@@ -18,6 +18,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
     @AppStorage("developerModeEnabled") private var developerModeEnabled = false
+    @AppStorage(CodexProjectsDirectorySettings.userDefaultsKey) private var codexProjectsDirectoryPath = ""
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -503,6 +504,23 @@ struct ContentView: View {
                 .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
                 Menu("Developer") {
                     Toggle("Developer Mode", isOn: $developerModeEnabled)
+                    Divider()
+                    Text("Projects Folder")
+                    Text(resolvedCodexProjectsDirectoryPath)
+                        .font(.caption2.monospaced())
+                    Button("Choose Projects Folder...") {
+                        chooseCodexProjectsDirectory()
+                    }
+                    Button("Use Default Projects Folder") {
+                        useDefaultCodexProjectsDirectory()
+                    }
+                    .disabled(isUsingDefaultCodexProjectsDirectory)
+                    Button("Open Projects Folder in Finder") {
+                        openCodexProjectsDirectoryInFinder()
+                    }
+                    Button("Copy Projects Folder Path") {
+                        copyToPasteboard(resolvedCodexProjectsDirectoryPath)
+                    }
                     if let message = viewModel.lastBoardMessage, !message.isEmpty {
                         Button("Copy Board Message") {
                             copyToPasteboard(message)
@@ -661,6 +679,7 @@ struct ContentView: View {
         }
         .onAppear {
             syncSelectedAgentConsoleSelection()
+            ensureCodexProjectsDirectoryExists()
         }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
@@ -1244,6 +1263,14 @@ struct ContentView: View {
         return viewModel.agents.first(where: { $0.id == selectedAgentConsoleAgentID }) ?? viewModel.agents.first
     }
 
+    private var resolvedCodexProjectsDirectoryPath: String {
+        CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+    }
+
+    private var isUsingDefaultCodexProjectsDirectory: Bool {
+        codexProjectsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var globalTaskSearchResults: [GlobalTaskSearchResult] {
         viewModel.globalTaskSearchResults(query: globalTaskSearchQuery)
     }
@@ -1251,6 +1278,57 @@ struct ContentView: View {
     private func resetTaskFilters() {
         taskSearchQuery = ""
         selectedAssigneeFilterKey = "all"
+    }
+
+    private func chooseCodexProjectsDirectory() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.title = "Choose Projects Folder"
+        panel.message = "Select a default working folder for agent project execution."
+        panel.prompt = "Use Folder"
+        panel.directoryURL = URL(fileURLWithPath: resolvedCodexProjectsDirectoryPath, isDirectory: true)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        codexProjectsDirectoryPath = url.path
+        ensureCodexProjectsDirectoryExists()
+    }
+
+    private func useDefaultCodexProjectsDirectory() {
+        codexProjectsDirectoryPath = ""
+        ensureCodexProjectsDirectoryExists()
+    }
+
+    private func openCodexProjectsDirectoryInFinder() {
+        do {
+            let url = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(
+                at: resolvedCodexProjectsDirectoryPath
+            )
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
+        }
+    }
+
+    private func ensureCodexProjectsDirectoryExists() {
+        do {
+            _ = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(
+                at: resolvedCodexProjectsDirectoryPath
+            )
+        } catch {
+            presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
+        }
+    }
+
+    private func presentCodexProjectsDirectoryError(_ error: Error, attemptedPath: String) {
+        let alert = NSAlert()
+        alert.messageText = "Projects Folder Error"
+        alert.informativeText = "Could not use folder:\n\(attemptedPath)\n\n\(error.localizedDescription)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func syncSelectedAgentConsoleSelection() {

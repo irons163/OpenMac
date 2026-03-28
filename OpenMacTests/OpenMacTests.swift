@@ -205,6 +205,49 @@ struct AgentTaskExecutorTests {
                 #expect(request.model == "gpt-5.2")
                 #expect(request.profile == "default")
                 #expect(request.prompt.contains("Generate dispatch notes"))
+                #expect(request.workingDirectoryPath?.contains("Library/Application Support/OpenMac/Projects") == true)
+                return "Bridge run complete"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Bridge run complete")
+        case .failure:
+            #expect(Bool(false), "Expected success for Codex Bridge runtime")
+        }
+    }
+
+    @Test("default executor codex bridge request honors projects directory override environment")
+    func openAICompatibleCodexBridgeUsesProjectsDirectoryOverride() {
+        let task = WorkTask(
+            title: "Generate dispatch notes",
+            details: "Bridge path",
+            requiredSkills: ["automation"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge,
+                codexProfile: "default"
+            )
+        )
+        let expectedPath = "/tmp/openmac-projects-override"
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [CodexProjectsDirectorySettings.environmentOverrideKey: expectedPath] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                #expect(request.workingDirectoryPath == expectedPath)
                 return "Bridge run complete"
             }
         )
