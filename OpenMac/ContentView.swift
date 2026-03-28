@@ -191,10 +191,14 @@ struct ContentView: View {
                 .help("Create a new agent profile (Option-Command-N)")
                 Menu("Board Actions") {
                     Section("Health") {
-                        Button("Apply Health Fixes") {
-                            applyAllHealthRecommendations()
+                        if hasAutoHealthFixes {
+                            Button("Apply Health Fixes") {
+                                applyAllHealthRecommendations()
+                            }
+                            .keyboardShortcut("h", modifiers: [.command, .shift])
+                        } else {
+                            Text("No health fixes available")
                         }
-                        .disabled(!hasAutoHealthFixes)
                     }
 
                     Section("Board") {
