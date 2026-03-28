@@ -54,6 +54,20 @@ struct BoardHealthRecommendation: Identifiable, Equatable {
     }
 }
 
+struct GlobalTaskSearchResult: Identifiable, Equatable {
+    let taskID: UUID
+    let taskTitle: String
+    let taskDetails: String
+    let status: KanbanStatus
+    let boardID: UUID
+    let boardName: String
+    let assigneeName: String
+
+    var id: String {
+        "\(boardID.uuidString)-\(taskID.uuidString)"
+    }
+}
+
 final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
@@ -344,6 +358,79 @@ final class KanbanBoardViewModel: ObservableObject {
 
             return matchesQuery && matchesAssignee
         }
+    }
+
+    func globalTaskSearchResults(query: String) -> [GlobalTaskSearchResult] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        syncCurrentBoardRecord()
+        let queryTerms = normalizedQuery
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+
+        var results: [GlobalTaskSearchResult] = []
+        for board in boards {
+            let agentsByID = Dictionary(uniqueKeysWithValues: board.agents.map { ($0.id, $0.name) })
+            let boardMatches: [GlobalTaskSearchResult] = board.tasks.compactMap { task -> GlobalTaskSearchResult? in
+                let assigneeName: String
+                if let assignedAgentID = task.assignedAgentID, let resolvedName = agentsByID[assignedAgentID] {
+                    assigneeName = resolvedName
+                } else {
+                    assigneeName = "Unassigned"
+                }
+                let searchableValues = [
+                    board.name.lowercased(),
+                    task.title.lowercased(),
+                    task.details.lowercased(),
+                    assigneeName.lowercased()
+                ] + task.requiredSkills.map { $0.lowercased() }
+
+                let matches = queryTerms.allSatisfy { term in
+                    searchableValues.contains { value in value.contains(term) }
+                }
+                guard matches else { return nil }
+
+                return GlobalTaskSearchResult(
+                    taskID: task.id,
+                    taskTitle: task.title,
+                    taskDetails: task.details,
+                    status: task.status,
+                    boardID: board.id,
+                    boardName: board.name,
+                    assigneeName: assigneeName
+                )
+            }
+            results.append(contentsOf: boardMatches)
+        }
+
+        return results.sorted { lhs, rhs in
+            if lhs.boardName.localizedCaseInsensitiveCompare(rhs.boardName) != .orderedSame {
+                return lhs.boardName.localizedCaseInsensitiveCompare(rhs.boardName) == .orderedAscending
+            }
+            return lhs.taskTitle.localizedCaseInsensitiveCompare(rhs.taskTitle) == .orderedAscending
+        }
+    }
+
+    @discardableResult
+    func openTask(_ taskID: UUID, in boardID: UUID) -> Bool {
+        syncCurrentBoardRecord()
+        guard let boardIndex = boards.firstIndex(where: { $0.id == boardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+
+        guard boards[boardIndex].tasks.contains(where: { $0.id == taskID }) else {
+            lastBoardMessage = "Task not found"
+            return false
+        }
+
+        if boardID != selectedBoardID {
+            loadBoard(boardID)
+            persistBoardState()
+        }
+        lastBoardMessage = nil
+        return true
     }
 
     @discardableResult

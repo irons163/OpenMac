@@ -1635,6 +1635,67 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
+    @Test("global task search finds tasks across boards with board metadata")
+    func globalTaskSearchFindsTasksAcrossBoards() {
+        let sourceTask = WorkTask(
+            title: "Design Home",
+            details: "",
+            requiredSkills: ["ui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [sourceTask], agents: [])
+        _ = viewModel.createBoard(name: "Ops Board")
+        _ = viewModel.addTask(
+            title: "Incident Response",
+            details: "Fix prod issue",
+            requiredSkillsText: "ops",
+            storyPoints: 3
+        )
+
+        let results = viewModel.globalTaskSearchResults(query: "incident")
+
+        #expect(results.count == 1)
+        #expect(results.first?.boardName == "Ops Board")
+        #expect(results.first?.taskTitle == "Incident Response")
+    }
+
+    @Test("open task switches board context and persists selection")
+    func openTaskSwitchesBoardContextAndPersists() {
+        let defaultTask = WorkTask(
+            title: "Default Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [defaultTask], agents: [], boardStore: store)
+        let defaultBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Release Board")
+        _ = viewModel.addTask(
+            title: "Ship Candidate",
+            details: "",
+            requiredSkillsText: "release",
+            storyPoints: 2
+        )
+        let targetBoardID = viewModel.selectedBoardID
+        let targetTaskID = viewModel.tasks.first?.id
+        _ = viewModel.switchBoard(to: defaultBoardID)
+
+        #expect(targetTaskID != nil)
+        guard let targetTaskID else { return }
+
+        let opened = viewModel.openTask(targetTaskID, in: targetBoardID)
+
+        #expect(opened)
+        #expect(viewModel.selectedBoardID == targetBoardID)
+        #expect(viewModel.tasks.contains(where: { $0.id == targetTaskID }))
+        #expect(store.savedSnapshots.last?.selectedBoardID == targetBoardID)
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

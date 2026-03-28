@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var isShowingEditAgentSheet = false
     @State private var isShowingNewBoardSheet = false
     @State private var isShowingRenameBoardSheet = false
+    @State private var isShowingGlobalTaskFinder = false
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
     @State private var isShowingDeleteBoardAlert = false
@@ -36,6 +37,7 @@ struct ContentView: View {
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
     @State private var taskSearchQuery = ""
+    @State private var globalTaskSearchQuery = ""
     @State private var selectedAssigneeFilterKey = "all"
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
@@ -202,6 +204,11 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .help("Create a new agent profile (Option-Command-N)")
+                Button("Find Task") {
+                    openGlobalTaskFinder()
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                .help("Search tasks across boards (Command-F)")
                 Menu("Board: \(viewModel.selectedBoardName)") {
                     Button("New Board") {
                         openNewBoardSheet()
@@ -324,6 +331,14 @@ struct ContentView: View {
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeRenameBoardSheet,
                 onRename: renameBoardFromSheet
+            )
+        }
+        .sheet(isPresented: $isShowingGlobalTaskFinder) {
+            GlobalTaskSearchSheet(
+                query: $globalTaskSearchQuery,
+                results: globalTaskSearchResults,
+                onOpenResult: openGlobalTaskSearchResult,
+                onClose: closeGlobalTaskFinder
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -513,6 +528,25 @@ struct ContentView: View {
         let duplicated = viewModel.duplicateBoard(viewModel.selectedBoardID)
         if duplicated {
             handleBoardContextChanged()
+        }
+    }
+
+    private func openGlobalTaskFinder() {
+        globalTaskSearchQuery = taskSearchQuery
+        isShowingGlobalTaskFinder = true
+    }
+
+    private func closeGlobalTaskFinder() {
+        globalTaskSearchQuery = ""
+        isShowingGlobalTaskFinder = false
+    }
+
+    private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
+        let opened = viewModel.openTask(result.taskID, in: result.boardID)
+        if opened {
+            closeGlobalTaskFinder()
+            handleBoardContextChanged()
+            taskSearchQuery = result.taskTitle
         }
     }
 
@@ -767,6 +801,10 @@ struct ContentView: View {
 
     private var moveTaskBoardTargets: [KanbanBoardRecord] {
         viewModel.boards.filter { $0.id != viewModel.selectedBoardID }
+    }
+
+    private var globalTaskSearchResults: [GlobalTaskSearchResult] {
+        viewModel.globalTaskSearchResults(query: globalTaskSearchQuery)
     }
 
     private func resetTaskFilters() {
@@ -1239,6 +1277,70 @@ private struct TaskCardView: View {
 
     private var taskCardBorder: Color {
         BoardChromePalette.taskCardBorderColor(for: colorScheme)
+    }
+}
+
+private struct GlobalTaskSearchSheet: View {
+    @Binding var query: String
+    let results: [GlobalTaskSearchResult]
+    let onOpenResult: (GlobalTaskSearchResult) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Find Task")
+                .font(.title3.weight(.semibold))
+
+            TextField("Search title, details, skills, assignee, board", text: $query)
+                .textFieldStyle(.roundedBorder)
+
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Type to search all boards.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if results.isEmpty {
+                Text("No matching tasks found.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                List(results) { result in
+                    Button {
+                        onOpenResult(result)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(result.taskTitle)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            HStack(spacing: 8) {
+                                Text(result.boardName)
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(.quaternary, in: Capsule())
+                                Text(result.status.title)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(result.assigneeName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.inset)
+            }
+
+            HStack {
+                Spacer()
+                Button("Close", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 560, height: 420)
     }
 }
 
