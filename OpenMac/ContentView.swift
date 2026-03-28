@@ -250,6 +250,7 @@ struct ContentView: View {
                 skills: $newTaskSkills,
                 storyPoints: $newTaskPoints,
                 boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetDraftAndClose,
                 onCreate: {
                     let added = viewModel.addTask(
@@ -279,6 +280,7 @@ struct ContentView: View {
                 skills: $editTaskSkills,
                 storyPoints: $editTaskPoints,
                 boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditTaskSheet,
                 onSave: applyTaskEdits
             )
@@ -289,6 +291,7 @@ struct ContentView: View {
                 skills: $newAgentSkills,
                 maxConcurrentTasks: $newAgentCapacity,
                 boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetAgentDraftAndClose,
                 onCreate: {
                     let added = viewModel.addAgent(
@@ -308,6 +311,7 @@ struct ContentView: View {
                 skills: $editAgentSkills,
                 maxConcurrentTasks: $editAgentCapacity,
                 boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditAgentSheet,
                 onSave: applyAgentEdits
             )
@@ -1089,6 +1093,7 @@ private struct NewTaskSheet: View {
     @Binding var skills: String
     @Binding var storyPoints: Int
     let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
     let onCreate: () -> Void
@@ -1099,9 +1104,7 @@ private struct NewTaskSheet: View {
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
-                Text(boardMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
             TextField("Title", text: $title)
@@ -1128,6 +1131,7 @@ private struct EditTaskSheet: View {
     @Binding var skills: String
     @Binding var storyPoints: Int
     let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -1138,9 +1142,7 @@ private struct EditTaskSheet: View {
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
-                Text(boardMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
             TextField("Title", text: $title)
@@ -1196,6 +1198,7 @@ private struct NewAgentSheet: View {
     @Binding var skills: String
     @Binding var maxConcurrentTasks: Int
     let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
     let onCreate: () -> Void
@@ -1206,9 +1209,7 @@ private struct NewAgentSheet: View {
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
-                Text(boardMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
             TextField("Name", text: $name)
@@ -1232,6 +1233,7 @@ private struct EditAgentSheet: View {
     @Binding var skills: String
     @Binding var maxConcurrentTasks: Int
     let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -1242,9 +1244,7 @@ private struct EditAgentSheet: View {
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
-                Text(boardMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
             TextField("Name", text: $name)
@@ -1283,9 +1283,7 @@ private struct ManualTriageSheet: View {
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
-                Text(boardMessage)
-                    .font(.caption)
-                    .foregroundStyle(boardMessageColor)
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
             HStack {
@@ -1364,9 +1362,21 @@ private struct ManualTriageSheet: View {
     private var triageCardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.94)
     }
+}
 
-    private var boardMessageColor: Color {
-        switch boardMessageSeverity {
+private struct BoardMessageBanner: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let message: String
+    let severity: BoardMessageSeverity?
+
+    var body: some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(messageColor)
+    }
+
+    private var messageColor: Color {
+        switch severity {
         case .info:
             return colorScheme == .dark ? Color.cyan.opacity(0.9) : Color(red: 0.0, green: 0.42, blue: 0.56)
         case .warning:
