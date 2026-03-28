@@ -3655,6 +3655,7 @@ struct KanbanPersistenceTests {
         let executed = viewModel.runTaskExecution(task.id)
         let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
         let record = updatedTask?.executionRecord
+        let agentEvents = viewModel.executionEvents(for: agent.id)
 
         #expect(executed)
         #expect(updatedTask?.status == .review)
@@ -3667,6 +3668,10 @@ struct KanbanPersistenceTests {
         #expect(record?.lastFinishedAt != nil)
         #expect(viewModel.lastBoardMessageSeverity == .info)
         #expect(store.savedSnapshots.count == 1)
+        #expect(agentEvents.count == 2)
+        #expect(agentEvents.first?.status == .succeeded)
+        #expect(agentEvents.last?.status == .running)
+        #expect(agentEvents.first?.taskID == task.id)
     }
 
     @Test("run task execution rejects unassigned task")
@@ -3818,6 +3823,7 @@ struct KanbanPersistenceTests {
         let executed = viewModel.runTaskExecution(task.id)
         let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
         let record = updatedTask?.executionRecord
+        let agentEvents = viewModel.executionEvents(for: agent.id)
 
         #expect(executed)
         #expect(updatedTask?.status == .inProgress)
@@ -3829,6 +3835,10 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Execution failed: Tool timeout")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
         #expect(store.savedSnapshots.count == 1)
+        #expect(agentEvents.count == 2)
+        #expect(agentEvents.first?.status == .failed)
+        #expect(agentEvents.last?.status == .running)
+        #expect(agentEvents.first?.taskID == task.id)
     }
 
     @Test("run task execution extracts debug log from failure delimiter")

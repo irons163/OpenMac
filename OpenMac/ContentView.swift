@@ -70,6 +70,7 @@ struct ContentView: View {
     @State private var selectedAssigneeFilterKey = "all"
     @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
     @State private var isBatchRunning = false
+    @State private var selectedAgentConsoleAgentID: UUID?
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -87,9 +88,21 @@ struct ContentView: View {
                         maxLoad: agent.maxConcurrentTasks,
                         loadPercent: viewModel.loadPercent(for: agent.id),
                         loadProgress: min(1.0, viewModel.loadRatio(for: agent.id)),
-                        isOverloaded: viewModel.isAgentOverloaded(agent.id)
+                        isOverloaded: viewModel.isAgentOverloaded(agent.id),
+                        isRunning: viewModel.isAgentExecutionRunning(agent.id),
+                        recentEventMessage: viewModel.executionEvents(for: agent.id, limit: 1).first?.message,
+                        isSelected: selectedAgentConsoleAgentID == agent.id
                     )
                     .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedAgentConsoleAgentID = agent.id
+                    }
+                    .listRowBackground(
+                        selectedAgentConsoleAgentID == agent.id
+                            ? BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme)
+                            : Color.clear
+                    )
                     .contextMenu {
                         Button("Edit Agent") {
                             openEditAgent(agent)
@@ -259,6 +272,18 @@ struct ContentView: View {
                             )
                         }
                     }
+                }
+
+                if let selectedAgent = selectedAgentForConsole {
+                    AgentLiveConsoleView(
+                        agentName: selectedAgent.name,
+                        isRunning: viewModel.isAgentExecutionRunning(selectedAgent.id),
+                        events: viewModel.executionEvents(for: selectedAgent.id),
+                        onCopy: copyToPasteboard,
+                        onClear: {
+                            viewModel.clearExecutionEvents(for: selectedAgent.id)
+                        }
+                    )
                 }
 
                 ScrollView(.horizontal) {
@@ -634,8 +659,12 @@ struct ContentView: View {
                 onClose: { selectedExecutionDetails = nil }
             )
         }
+        .onAppear {
+            syncSelectedAgentConsoleSelection()
+        }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
+            syncSelectedAgentConsoleSelection()
         }
         .onChange(of: viewModel.selectedBoardID) { _, _ in
             handleBoardContextChanged()
@@ -790,6 +819,7 @@ struct ContentView: View {
         closeEditTaskSheet()
         closeEditAgentSheet()
         normalizeAssigneeFilterSelection()
+        syncSelectedAgentConsoleSelection()
     }
 
     private func openWIPSettings() {
@@ -1207,6 +1237,13 @@ struct ContentView: View {
         viewModel.boards.filter { $0.id != viewModel.selectedBoardID }
     }
 
+    private var selectedAgentForConsole: AgentProfile? {
+        guard let selectedAgentConsoleAgentID else {
+            return viewModel.agents.first
+        }
+        return viewModel.agents.first(where: { $0.id == selectedAgentConsoleAgentID }) ?? viewModel.agents.first
+    }
+
     private var globalTaskSearchResults: [GlobalTaskSearchResult] {
         viewModel.globalTaskSearchResults(query: globalTaskSearchQuery)
     }
@@ -1214,6 +1251,20 @@ struct ContentView: View {
     private func resetTaskFilters() {
         taskSearchQuery = ""
         selectedAssigneeFilterKey = "all"
+    }
+
+    private func syncSelectedAgentConsoleSelection() {
+        guard !viewModel.agents.isEmpty else {
+            selectedAgentConsoleAgentID = nil
+            return
+        }
+
+        if let selectedAgentConsoleAgentID,
+           viewModel.agents.contains(where: { $0.id == selectedAgentConsoleAgentID }) {
+            return
+        }
+
+        selectedAgentConsoleAgentID = viewModel.agents.first?.id
     }
 
     private func normalizeAssigneeFilterSelection() {
@@ -1330,6 +1381,9 @@ private struct AgentRowView: View {
     let loadPercent: Int
     let loadProgress: Double
     let isOverloaded: Bool
+    let isRunning: Bool
+    let recentEventMessage: String?
+    let isSelected: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1360,7 +1414,22 @@ private struct AgentRowView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
             }
+            if isRunning {
+                Text("Live: Running")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
+            } else if let recentEventMessage, !recentEventMessage.isEmpty {
+                Text("Last: \(recentEventMessage)")
+                    .font(.caption2)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                    .lineLimit(1)
+            }
         }
+        .padding(8)
+        .background(
+            isSelected ? BoardSurfacePalette.supplementaryCardColor(for: colorScheme) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10)
+        )
     }
 }
 
@@ -1992,6 +2061,151 @@ private struct ExecutionDetailsSheet: View {
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+}
+
+private struct AgentLiveConsoleView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let agentName: String
+    let isRunning: Bool
+    let events: [AgentExecutionEvent]
+    let onCopy: (String) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Agent Live Console · \(agentName)")
+                    .font(.headline)
+                Spacer()
+                Text(isRunning ? "Running" : "Idle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(
+                        isRunning
+                            ? BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme)
+                            : BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
+                    )
+                if !events.isEmpty {
+                    Button("Clear", action: onClear)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+
+            if events.isEmpty {
+                Text("No execution events yet. Run a task to see live updates for this agent.")
+                    .font(.caption)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(events) { event in
+                            AgentExecutionEventRow(event: event, onCopy: onCopy)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 120, maxHeight: 220)
+                .padding(10)
+                .background(
+                    BoardSurfacePalette.supplementaryCardColor(for: colorScheme),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            BoardChromePalette.supplementaryCardBorderColor(for: colorScheme),
+                            lineWidth: 1
+                        )
+                )
+            }
+        }
+    }
+}
+
+private struct AgentExecutionEventRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let event: AgentExecutionEvent
+    let onCopy: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(statusLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                Text(Self.dateFormatter.string(from: event.timestamp))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                Text(event.taskTitle)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button("Copy") {
+                    onCopy(copyText)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+
+            Text(event.message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+
+            if let details = event.details, !details.isEmpty {
+                Text(details)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .background(BoardSurfacePalette.taskCardColor(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(BoardChromePalette.taskCardBorderColor(for: colorScheme), lineWidth: 1)
+        )
+    }
+
+    private var statusLabel: String {
+        switch event.status {
+        case .running:
+            return "Running"
+        case .succeeded:
+            return "Succeeded"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private var statusColor: Color {
+        switch event.status {
+        case .running:
+            return BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme)
+        case .succeeded:
+            return BoardSemanticTextPalette.color(for: .success, scheme: colorScheme)
+        case .failed:
+            return BoardSemanticTextPalette.color(for: .error, scheme: colorScheme)
+        }
+    }
+
+    private var copyText: String {
+        [
+            "[\(statusLabel)] \(event.taskTitle)",
+            event.message,
+            event.details
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n")
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
         formatter.timeStyle = .medium
         return formatter
     }()

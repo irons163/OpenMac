@@ -673,6 +673,37 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 }
 
+struct AgentExecutionEvent: Identifiable, Equatable {
+    let id: UUID
+    let timestamp: Date
+    let agentID: UUID
+    let taskID: UUID
+    let taskTitle: String
+    let status: TaskExecutionStatus
+    let message: String
+    let details: String?
+
+    init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        agentID: UUID,
+        taskID: UUID,
+        taskTitle: String,
+        status: TaskExecutionStatus,
+        message: String,
+        details: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.agentID = agentID
+        self.taskID = taskID
+        self.taskTitle = taskTitle
+        self.status = status
+        self.message = message
+        self.details = details
+    }
+}
+
 final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
@@ -693,11 +724,13 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var lastCodexLoginCommand: String?
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
+    @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
 
     private let assignmentEngine: AutoAssignmentEngine
     private let taskExecutor: any AgentTaskExecuting
     private let boardStore: KanbanBoardStore?
     private static let defaultBoardName = "Default Board"
+    private static let maxAgentExecutionEventsPerAgent = 120
 
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
@@ -1708,6 +1741,7 @@ final class KanbanBoardViewModel: ObservableObject {
         guard agents.contains(where: { $0.id == agentID }) else { return false }
 
         agents.removeAll { $0.id == agentID }
+        agentExecutionEventsByAgentID[agentID] = nil
 
         for index in tasks.indices where tasks[index].assignedAgentID == agentID {
             tasks[index].assignedAgentID = nil
@@ -1986,6 +2020,25 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func executionRecord(for taskID: UUID) -> TaskExecutionRecord? {
         tasks.first(where: { $0.id == taskID })?.executionRecord
+    }
+
+    func executionEvents(for agentID: UUID, limit: Int = 80) -> [AgentExecutionEvent] {
+        let events = agentExecutionEventsByAgentID[agentID] ?? []
+        guard limit > 0, events.count > limit else {
+            return events.reversed()
+        }
+        return events.suffix(limit).reversed()
+    }
+
+    func clearExecutionEvents(for agentID: UUID) {
+        agentExecutionEventsByAgentID[agentID] = []
+    }
+
+    func isAgentExecutionRunning(_ agentID: UUID) -> Bool {
+        tasks.contains { task in
+            guard task.executionRecord?.status == .running else { return false }
+            return task.executionRecord?.lastAgentID == agentID || task.assignedAgentID == agentID
+        }
     }
 
     private struct PreparedTaskExecution {
@@ -2468,6 +2521,31 @@ final class KanbanBoardViewModel: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func appendAgentExecutionEvent(
+        agentID: UUID,
+        taskID: UUID,
+        taskTitle: String,
+        status: TaskExecutionStatus,
+        message: String,
+        details: String? = nil
+    ) {
+        let event = AgentExecutionEvent(
+            agentID: agentID,
+            taskID: taskID,
+            taskTitle: taskTitle,
+            status: status,
+            message: message,
+            details: normalizeExecutionText(details)
+        )
+
+        var events = agentExecutionEventsByAgentID[agentID] ?? []
+        events.append(event)
+        if events.count > Self.maxAgentExecutionEventsPerAgent {
+            events.removeFirst(events.count - Self.maxAgentExecutionEventsPerAgent)
+        }
+        agentExecutionEventsByAgentID[agentID] = events
+    }
+
     private func prepareTaskExecution(_ taskID: UUID, requiresTaskDetails: Bool) -> PreparedTaskExecution? {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return nil }
         lastExecutionDebugLog = nil
@@ -2509,6 +2587,14 @@ final class KanbanBoardViewModel: ObservableObject {
         record.lastDebugOutput = nil
         record.lastAgentID = agent.id
         tasks[taskIndex].executionRecord = record
+        appendAgentExecutionEvent(
+            agentID: agent.id,
+            taskID: taskID,
+            taskTitle: tasks[taskIndex].title,
+            status: .running,
+            message: "Started execution · \(tasks[taskIndex].title)",
+            details: "Story points: \(tasks[taskIndex].storyPoints)"
+        )
 
         return PreparedTaskExecution(
             taskID: taskID,
@@ -2538,6 +2624,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastCodexLoginCommand = nil
                 lastBoardMessage = blockerMessage
                 lastBoardMessageSeverity = .warning
+                appendAgentExecutionEvent(
+                    agentID: prepared.agent.id,
+                    taskID: prepared.taskID,
+                    taskTitle: tasks[taskIndex].title,
+                    status: .failed,
+                    message: blockerMessage,
+                    details: normalizedSummary
+                )
             } else {
                 var finishedRecord = baselineRecord
                 finishedRecord.status = .succeeded
@@ -2564,6 +2658,14 @@ final class KanbanBoardViewModel: ObservableObject {
                     lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
                     lastBoardMessageSeverity = .info
                 }
+                appendAgentExecutionEvent(
+                    agentID: prepared.agent.id,
+                    taskID: prepared.taskID,
+                    taskTitle: tasks[taskIndex].title,
+                    status: .succeeded,
+                    message: "Execution succeeded · \(tasks[taskIndex].title)",
+                    details: normalizedSummary
+                )
             }
 
         case let .failure(message):
@@ -2583,6 +2685,20 @@ final class KanbanBoardViewModel: ObservableObject {
             )
             lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
             lastBoardMessageSeverity = .warning
+            let eventDetails: String?
+            if let debug = failedRecord.lastDebugOutput, !debug.isEmpty {
+                eventDetails = "Debug:\n\(debug)"
+            } else {
+                eventDetails = nil
+            }
+            appendAgentExecutionEvent(
+                agentID: prepared.agent.id,
+                taskID: prepared.taskID,
+                taskTitle: tasks[taskIndex].title,
+                status: .failed,
+                message: failedRecord.lastError ?? "Unknown execution error",
+                details: eventDetails
+            )
         }
 
         persistBoardState()
@@ -2685,6 +2801,7 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessageSeverity = nil
         lastExecutionDebugLog = nil
         lastCodexLoginCommand = nil
+        agentExecutionEventsByAgentID = [:]
     }
 
     private func uniqueBoardCopyName(for sourceName: String) -> String {
