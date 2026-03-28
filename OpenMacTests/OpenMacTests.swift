@@ -294,8 +294,9 @@ struct KanbanFlowTests {
         #expect(viewModel.assignmentReason(for: task.id) != nil)
     }
 
-    @Test("filters tasks by search query across title details and skills")
+    @Test("filters tasks by search query across title details skills and assignee name")
     func filtersTasksBySearchQuery() {
+        let searchAgent = AgentProfile(name: "Search Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
         let matchByTitle = WorkTask(
             title: "Implement search panel",
             details: "",
@@ -318,7 +319,7 @@ struct KanbanFlowTests {
             requiredSkills: ["search"],
             storyPoints: 1,
             status: .todo,
-            assignedAgentID: nil
+            assignedAgentID: searchAgent.id
         )
         let nonMatch = WorkTask(
             title: "Notifications",
@@ -328,14 +329,26 @@ struct KanbanFlowTests {
             status: .todo,
             assignedAgentID: nil
         )
-        let viewModel = KanbanBoardViewModel(tasks: [matchByTitle, matchByDetails, matchBySkills, nonMatch], agents: [])
+        let matchByAssignee = WorkTask(
+            title: "Polish transitions",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: searchAgent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [matchByTitle, matchByDetails, matchBySkills, matchByAssignee, nonMatch],
+            agents: [searchAgent]
+        )
 
         let filtered = viewModel.filteredTasks(in: .todo, query: "search", assigneeFilter: .all)
 
-        #expect(filtered.count == 3)
+        #expect(filtered.count == 4)
         #expect(filtered.contains(where: { $0.id == matchByTitle.id }))
         #expect(filtered.contains(where: { $0.id == matchByDetails.id }))
         #expect(filtered.contains(where: { $0.id == matchBySkills.id }))
+        #expect(filtered.contains(where: { $0.id == matchByAssignee.id }))
         #expect(!filtered.contains(where: { $0.id == nonMatch.id }))
     }
 

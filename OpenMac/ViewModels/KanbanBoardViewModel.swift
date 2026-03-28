@@ -138,7 +138,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 let titleMatch = task.title.lowercased().contains(normalizedQuery)
                 let detailsMatch = task.details.lowercased().contains(normalizedQuery)
                 let skillsMatch = task.requiredSkills.contains { $0.lowercased().contains(normalizedQuery) }
-                matchesQuery = titleMatch || detailsMatch || skillsMatch
+                let assigneeNameMatch = agentName(for: task.assignedAgentID).lowercased().contains(normalizedQuery)
+                matchesQuery = titleMatch || detailsMatch || skillsMatch || assigneeNameMatch
             }
 
             let matchesAssignee: Bool
