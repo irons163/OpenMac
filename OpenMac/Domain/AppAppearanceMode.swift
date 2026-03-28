@@ -44,3 +44,9 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+enum AppearanceSchemeResolver {
+    static func resolve(systemScheme: ColorScheme, appearanceMode: AppAppearanceMode) -> ColorScheme {
+        appearanceMode.preferredColorScheme ?? systemScheme
+    }
+}

@@ -132,6 +132,14 @@ struct AppearanceModeTests {
         #expect(AppAppearanceMode.dark.next() == .system)
     }
 
+    @Test("resolves effective color scheme from system scheme and selected appearance mode")
+    func resolvesEffectiveColorSchemeFromAppearanceSelection() {
+        #expect(AppearanceSchemeResolver.resolve(systemScheme: .light, appearanceMode: .system) == .light)
+        #expect(AppearanceSchemeResolver.resolve(systemScheme: .dark, appearanceMode: .system) == .dark)
+        #expect(AppearanceSchemeResolver.resolve(systemScheme: .light, appearanceMode: .dark) == .dark)
+        #expect(AppearanceSchemeResolver.resolve(systemScheme: .dark, appearanceMode: .light) == .light)
+    }
+
     @Test("board message palette falls back to error tone when severity is missing")
     func boardMessagePaletteFallbacksToError() {
         let fallbackDark = BoardMessageColorPalette.token(for: nil, scheme: .dark)
@@ -216,6 +224,17 @@ struct AppearanceModeTests {
         #expect(errorLight.contrastRatio(against: lightBackground) >= 4.5)
         #expect(errorDark.contrastRatio(against: darkSupplementary) >= 4.5)
         #expect(errorLight.contrastRatio(against: lightSupplementary) >= 4.5)
+    }
+
+    @Test("semantic error text keeps contrast on WIP counter surfaces")
+    func semanticErrorTextCounterContrast() {
+        let errorDark = BoardSemanticTextPalette.token(for: .error, scheme: .dark)
+        let errorLight = BoardSemanticTextPalette.token(for: .error, scheme: .light)
+        let counterDark = BoardChromePalette.counterToken(for: .dark)
+        let counterLight = BoardChromePalette.counterToken(for: .light)
+
+        #expect(errorDark.contrastRatio(against: counterDark) >= 4.5)
+        #expect(errorLight.contrastRatio(against: counterLight) >= 4.5)
     }
 
     @Test("dark task cards stay visually distinct from each kanban column background")

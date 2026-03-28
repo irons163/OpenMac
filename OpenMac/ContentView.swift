@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
     @StateObject private var viewModel: KanbanBoardViewModel
 
@@ -76,7 +76,7 @@ struct ContentView: View {
                     if !viewModel.triageCandidates().isEmpty {
                         Text("\(viewModel.triageCandidates().count) task(s) need manual triage")
                             .font(.callout)
-                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
+                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
                     }
                 }
 
@@ -127,7 +127,7 @@ struct ContentView: View {
                 if let message = viewModel.lastBoardMessage {
                     Text(message)
                         .font(.callout)
-                        .foregroundStyle(BoardMessageColorPalette.color(for: viewModel.lastBoardMessageSeverity, scheme: colorScheme))
+                        .foregroundStyle(BoardMessageColorPalette.color(for: viewModel.lastBoardMessageSeverity, scheme: effectiveColorScheme))
                 }
 
                 ScrollView(.horizontal) {
@@ -336,6 +336,7 @@ struct ContentView: View {
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
         }
+        .environment(\.colorScheme, effectiveColorScheme)
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
     }
 
@@ -614,7 +615,11 @@ struct ContentView: View {
     }
 
     private var detailBackgroundColors: [Color] {
-        BoardSurfacePalette.detailGradientTokens(for: colorScheme).map(\.color)
+        BoardSurfacePalette.detailGradientTokens(for: effectiveColorScheme).map(\.color)
+    }
+
+    private var effectiveColorScheme: ColorScheme {
+        AppearanceSchemeResolver.resolve(systemScheme: systemColorScheme, appearanceMode: selectedAppearanceMode)
     }
 
     private var selectedAppearanceMode: AppAppearanceMode {
@@ -867,7 +872,7 @@ private struct KanbanColumnView: View {
                 if let wipLimit {
                     Text("\(tasks.count)/\(wipLimit)")
                         .font(.caption)
-                        .foregroundStyle(tasks.count >= wipLimit ? .red : .primary)
+                        .foregroundStyle(tasks.count >= wipLimit ? BoardSemanticTextPalette.color(for: .error, scheme: colorScheme) : .primary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                         .background(counterBackground, in: Capsule())
@@ -1365,7 +1370,7 @@ enum BoardMessageColorPalette {
         case (.dark, .warning):
             return BoardMessageColorToken(red: 0.94, green: 0.67, blue: 0.22, opacity: 1.0)
         case (.dark, .error):
-            return BoardMessageColorToken(red: 0.96, green: 0.45, blue: 0.39, opacity: 1.0)
+            return BoardMessageColorToken(red: 1.0, green: 0.64, blue: 0.59, opacity: 1.0)
         case (.light, .info):
             return BoardMessageColorToken(red: 0.00, green: 0.42, blue: 0.56, opacity: 1.0)
         case (.light, .warning):
@@ -1622,7 +1627,7 @@ enum BoardSemanticTextPalette {
         case (.dark, .warning):
             return BoardMessageColorToken(red: 0.94, green: 0.67, blue: 0.22, opacity: 1.0)
         case (.dark, .error):
-            return BoardMessageColorToken(red: 0.96, green: 0.45, blue: 0.39, opacity: 1.0)
+            return BoardMessageColorToken(red: 1.0, green: 0.64, blue: 0.59, opacity: 1.0)
         case (.light, .success):
             return BoardMessageColorToken(red: 0.06, green: 0.45, blue: 0.18, opacity: 1.0)
         case (.light, .warning):
