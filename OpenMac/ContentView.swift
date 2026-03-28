@@ -189,28 +189,37 @@ struct ContentView: View {
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .help("Create a new agent profile (Option-Command-N)")
                 Menu("Board Actions") {
-                    Button("Archive Done") {
-                        archiveDoneTasks()
+                    Section("Health") {
+                        Button("Apply Health Fixes") {
+                            applyAllHealthRecommendations()
+                        }
+                        .disabled(!hasAutoHealthFixes)
                     }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-                    .disabled(viewModel.tasks(in: .done).isEmpty)
 
-                    Button("Rebalance Load") {
-                        rebalanceTodoAssignments()
-                    }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(!viewModel.canRebalanceTodoAssignments())
+                    Section("Board") {
+                        Button("Archive Done") {
+                            archiveDoneTasks()
+                        }
+                        .keyboardShortcut("d", modifiers: [.command, .shift])
+                        .disabled(viewModel.tasks(in: .done).isEmpty)
 
-                    Button("WIP Limits") {
-                        openWIPSettings()
-                    }
-                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                        Button("Rebalance Load") {
+                            rebalanceTodoAssignments()
+                        }
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
+                        .disabled(!viewModel.canRebalanceTodoAssignments())
 
-                    Button("Manual Triage") {
-                        openManualTriage()
+                        Button("WIP Limits") {
+                            openWIPSettings()
+                        }
+                        .keyboardShortcut("l", modifiers: [.command, .shift])
+
+                        Button("Manual Triage") {
+                            openManualTriage()
+                        }
+                        .keyboardShortcut("t", modifiers: [.command, .shift])
+                        .disabled(viewModel.triageCandidates().isEmpty)
                     }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .disabled(viewModel.triageCandidates().isEmpty)
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
             }
@@ -590,6 +599,17 @@ struct ContentView: View {
 
     private var canAutoAssignFromToolbar: Bool {
         viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
+    }
+
+    private var hasAutoHealthFixes: Bool {
+        viewModel.healthRecommendations().contains { recommendation in
+            switch recommendation.action {
+            case .openManualTriage, .openNewAgent:
+                return false
+            case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
+                return true
+            }
+        }
     }
 
     private var detailBackgroundColors: [Color] {
