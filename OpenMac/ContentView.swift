@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -227,6 +228,20 @@ struct ContentView: View {
                     }
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
+                Menu("Appearance") {
+                    ForEach(AppAppearanceMode.allCases) { mode in
+                        Button {
+                            appearanceModeRawValue = mode.rawValue
+                        } label: {
+                            if selectedAppearanceMode == mode {
+                                Label(mode.title, systemImage: "checkmark")
+                            } else {
+                                Text(mode.title)
+                            }
+                        }
+                    }
+                }
+                .help("Switch between system, light, and dark appearance")
             }
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -315,6 +330,7 @@ struct ContentView: View {
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
         }
+        .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
     }
 
     private func resetDraftAndClose() {
@@ -617,6 +633,10 @@ struct ContentView: View {
             Color(red: 0.96, green: 0.98, blue: 1.0),
             Color(red: 0.93, green: 0.96, blue: 0.99)
         ]
+    }
+
+    private var selectedAppearanceMode: AppAppearanceMode {
+        AppAppearanceMode.resolve(rawValue: appearanceModeRawValue)
     }
 }
 

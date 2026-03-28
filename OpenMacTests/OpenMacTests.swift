@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import OpenMac
 
@@ -107,6 +108,21 @@ struct AutoAssignmentEngineTests {
         #expect(decision?.agentID == agent.id)
         #expect(!(decision?.reason.isEmpty ?? true))
         #expect((decision?.score ?? 0) > 0)
+    }
+}
+
+struct AppearanceModeTests {
+
+    @Test("maps appearance mode to preferred color scheme")
+    func mapsAppearanceModeToPreferredColorScheme() {
+        #expect(AppAppearanceMode.system.preferredColorScheme == nil)
+        #expect(AppAppearanceMode.light.preferredColorScheme == .light)
+        #expect(AppAppearanceMode.dark.preferredColorScheme == .dark)
+    }
+
+    @Test("defaults invalid stored appearance mode to system")
+    func defaultsInvalidStoredAppearanceModeToSystem() {
+        #expect(AppAppearanceMode.resolve(rawValue: "invalid") == .system)
     }
 }
 
