@@ -433,6 +433,71 @@ final class KanbanBoardViewModel: ObservableObject {
         return true
     }
 
+    func workspaceExportData() -> Data? {
+        syncCurrentBoardRecord()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        do {
+            return try encoder.encode(
+                KanbanBoardSnapshot(
+                    tasks: tasks,
+                    agents: agents,
+                    wipLimits: wipLimits,
+                    boards: boards,
+                    selectedBoardID: selectedBoardID
+                )
+            )
+        } catch {
+            lastBoardMessage = "Failed to export workspace"
+            return nil
+        }
+    }
+
+    @discardableResult
+    func importWorkspaceData(_ data: Data) -> Bool {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+
+        guard let snapshot = try? decoder.decode(KanbanBoardSnapshot.self, from: data) else {
+            lastBoardMessage = "Invalid workspace JSON"
+            return false
+        }
+
+        let importedBoards: [KanbanBoardRecord]
+        let preferredSelectedBoardID: UUID?
+        if let snapshotBoards = snapshot.boards, !snapshotBoards.isEmpty {
+            importedBoards = snapshotBoards.map(normalizedBoardRecord)
+            preferredSelectedBoardID = snapshot.selectedBoardID
+        } else {
+            let fallbackBoard = KanbanBoardRecord(
+                name: Self.defaultBoardName,
+                tasks: snapshot.tasks,
+                agents: snapshot.agents,
+                wipLimits: snapshot.wipLimits
+            )
+            importedBoards = [normalizedBoardRecord(fallbackBoard)]
+            preferredSelectedBoardID = nil
+        }
+
+        guard !importedBoards.isEmpty else {
+            lastBoardMessage = "Workspace has no boards"
+            return false
+        }
+
+        boards = importedBoards
+        let resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
+            importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
+        } ?? importedBoards[0].id
+
+        loadBoard(resolvedSelectedBoardID)
+        persistBoardState()
+        let boardLabel = boards.count == 1 ? "board" : "boards"
+        lastBoardMessage = "Imported workspace (\(boards.count) \(boardLabel))"
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
     @discardableResult
     func moveTask(_ taskID: UUID, to status: KanbanStatus) -> Bool {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
@@ -1272,6 +1337,21 @@ final class KanbanBoardViewModel: ObservableObject {
             suffix += 1
         }
         return candidate
+    }
+
+    private func normalizedBoardRecord(_ board: KanbanBoardRecord) -> KanbanBoardRecord {
+        let trimmedName = board.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = trimmedName.isEmpty ? Self.defaultBoardName : trimmedName
+        let resolvedWIPLimits = board.wipLimits.reduce(into: [:]) { partialResult, pair in
+            partialResult[pair.key] = max(1, pair.value)
+        }
+        return KanbanBoardRecord(
+            id: board.id,
+            name: resolvedName,
+            tasks: board.tasks,
+            agents: board.agents,
+            wipLimits: resolvedWIPLimits
+        )
     }
 
     private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {

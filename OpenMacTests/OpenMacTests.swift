@@ -1696,6 +1696,87 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.last?.selectedBoardID == targetBoardID)
     }
 
+    @Test("exports workspace snapshot JSON including multi-board metadata")
+    func exportsWorkspaceSnapshotJSON() throws {
+        let seedTask = WorkTask(
+            title: "Seed",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [seedTask], agents: [])
+        _ = viewModel.createBoard(name: "Ops Board")
+
+        let exported = viewModel.workspaceExportData()
+
+        #expect(exported != nil)
+        guard let exported else { return }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exported)
+        #expect(snapshot.boards?.count == 2)
+        #expect(snapshot.selectedBoardID == viewModel.selectedBoardID)
+    }
+
+    @Test("imports workspace snapshot and persists board selection")
+    func importsWorkspaceSnapshotAndPersistsSelection() throws {
+        let deliveryTask = WorkTask(
+            title: "Delivery",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let qaTask = WorkTask(
+            title: "QA",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let deliveryBoard = KanbanBoardRecord(name: "Delivery", tasks: [deliveryTask], agents: [], wipLimits: [.inProgress: 3, .review: 2])
+        let qaBoard = KanbanBoardRecord(name: "QA", tasks: [qaTask], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: deliveryBoard.tasks,
+            agents: deliveryBoard.agents,
+            wipLimits: deliveryBoard.wipLimits,
+            boards: [deliveryBoard, qaBoard],
+            selectedBoardID: qaBoard.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let imported = viewModel.importWorkspaceData(data)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.selectedBoardID == qaBoard.id)
+        #expect(viewModel.selectedBoardName == "QA")
+        #expect(viewModel.tasks.first?.title == "QA")
+        #expect(store.savedSnapshots.last?.selectedBoardID == qaBoard.id)
+    }
+
+    @Test("rejects invalid workspace JSON import")
+    func rejectsInvalidWorkspaceImport() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let invalidData = Data("not-valid-json".utf8)
+
+        let imported = viewModel.importWorkspaceData(invalidData)
+
+        #expect(!imported)
+        #expect(viewModel.lastBoardMessage == "Invalid workspace JSON")
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
