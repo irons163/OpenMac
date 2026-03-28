@@ -131,6 +131,48 @@ struct AppearanceModeTests {
         #expect(AppAppearanceMode.light.next() == .dark)
         #expect(AppAppearanceMode.dark.next() == .system)
     }
+
+    @Test("board message palette falls back to error tone when severity is missing")
+    func boardMessagePaletteFallbacksToError() {
+        let fallbackDark = BoardMessageColorPalette.token(for: nil, scheme: .dark)
+        let fallbackLight = BoardMessageColorPalette.token(for: nil, scheme: .light)
+        let errorDark = BoardMessageColorPalette.token(for: .error, scheme: .dark)
+        let errorLight = BoardMessageColorPalette.token(for: .error, scheme: .light)
+
+        #expect(fallbackDark.red == errorDark.red)
+        #expect(fallbackDark.green == errorDark.green)
+        #expect(fallbackDark.blue == errorDark.blue)
+        #expect(fallbackDark.opacity == errorDark.opacity)
+
+        #expect(fallbackLight.red == errorLight.red)
+        #expect(fallbackLight.green == errorLight.green)
+        #expect(fallbackLight.blue == errorLight.blue)
+        #expect(fallbackLight.opacity == errorLight.opacity)
+    }
+
+    @Test("board message palette maintains dark mode contrast for all severities")
+    func boardMessagePaletteDarkContrast() {
+        let background = BoardMessageColorPalette.darkBoardBackground
+        let infoContrast = BoardMessageColorPalette.token(for: .info, scheme: .dark).contrastRatio(against: background)
+        let warningContrast = BoardMessageColorPalette.token(for: .warning, scheme: .dark).contrastRatio(against: background)
+        let errorContrast = BoardMessageColorPalette.token(for: .error, scheme: .dark).contrastRatio(against: background)
+
+        #expect(infoContrast >= 4.0)
+        #expect(warningContrast >= 4.0)
+        #expect(errorContrast >= 4.0)
+    }
+
+    @Test("board message palette maintains light mode contrast for all severities")
+    func boardMessagePaletteLightContrast() {
+        let background = BoardMessageColorPalette.lightBoardBackground
+        let infoContrast = BoardMessageColorPalette.token(for: .info, scheme: .light).contrastRatio(against: background)
+        let warningContrast = BoardMessageColorPalette.token(for: .warning, scheme: .light).contrastRatio(against: background)
+        let errorContrast = BoardMessageColorPalette.token(for: .error, scheme: .light).contrastRatio(against: background)
+
+        #expect(infoContrast >= 4.0)
+        #expect(warningContrast >= 4.0)
+        #expect(errorContrast >= 4.0)
+    }
 }
 
 struct KanbanFlowTests {

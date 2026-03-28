@@ -127,7 +127,7 @@ struct ContentView: View {
                 if let message = viewModel.lastBoardMessage {
                     Text(message)
                         .font(.callout)
-                        .foregroundStyle(boardMessageColor(for: viewModel.lastBoardMessageSeverity))
+                        .foregroundStyle(BoardMessageColorPalette.color(for: viewModel.lastBoardMessageSeverity, scheme: colorScheme))
                 }
 
                 ScrollView(.horizontal) {
@@ -624,19 +624,6 @@ struct ContentView: View {
             Color(red: 0.96, green: 0.98, blue: 1.0),
             Color(red: 0.93, green: 0.96, blue: 0.99)
         ]
-    }
-
-    private func boardMessageColor(for severity: BoardMessageSeverity?) -> Color {
-        switch severity {
-        case .info:
-            return colorScheme == .dark ? Color.cyan.opacity(0.9) : Color(red: 0.0, green: 0.42, blue: 0.56)
-        case .warning:
-            return colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0)
-        case .error:
-            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
-        case .none:
-            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
-        }
     }
 
     private var selectedAppearanceMode: AppAppearanceMode {
@@ -1296,7 +1283,7 @@ private struct ManualTriageSheet: View {
             if unassignableTaskCount > 0 {
                 Text("\(unassignableTaskCount) task(s) currently have no eligible agent and will be skipped.")
                     .font(.caption)
-                    .foregroundStyle(colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0))
+                    .foregroundStyle(BoardMessageColorPalette.color(for: .warning, scheme: colorScheme))
             }
 
             if tasks.isEmpty {
@@ -1364,6 +1351,66 @@ private struct ManualTriageSheet: View {
     }
 }
 
+struct BoardMessageColorToken: Equatable {
+    let red: Double
+    let green: Double
+    let blue: Double
+    let opacity: Double
+
+    var color: Color {
+        Color(red: red, green: green, blue: blue).opacity(opacity)
+    }
+
+    var relativeLuminance: Double {
+        let linearRed = linearizedComponent(red)
+        let linearGreen = linearizedComponent(green)
+        let linearBlue = linearizedComponent(blue)
+        return (0.2126 * linearRed) + (0.7152 * linearGreen) + (0.0722 * linearBlue)
+    }
+
+    func contrastRatio(against other: BoardMessageColorToken) -> Double {
+        let lighter = max(relativeLuminance, other.relativeLuminance)
+        let darker = min(relativeLuminance, other.relativeLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func linearizedComponent(_ value: Double) -> Double {
+        if value <= 0.03928 {
+            return value / 12.92
+        }
+        return pow((value + 0.055) / 1.055, 2.4)
+    }
+}
+
+enum BoardMessageColorPalette {
+    static let darkBoardBackground = BoardMessageColorToken(red: 0.10, green: 0.12, blue: 0.16, opacity: 1.0)
+    static let lightBoardBackground = BoardMessageColorToken(red: 0.96, green: 0.98, blue: 1.0, opacity: 1.0)
+
+    static func token(for severity: BoardMessageSeverity?, scheme: ColorScheme) -> BoardMessageColorToken {
+        let resolvedSeverity = severity ?? .error
+        switch (scheme, resolvedSeverity) {
+        case (.dark, .info):
+            return BoardMessageColorToken(red: 0.42, green: 0.87, blue: 0.96, opacity: 1.0)
+        case (.dark, .warning):
+            return BoardMessageColorToken(red: 0.94, green: 0.67, blue: 0.22, opacity: 1.0)
+        case (.dark, .error):
+            return BoardMessageColorToken(red: 0.96, green: 0.45, blue: 0.39, opacity: 1.0)
+        case (.light, .info):
+            return BoardMessageColorToken(red: 0.00, green: 0.42, blue: 0.56, opacity: 1.0)
+        case (.light, .warning):
+            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+        case (.light, .error):
+            return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
+        }
+    }
+
+    static func color(for severity: BoardMessageSeverity?, scheme: ColorScheme) -> Color {
+        token(for: severity, scheme: scheme).color
+    }
+}
+
 private struct BoardMessageBanner: View {
     @Environment(\.colorScheme) private var colorScheme
     let message: String
@@ -1372,20 +1419,7 @@ private struct BoardMessageBanner: View {
     var body: some View {
         Text(message)
             .font(.caption)
-            .foregroundStyle(messageColor)
-    }
-
-    private var messageColor: Color {
-        switch severity {
-        case .info:
-            return colorScheme == .dark ? Color.cyan.opacity(0.9) : Color(red: 0.0, green: 0.42, blue: 0.56)
-        case .warning:
-            return colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0)
-        case .error:
-            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
-        case .none:
-            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
-        }
+            .foregroundStyle(BoardMessageColorPalette.color(for: severity, scheme: colorScheme))
     }
 }
 
