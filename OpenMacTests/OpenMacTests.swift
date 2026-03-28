@@ -810,6 +810,76 @@ struct KanbanFlowTests {
         #expect(!viewModel.hasPendingManualTriage)
     }
 
+    @Test("counts auto-fixable health recommendations")
+    func countsAutoFixableHealthRecommendations() {
+        let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let available = AgentProfile(name: "B Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssignedA = WorkTask(
+            title: "Todo A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoAssignedB = WorkTask(
+            title: "Todo B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let todoUnassigned = WorkTask(
+            title: "Todo C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: overloaded.id
+        )
+        let done = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssignedA, todoAssignedB, todoUnassigned, inProgress, done],
+            agents: [overloaded, available],
+            wipLimits: [.inProgress: 1, .review: 2]
+        )
+
+        #expect(viewModel.autoFixableHealthRecommendationCount == 4)
+        #expect(viewModel.hasAutoFixableHealthRecommendations)
+    }
+
+    @Test("reports no auto-fixable health recommendations when only navigation actions exist")
+    func reportsNoAutoFixableHealthRecommendationsForNavigationOnlyActions() {
+        let task = WorkTask(
+            title: "Needs assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        #expect(viewModel.autoFixableHealthRecommendationCount == 0)
+        #expect(!viewModel.hasAutoFixableHealthRecommendations)
+    }
+
     @Test("applies all mutating health recommendations in one pass")
     func appliesAllMutatingHealthRecommendationsInOnePass() {
         let overloaded = AgentProfile(name: "A Agent", skills: ["swiftui"], maxConcurrentTasks: 1)

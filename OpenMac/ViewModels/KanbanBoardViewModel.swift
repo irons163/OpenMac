@@ -14,6 +14,15 @@ enum BoardHealthAction: Equatable {
     case rebalanceTodoLoad
     case increaseWIPLimit(KanbanStatus)
     case archiveDone
+
+    var isAutoFixable: Bool {
+        switch self {
+        case .openManualTriage, .openNewAgent:
+            return false
+        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
+            return true
+        }
+    }
 }
 
 struct BoardHealthRecommendation: Identifiable, Equatable {
@@ -76,6 +85,12 @@ final class KanbanBoardViewModel: ObservableObject {
         return penalties
             .map { "\($0.label): -\($0.points)" }
             .joined(separator: "\n")
+    }
+    var autoFixableHealthRecommendationCount: Int {
+        healthRecommendations().filter { $0.action.isAutoFixable }.count
+    }
+    var hasAutoFixableHealthRecommendations: Bool {
+        autoFixableHealthRecommendationCount > 0
     }
 
     init(
@@ -653,7 +668,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let actions = healthRecommendations().map(\.action)
         var appliedCount = 0
 
-        for action in actions where !isNavigationalHealthAction(action) {
+        for action in actions where action.isAutoFixable {
             if applyHealthRecommendation(action) {
                 appliedCount += 1
             }
@@ -838,15 +853,6 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         return items
-    }
-
-    private func isNavigationalHealthAction(_ action: BoardHealthAction) -> Bool {
-        switch action {
-        case .openManualTriage, .openNewAgent:
-            return true
-        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
-            return false
-        }
     }
 
     private func persistBoardState() {

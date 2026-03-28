@@ -191,7 +191,7 @@ struct ContentView: View {
                 .help("Create a new agent profile (Option-Command-N)")
                 Menu("Board Actions") {
                     Section("Health") {
-                        if hasAutoHealthFixes {
+                        if viewModel.hasAutoFixableHealthRecommendations {
                             Button("Apply Health Fixes") {
                                 applyAllHealthRecommendations()
                             }
@@ -606,17 +606,6 @@ struct ContentView: View {
         viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
     }
 
-    private var hasAutoHealthFixes: Bool {
-        viewModel.healthRecommendations().contains { recommendation in
-            switch recommendation.action {
-            case .openManualTriage, .openNewAgent:
-                return false
-            case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
-                return true
-            }
-        }
-    }
-
     private var detailBackgroundColors: [Color] {
         if colorScheme == .dark {
             return [
@@ -779,12 +768,7 @@ private struct BoardHealthRecommendationsView: View {
 
     private var hasMutatingRecommendations: Bool {
         recommendations.contains { recommendation in
-            switch recommendation.action {
-            case .openManualTriage, .openNewAgent:
-                return false
-            case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
-                return true
-            }
+            recommendation.action.isAutoFixable
         }
     }
 }
