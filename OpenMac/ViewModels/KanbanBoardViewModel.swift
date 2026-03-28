@@ -82,9 +82,16 @@ final class KanbanBoardViewModel: ObservableObject {
     var boardHealthBreakdownText: String {
         let penalties = boardHealthPenaltyItems()
         guard !penalties.isEmpty else { return "No active penalties" }
-        return penalties
+        let totalPenalty = penalties.reduce(0) { partialResult, item in
+            partialResult + item.points
+        }
+        let lines = penalties
             .map { "\($0.label): -\($0.points)" }
-            .joined(separator: "\n")
+        return (lines + [
+            "Total Penalty: -\(totalPenalty)",
+            "Health Score: \(boardHealthScore)"
+        ])
+        .joined(separator: "\n")
     }
     var autoFixableHealthRecommendationCount: Int {
         healthRecommendations().filter { $0.action.isAutoFixable }.count

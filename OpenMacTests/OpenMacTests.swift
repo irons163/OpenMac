@@ -589,6 +589,8 @@ struct KanbanFlowTests {
         #expect(viewModel.boardHealthBreakdownText.contains("In Progress WIP Pressure: -10"))
         #expect(viewModel.boardHealthBreakdownText.contains("Review WIP Pressure: -10"))
         #expect(viewModel.boardHealthBreakdownText.contains("Done Backlog: -5"))
+        #expect(viewModel.boardHealthBreakdownText.contains("Total Penalty: -45"))
+        #expect(viewModel.boardHealthBreakdownText.contains("Health Score: 55"))
     }
 
     @Test("maps medium health scores to watch label")
