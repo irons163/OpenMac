@@ -796,7 +796,7 @@ private struct BoardHealthRecommendationsView: View {
     }
 
     private var recommendationCardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.20) : Color.black.opacity(0.12)
+        BoardChromePalette.supplementaryCardBorderColor(for: colorScheme)
     }
 
     private var autoFixRecommendationCount: Int {
@@ -830,7 +830,7 @@ private struct SummaryBadge: View {
         .background(color.opacity(colorScheme == .dark ? 0.32 : 0.2), in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1)
+                .stroke(BoardChromePalette.summaryBadgeBorderColor(for: colorScheme), lineWidth: 1)
         )
 
         if let helpText, !helpText.isEmpty {
@@ -930,7 +930,7 @@ private struct KanbanColumnView: View {
     }
 
     private var counterBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white.opacity(0.82)
+        BoardChromePalette.counterColor(for: colorScheme)
     }
 
     private var emptyStateBackground: Color {
@@ -938,7 +938,7 @@ private struct KanbanColumnView: View {
     }
 
     private var columnBorderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.24) : Color.white.opacity(0.8)
+        BoardChromePalette.columnBorderColor(for: colorScheme)
     }
 }
 
@@ -1032,7 +1032,7 @@ private struct TaskCardView: View {
     }
 
     private var storyPointBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08)
+        BoardChromePalette.storyPointColor(for: colorScheme)
     }
 
     private var taskCardBackground: Color {
@@ -1040,7 +1040,7 @@ private struct TaskCardView: View {
     }
 
     private var taskCardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.08)
+        BoardChromePalette.taskCardBorderColor(for: colorScheme)
     }
 }
 
@@ -1468,6 +1468,91 @@ enum BoardSurfacePalette {
 
     static func emptyStateColor(for scheme: ColorScheme) -> Color {
         emptyStateToken(for: scheme).color
+    }
+}
+
+enum BoardChromePalette {
+    static func counterToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.24, green: 0.29, blue: 0.37, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 0.96, green: 0.97, blue: 0.99, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.24, green: 0.29, blue: 0.37, opacity: 1.0)
+        }
+    }
+
+    static func storyPointToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.20, green: 0.24, blue: 0.31, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 0.90, green: 0.92, blue: 0.95, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.20, green: 0.24, blue: 0.31, opacity: 1.0)
+        }
+    }
+
+    static func columnBorderToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.31, green: 0.36, blue: 0.46, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 0.84, green: 0.87, blue: 0.93, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.31, green: 0.36, blue: 0.46, opacity: 1.0)
+        }
+    }
+
+    static func taskCardBorderToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.44, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 0.84, green: 0.87, blue: 0.93, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.44, opacity: 1.0)
+        }
+    }
+
+    static func supplementaryCardBorderToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.45, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 0.83, green: 0.86, blue: 0.92, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.30, green: 0.35, blue: 0.45, opacity: 1.0)
+        }
+    }
+
+    static func summaryBadgeBorderToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        columnBorderToken(for: scheme)
+    }
+
+    static func counterColor(for scheme: ColorScheme) -> Color {
+        counterToken(for: scheme).color
+    }
+
+    static func storyPointColor(for scheme: ColorScheme) -> Color {
+        storyPointToken(for: scheme).color
+    }
+
+    static func columnBorderColor(for scheme: ColorScheme) -> Color {
+        columnBorderToken(for: scheme).color
+    }
+
+    static func taskCardBorderColor(for scheme: ColorScheme) -> Color {
+        taskCardBorderToken(for: scheme).color
+    }
+
+    static func supplementaryCardBorderColor(for scheme: ColorScheme) -> Color {
+        supplementaryCardBorderToken(for: scheme).color
+    }
+
+    static func summaryBadgeBorderColor(for scheme: ColorScheme) -> Color {
+        summaryBadgeBorderToken(for: scheme).color
     }
 }
 
