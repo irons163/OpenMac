@@ -175,6 +175,90 @@ struct AgentTaskExecutorTests {
             #expect(message == "Missing OPENAI_API_KEY for OpenAI-compatible runtime")
         }
     }
+
+    @Test("default executor openai compatible supports codex bridge mode")
+    func openAICompatibleCodexBridgeUsesRunner() {
+        let task = WorkTask(
+            title: "Generate dispatch notes",
+            details: "Bridge path",
+            requiredSkills: ["automation"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge,
+                codexProfile: "default"
+            )
+        )
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgeRunner: { request in
+                #expect(request.model == "gpt-5.2")
+                #expect(request.profile == "default")
+                #expect(request.prompt.contains("Generate dispatch notes"))
+                return "Bridge run complete"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Bridge run complete")
+        case .failure:
+            #expect(Bool(false), "Expected success for Codex Bridge runtime")
+        }
+    }
+
+    @Test("default executor surfaces codex bridge failures")
+    func openAICompatibleCodexBridgeFailure() {
+        let task = WorkTask(
+            title: "Bridge failure",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgeRunner: { _ in
+                struct BridgeError: LocalizedError {
+                    var errorDescription: String? { "codex unavailable" }
+                }
+                throw BridgeError()
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected Codex Bridge failure")
+        case let .failure(message):
+            #expect(message.contains("Codex Bridge run failed"))
+            #expect(message.contains("codex unavailable"))
+        }
+    }
 }
 
 struct AppearanceModeTests {

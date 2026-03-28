@@ -89,9 +89,47 @@ protocol AgentTaskExecuting {
 }
 
 struct DefaultAgentTaskExecutor: AgentTaskExecuting {
+    struct CodexBridgeRequest: Equatable {
+        let prompt: String
+        let model: String
+        let profile: String?
+    }
+
     var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
     var urlSession: URLSession = .shared
     var timeoutSeconds: TimeInterval = 30
+    var codexBridgeRunner: (CodexBridgeRequest) throws -> String = { request in
+        try Self.defaultCodexBridgeRunner(request: request)
+    }
+
+    init(
+        environmentProvider: @escaping () -> [String: String] = { ProcessInfo.processInfo.environment },
+        urlSession: URLSession = .shared,
+        timeoutSeconds: TimeInterval = 30,
+        codexBridgeRunner: @escaping (CodexBridgeRequest) throws -> String = { request in
+            try Self.defaultCodexBridgeRunner(request: request)
+        }
+    ) {
+        self.environmentProvider = environmentProvider
+        self.urlSession = urlSession
+        self.timeoutSeconds = timeoutSeconds
+        self.codexBridgeRunner = codexBridgeRunner
+    }
+
+    init(
+        environmentProvider: @escaping () -> [String: String],
+        urlSession: URLSession,
+        timeoutSeconds: TimeInterval
+    ) {
+        self.init(
+            environmentProvider: environmentProvider,
+            urlSession: urlSession,
+            timeoutSeconds: timeoutSeconds,
+            codexBridgeRunner: { request in
+                try Self.defaultCodexBridgeRunner(request: request)
+            }
+        )
+    }
 
     func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
         let runtimeProfile = agent.runtimeProfile ?? AgentRuntimeProfile(provider: .localMock)
@@ -106,6 +144,19 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
     private func runOpenAICompatible(
+        task: WorkTask,
+        agent: AgentProfile,
+        runtimeProfile: AgentRuntimeProfile
+    ) -> AgentTaskExecutionOutcome {
+        switch runtimeProfile.openAIAuthMode {
+        case .apiKey:
+            return runOpenAICompatibleWithAPIKey(task: task, agent: agent, runtimeProfile: runtimeProfile)
+        case .codexBridge:
+            return runOpenAICompatibleWithCodexBridge(task: task, agent: agent, runtimeProfile: runtimeProfile)
+        }
+    }
+
+    private func runOpenAICompatibleWithAPIKey(
         task: WorkTask,
         agent: AgentProfile,
         runtimeProfile: AgentRuntimeProfile
@@ -145,6 +196,28 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return .success(summary: summary)
         } catch {
             return .failure(message: "OpenAI-compatible run failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func runOpenAICompatibleWithCodexBridge(
+        task: WorkTask,
+        agent: AgentProfile,
+        runtimeProfile: AgentRuntimeProfile
+    ) -> AgentTaskExecutionOutcome {
+        let prompt = buildCodexBridgePrompt(task: task, agent: agent)
+        let request = CodexBridgeRequest(
+            prompt: prompt,
+            model: runtimeProfile.model,
+            profile: runtimeProfile.codexProfile
+        )
+        do {
+            let summary = try codexBridgeRunner(request).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !summary.isEmpty else {
+                return .failure(message: "Codex Bridge returned empty output")
+            }
+            return .success(summary: summary)
+        } catch {
+            return .failure(message: "Codex Bridge run failed: \(error.localizedDescription)")
         }
     }
 
@@ -201,6 +274,21 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         ]
     }
 
+    private func buildCodexBridgePrompt(task: WorkTask, agent: AgentProfile) -> String {
+        let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
+        let skillsLine = sortedSkills.isEmpty ? "none" : sortedSkills
+        return """
+        You are supporting an assigned AI agent in a kanban execution system.
+        Agent: \(agent.name)
+        Task title: \(task.title)
+        Task details: \(task.details)
+        Required skills: \(skillsLine)
+        Story points: \(task.storyPoints)
+
+        Return a concise plain-text execution summary and key outcomes.
+        """
+    }
+
     private func send(request: URLRequest) throws -> ChatCompletionResponse {
         let semaphore = DispatchSemaphore(value: 0)
         var responseData: Data?
@@ -244,6 +332,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         case invalidResponse
         case emptyResponse
         case serverError(String)
+        case codexBridgeFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -254,6 +343,8 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             case .emptyResponse:
                 return "Empty response"
             case let .serverError(message):
+                return message
+            case let .codexBridgeFailed(message):
                 return message
             }
         }
@@ -275,6 +366,60 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         struct Choice: Decodable {
             let message: ChatMessage
         }
+    }
+
+    private static func defaultCodexBridgeRunner(request: CodexBridgeRequest) throws -> String {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openmac-codex-bridge-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        var arguments = [
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox", "read-only",
+            "--output-last-message", outputURL.path
+        ]
+        if !request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            arguments.append(contentsOf: ["--model", request.model])
+        }
+        if let profile = request.profile?.trimmingCharacters(in: .whitespacesAndNewlines), !profile.isEmpty {
+            arguments.append(contentsOf: ["--profile", profile])
+        }
+        arguments.append(request.prompt)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let rawOutputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let rawOutput = String(data: rawOutputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            let message = rawOutput.isEmpty ? "codex exited with code \(process.terminationStatus)" : rawOutput
+            throw ExecutorError.codexBridgeFailed(message)
+        }
+
+        if let message = try? String(contentsOf: outputURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           !message.isEmpty {
+            return message
+        }
+
+        if !rawOutput.isEmpty {
+            return rawOutput
+        }
+
+        throw ExecutorError.emptyResponse
     }
 }
 

@@ -66,11 +66,46 @@ enum AgentRuntimeProvider: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum OpenAICompatibleAuthMode: String, CaseIterable, Codable, Identifiable {
+    case apiKey
+    case codexBridge
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .apiKey:
+            return "API Key"
+        case .codexBridge:
+            return "Codex Bridge"
+        }
+    }
+}
+
 struct AgentRuntimeProfile: Equatable, Codable {
     var provider: AgentRuntimeProvider
     var model: String
     var endpoint: String?
     var tools: Set<String>
+    var openAIAuthMode: OpenAICompatibleAuthMode
+    var codexProfile: String?
+
+    init(
+        provider: AgentRuntimeProvider = .localMock,
+        model: String? = nil,
+        endpoint: String? = nil,
+        tools: [String] = [],
+        openAIAuthMode: OpenAICompatibleAuthMode = .apiKey,
+        codexProfile: String? = nil
+    ) {
+        self.provider = provider
+        let trimmedModel = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = trimmedModel.isEmpty ? provider.defaultModel : trimmedModel
+        self.endpoint = Self.normalizeOptional(endpoint)
+        self.tools = Set(tools.map(Self.normalizeTool))
+        self.openAIAuthMode = openAIAuthMode
+        self.codexProfile = Self.normalizeOptional(codexProfile)
+    }
 
     init(
         provider: AgentRuntimeProvider = .localMock,
@@ -78,15 +113,62 @@ struct AgentRuntimeProfile: Equatable, Codable {
         endpoint: String? = nil,
         tools: [String] = []
     ) {
-        self.provider = provider
-        let trimmedModel = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        self.model = trimmedModel.isEmpty ? provider.defaultModel : trimmedModel
-        self.endpoint = endpoint?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.tools = Set(tools.map(Self.normalizeTool))
+        self.init(
+            provider: provider,
+            model: model,
+            endpoint: endpoint,
+            tools: tools,
+            openAIAuthMode: .apiKey,
+            codexProfile: nil
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case endpoint
+        case tools
+        case openAIAuthMode
+        case codexProfile
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let provider = try container.decode(AgentRuntimeProvider.self, forKey: .provider)
+        let model = try container.decodeIfPresent(String.self, forKey: .model)
+        let endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint)
+        let tools = try container.decodeIfPresent([String].self, forKey: .tools) ?? []
+        let openAIAuthMode = try container.decodeIfPresent(OpenAICompatibleAuthMode.self, forKey: .openAIAuthMode) ?? .apiKey
+        let codexProfile = try container.decodeIfPresent(String.self, forKey: .codexProfile)
+
+        self.init(
+            provider: provider,
+            model: model,
+            endpoint: endpoint,
+            tools: tools,
+            openAIAuthMode: openAIAuthMode,
+            codexProfile: codexProfile
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(endpoint, forKey: .endpoint)
+        try container.encode(Array(tools).sorted(), forKey: .tools)
+        try container.encode(openAIAuthMode, forKey: .openAIAuthMode)
+        try container.encodeIfPresent(codexProfile, forKey: .codexProfile)
     }
 
     nonisolated private static func normalizeTool(_ rawValue: String) -> String {
         rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    nonisolated private static func normalizeOptional(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

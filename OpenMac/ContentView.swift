@@ -36,6 +36,8 @@ struct ContentView: View {
     @State private var newAgentRuntimeModel = ""
     @State private var newAgentRuntimeEndpoint = ""
     @State private var newAgentRuntimeTools = ""
+    @State private var newAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .apiKey
+    @State private var newAgentCodexProfile = ""
     @State private var editingAgentID: UUID?
     @State private var editAgentName = ""
     @State private var editAgentSkills = ""
@@ -45,6 +47,8 @@ struct ContentView: View {
     @State private var editAgentRuntimeModel = ""
     @State private var editAgentRuntimeEndpoint = ""
     @State private var editAgentRuntimeTools = ""
+    @State private var editAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .apiKey
+    @State private var editAgentCodexProfile = ""
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
@@ -427,6 +431,8 @@ struct ContentView: View {
                 runtimeModel: $newAgentRuntimeModel,
                 runtimeEndpoint: $newAgentRuntimeEndpoint,
                 runtimeTools: $newAgentRuntimeTools,
+                openAIAuthMode: $newAgentOpenAIAuthMode,
+                codexProfile: $newAgentCodexProfile,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetAgentDraftAndClose,
@@ -440,7 +446,9 @@ struct ContentView: View {
                             provider: newAgentRuntimeProvider,
                             model: newAgentRuntimeModel,
                             endpoint: newAgentRuntimeEndpoint,
-                            toolsText: newAgentRuntimeTools
+                            toolsText: newAgentRuntimeTools,
+                            openAIAuthMode: newAgentOpenAIAuthMode,
+                            codexProfile: newAgentCodexProfile
                         )
                     )
                     if added {
@@ -459,6 +467,8 @@ struct ContentView: View {
                 runtimeModel: $editAgentRuntimeModel,
                 runtimeEndpoint: $editAgentRuntimeEndpoint,
                 runtimeTools: $editAgentRuntimeTools,
+                openAIAuthMode: $editAgentOpenAIAuthMode,
+                codexProfile: $editAgentCodexProfile,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditAgentSheet,
@@ -535,6 +545,8 @@ struct ContentView: View {
         newAgentRuntimeModel = ""
         newAgentRuntimeEndpoint = ""
         newAgentRuntimeTools = ""
+        newAgentOpenAIAuthMode = .apiKey
+        newAgentCodexProfile = ""
         isShowingNewAgentSheet = false
     }
 
@@ -935,6 +947,8 @@ struct ContentView: View {
         editAgentRuntimeModel = agent.runtimeProfile?.model ?? ""
         editAgentRuntimeEndpoint = agent.runtimeProfile?.endpoint ?? ""
         editAgentRuntimeTools = agent.runtimeProfile?.tools.sorted().joined(separator: ", ") ?? ""
+        editAgentOpenAIAuthMode = agent.runtimeProfile?.openAIAuthMode ?? .apiKey
+        editAgentCodexProfile = agent.runtimeProfile?.codexProfile ?? ""
         isShowingEditAgentSheet = true
     }
 
@@ -948,6 +962,8 @@ struct ContentView: View {
         editAgentRuntimeModel = ""
         editAgentRuntimeEndpoint = ""
         editAgentRuntimeTools = ""
+        editAgentOpenAIAuthMode = .apiKey
+        editAgentCodexProfile = ""
         isShowingEditAgentSheet = false
     }
 
@@ -964,7 +980,9 @@ struct ContentView: View {
                 provider: editAgentRuntimeProvider,
                 model: editAgentRuntimeModel,
                 endpoint: editAgentRuntimeEndpoint,
-                toolsText: editAgentRuntimeTools
+                toolsText: editAgentRuntimeTools,
+                openAIAuthMode: editAgentOpenAIAuthMode,
+                codexProfile: editAgentCodexProfile
             )
         )
 
@@ -1043,6 +1061,9 @@ struct ContentView: View {
         guard let runtimeProfile = agent.runtimeProfile else {
             return "Runtime: Disabled"
         }
+        if runtimeProfile.provider == .openAICompatible {
+            return "Runtime: \(runtimeProfile.provider.displayName) / \(runtimeProfile.model) / \(runtimeProfile.openAIAuthMode.displayName)"
+        }
         return "Runtime: \(runtimeProfile.provider.displayName) / \(runtimeProfile.model)"
     }
 
@@ -1051,7 +1072,9 @@ struct ContentView: View {
         provider: AgentRuntimeProvider,
         model: String,
         endpoint: String,
-        toolsText: String
+        toolsText: String,
+        openAIAuthMode: OpenAICompatibleAuthMode,
+        codexProfile: String
     ) -> AgentRuntimeProfile? {
         guard isEnabled else { return nil }
         let resolvedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1059,11 +1082,16 @@ struct ContentView: View {
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        let resolvedOpenAIAuthMode: OpenAICompatibleAuthMode = provider == .openAICompatible ? openAIAuthMode : .apiKey
+        let resolvedEndpoint = provider == .openAICompatible && resolvedOpenAIAuthMode == .apiKey ? endpoint : ""
+        let resolvedCodexProfile = provider == .openAICompatible && resolvedOpenAIAuthMode == .codexBridge ? codexProfile : ""
         return AgentRuntimeProfile(
             provider: provider,
             model: resolvedModel.isEmpty ? provider.defaultModel : resolvedModel,
-            endpoint: endpoint,
-            tools: parsedTools
+            endpoint: resolvedEndpoint,
+            tools: parsedTools,
+            openAIAuthMode: resolvedOpenAIAuthMode,
+            codexProfile: resolvedCodexProfile
         )
     }
 
@@ -1892,6 +1920,8 @@ private struct NewAgentSheet: View {
     @Binding var runtimeModel: String
     @Binding var runtimeEndpoint: String
     @Binding var runtimeTools: String
+    @Binding var openAIAuthMode: OpenAICompatibleAuthMode
+    @Binding var codexProfile: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -1918,7 +1948,23 @@ private struct NewAgentSheet: View {
                     }
                 }
                 TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
-                TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                if runtimeProvider == .openAICompatible {
+                    Picker("OpenAI Auth", selection: $openAIAuthMode) {
+                        ForEach(OpenAICompatibleAuthMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+
+                    switch openAIAuthMode {
+                    case .apiKey:
+                        TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                    case .codexBridge:
+                        TextField("Codex Profile (optional)", text: $codexProfile)
+                        Text("Uses local `codex login` session to execute the task through Codex CLI.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 TextField("Tools (comma separated)", text: $runtimeTools)
             }
 
@@ -1943,6 +1989,8 @@ private struct EditAgentSheet: View {
     @Binding var runtimeModel: String
     @Binding var runtimeEndpoint: String
     @Binding var runtimeTools: String
+    @Binding var openAIAuthMode: OpenAICompatibleAuthMode
+    @Binding var codexProfile: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -1969,7 +2017,23 @@ private struct EditAgentSheet: View {
                     }
                 }
                 TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
-                TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                if runtimeProvider == .openAICompatible {
+                    Picker("OpenAI Auth", selection: $openAIAuthMode) {
+                        ForEach(OpenAICompatibleAuthMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+
+                    switch openAIAuthMode {
+                    case .apiKey:
+                        TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                    case .codexBridge:
+                        TextField("Codex Profile (optional)", text: $codexProfile)
+                        Text("Uses local `codex login` session to execute the task through Codex CLI.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 TextField("Tools (comma separated)", text: $runtimeTools)
             }
 
