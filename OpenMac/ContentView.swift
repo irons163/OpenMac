@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
@@ -280,6 +282,18 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
                         .disabled(viewModel.triageCandidates().isEmpty)
+
+                        Divider()
+
+                        Button("Export Workspace JSON...") {
+                            exportWorkspaceFromToolbar()
+                        }
+                        .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                        Button("Import Workspace JSON...") {
+                            importWorkspaceFromToolbar()
+                        }
+                        .keyboardShortcut("i", modifiers: [.command, .shift])
 
                         Divider()
 
@@ -657,6 +671,54 @@ struct ContentView: View {
     private func openManualTriage() {
         refreshTriageSelections()
         isShowingManualTriageSheet = true
+    }
+
+    private func exportWorkspaceFromToolbar() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = "openmac-workspace.json"
+        panel.title = "Export Workspace"
+        panel.message = "Save boards, tasks, and agents as workspace JSON."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        _ = viewModel.exportWorkspace(to: url)
+    }
+
+    private func importWorkspaceFromToolbar() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = "Import Workspace"
+        panel.message = "Select workspace JSON to import."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let strategy = chooseWorkspaceImportStrategy() else { return }
+        let imported = viewModel.importWorkspace(from: url, strategy: strategy)
+        if imported {
+            handleBoardContextChanged()
+        }
+    }
+
+    private func chooseWorkspaceImportStrategy() -> WorkspaceImportStrategy? {
+        let alert = NSAlert()
+        alert.messageText = "Import Workspace"
+        alert.informativeText = "Choose how to apply this workspace file."
+        alert.addButton(withTitle: "Merge")
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .merge
+        case .alertSecondButtonReturn:
+            return .replace
+        default:
+            return nil
+        }
     }
 
     private func assignManually(taskID: UUID) {

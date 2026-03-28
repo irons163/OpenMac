@@ -1766,6 +1766,134 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.last?.selectedBoardID == qaBoard.id)
     }
 
+    @Test("imports workspace snapshot with duplicate board names and resolves collisions")
+    func importsWorkspaceSnapshotWithDuplicateBoardNames() throws {
+        let firstBoard = KanbanBoardRecord(name: "Ops", tasks: [], agents: [], wipLimits: [.inProgress: 3, .review: 2])
+        let secondBoard = KanbanBoardRecord(name: "Ops", tasks: [], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: firstBoard.tasks,
+            agents: firstBoard.agents,
+            wipLimits: firstBoard.wipLimits,
+            boards: [firstBoard, secondBoard],
+            selectedBoardID: secondBoard.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let imported = viewModel.importWorkspaceData(data)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.boards.map(\.name) == ["Ops", "Ops (2)"])
+    }
+
+    @Test("imports workspace snapshot and unassigns tasks with unknown agents")
+    func importsWorkspaceSnapshotUnassignsUnknownAgents() throws {
+        let unknownAgentID = UUID()
+        let task = WorkTask(
+            title: "Orphan Assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: unknownAgentID
+        )
+        let validAgent = AgentProfile(name: "Valid Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let board = KanbanBoardRecord(
+            name: "Import Board",
+            tasks: [task],
+            agents: [validAgent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+        let snapshot = KanbanBoardSnapshot(
+            tasks: board.tasks,
+            agents: board.agents,
+            wipLimits: board.wipLimits,
+            boards: [board],
+            selectedBoardID: board.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let imported = viewModel.importWorkspaceData(data)
+
+        #expect(imported)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+    }
+
+    @Test("merges workspace snapshot without replacing existing boards")
+    func mergesWorkspaceSnapshotWithoutReplacingExistingBoards() throws {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        _ = viewModel.createBoard(name: "Local Board")
+
+        let importedTask = WorkTask(
+            title: "Imported Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let importedBoard = KanbanBoardRecord(
+            name: "Imported Board",
+            tasks: [importedTask],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+        let snapshot = KanbanBoardSnapshot(
+            tasks: importedBoard.tasks,
+            agents: importedBoard.agents,
+            wipLimits: importedBoard.wipLimits,
+            boards: [importedBoard],
+            selectedBoardID: importedBoard.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let imported = viewModel.importWorkspaceData(data, strategy: .merge)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == 3)
+        #expect(viewModel.boards.contains(where: { $0.name == "Local Board" }))
+        #expect(viewModel.boards.contains(where: { $0.name == "Imported Board" }))
+        #expect(viewModel.selectedBoardID == importedBoard.id)
+        #expect(viewModel.tasks.first?.title == "Imported Task")
+    }
+
+    @Test("merge import resolves imported board names against existing boards")
+    func mergeImportResolvesImportedBoardNamesAgainstExistingBoards() throws {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        _ = viewModel.createBoard(name: "Ops")
+
+        let importedBoard = KanbanBoardRecord(name: "Ops", tasks: [], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: importedBoard.tasks,
+            agents: importedBoard.agents,
+            wipLimits: importedBoard.wipLimits,
+            boards: [importedBoard],
+            selectedBoardID: importedBoard.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let imported = viewModel.importWorkspaceData(data, strategy: .merge)
+
+        #expect(imported)
+        #expect(viewModel.boards.contains(where: { $0.name == "Ops" }))
+        #expect(viewModel.boards.contains(where: { $0.name == "Ops (2)" }))
+    }
+
     @Test("rejects invalid workspace JSON import")
     func rejectsInvalidWorkspaceImport() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
@@ -1775,6 +1903,119 @@ struct KanbanPersistenceTests {
 
         #expect(!imported)
         #expect(viewModel.lastBoardMessage == "Invalid workspace JSON")
+    }
+
+    @Test("exports workspace snapshot to JSON file URL")
+    func exportsWorkspaceSnapshotToFileURL() throws {
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("openmac-workspace.json")
+        defer { try? FileManager.default.removeItem(at: workspaceURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: workspaceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let task = WorkTask(
+            title: "Seed",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+        _ = viewModel.createBoard(name: "Ops Board")
+
+        let exported = viewModel.exportWorkspace(to: workspaceURL)
+
+        #expect(exported)
+        let exportedData = try Data(contentsOf: workspaceURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exportedData)
+        #expect(snapshot.boards?.count == 2)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("imports workspace snapshot from JSON file URL")
+    func importsWorkspaceSnapshotFromFileURL() throws {
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("openmac-workspace.json")
+        defer { try? FileManager.default.removeItem(at: workspaceURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: workspaceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let deliveryTask = WorkTask(
+            title: "Delivery",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let qaTask = WorkTask(
+            title: "QA",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let deliveryBoard = KanbanBoardRecord(name: "Delivery", tasks: [deliveryTask], agents: [], wipLimits: [.inProgress: 3, .review: 2])
+        let qaBoard = KanbanBoardRecord(name: "QA", tasks: [qaTask], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: deliveryBoard.tasks,
+            agents: deliveryBoard.agents,
+            wipLimits: deliveryBoard.wipLimits,
+            boards: [deliveryBoard, qaBoard],
+            selectedBoardID: qaBoard.id
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+        try data.write(to: workspaceURL, options: .atomic)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let imported = viewModel.importWorkspace(from: workspaceURL)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.selectedBoardID == qaBoard.id)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("rejects workspace import when file URL cannot be read")
+    func rejectsWorkspaceImportWhenFileCannotBeRead() {
+        let missingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("missing-workspace.json")
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let imported = viewModel.importWorkspace(from: missingURL)
+
+        #expect(!imported)
+        #expect(viewModel.lastBoardMessage == "Failed to read workspace file")
+    }
+
+    @Test("rejects workspace export when file URL cannot be written")
+    func rejectsWorkspaceExportWhenFileCannotBeWritten() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let exported = viewModel.exportWorkspace(to: directoryURL)
+
+        #expect(!exported)
+        #expect(viewModel.lastBoardMessage == "Failed to write workspace file")
     }
 
     @Test("file store saves and loads snapshot round trip")

@@ -31,6 +31,11 @@ enum BoardMessageSeverity: String, Equatable {
     case error
 }
 
+enum WorkspaceImportStrategy: Equatable {
+    case replace
+    case merge
+}
+
 struct BoardHealthRecommendation: Identifiable, Equatable {
     let action: BoardHealthAction
     let title: String
@@ -455,7 +460,22 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func importWorkspaceData(_ data: Data) -> Bool {
+    func exportWorkspace(to url: URL) -> Bool {
+        guard let data = workspaceExportData() else { return false }
+        do {
+            try data.write(to: url, options: .atomic)
+            let fileName = url.lastPathComponent.isEmpty ? "workspace.json" : url.lastPathComponent
+            lastBoardMessage = "Exported workspace to \(fileName)"
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = "Failed to write workspace file"
+            return false
+        }
+    }
+
+    @discardableResult
+    func importWorkspaceData(_ data: Data, strategy: WorkspaceImportStrategy = .replace) -> Bool {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
 
@@ -467,7 +487,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let importedBoards: [KanbanBoardRecord]
         let preferredSelectedBoardID: UUID?
         if let snapshotBoards = snapshot.boards, !snapshotBoards.isEmpty {
-            importedBoards = snapshotBoards.map(normalizedBoardRecord)
+            importedBoards = normalizedImportedBoardRecords(snapshotBoards)
             preferredSelectedBoardID = snapshot.selectedBoardID
         } else {
             let fallbackBoard = KanbanBoardRecord(
@@ -476,7 +496,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 agents: snapshot.agents,
                 wipLimits: snapshot.wipLimits
             )
-            importedBoards = [normalizedBoardRecord(fallbackBoard)]
+            importedBoards = normalizedImportedBoardRecords([fallbackBoard])
             preferredSelectedBoardID = nil
         }
 
@@ -485,17 +505,41 @@ final class KanbanBoardViewModel: ObservableObject {
             return false
         }
 
-        boards = importedBoards
-        let resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
-            importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
-        } ?? importedBoards[0].id
-
-        loadBoard(resolvedSelectedBoardID)
-        persistBoardState()
-        let boardLabel = boards.count == 1 ? "board" : "boards"
-        lastBoardMessage = "Imported workspace (\(boards.count) \(boardLabel))"
+        let resolvedSelectedBoardID: UUID
+        switch strategy {
+        case .replace:
+            boards = importedBoards
+            resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
+                importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
+            } ?? importedBoards[0].id
+            loadBoard(resolvedSelectedBoardID)
+            persistBoardState()
+            let boardLabel = boards.count == 1 ? "board" : "boards"
+            lastBoardMessage = "Imported workspace (\(boards.count) \(boardLabel))"
+        case .merge:
+            syncCurrentBoardRecord()
+            let currentSelectedBoardID = selectedBoardID
+            boards = mergedBoardRecords(currentBoards: boards, importedBoards: importedBoards)
+            resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
+                importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
+            } ?? currentSelectedBoardID
+            loadBoard(resolvedSelectedBoardID)
+            persistBoardState()
+            let boardLabel = importedBoards.count == 1 ? "board" : "boards"
+            lastBoardMessage = "Merged workspace (+\(importedBoards.count) \(boardLabel))"
+        }
         lastBoardMessageSeverity = .info
         return true
+    }
+
+    @discardableResult
+    func importWorkspace(from url: URL, strategy: WorkspaceImportStrategy = .replace) -> Bool {
+        guard let data = try? Data(contentsOf: url) else {
+            lastBoardMessage = "Failed to read workspace file"
+            return false
+        }
+
+        return importWorkspaceData(data, strategy: strategy)
     }
 
     @discardableResult
@@ -1342,16 +1386,66 @@ final class KanbanBoardViewModel: ObservableObject {
     private func normalizedBoardRecord(_ board: KanbanBoardRecord) -> KanbanBoardRecord {
         let trimmedName = board.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedName = trimmedName.isEmpty ? Self.defaultBoardName : trimmedName
+        let agentIDs = Set(board.agents.map(\.id))
+        let resolvedTasks = board.tasks.map { task in
+            var resolvedTask = task
+            if let assignedAgentID = resolvedTask.assignedAgentID,
+               !agentIDs.contains(assignedAgentID) {
+                resolvedTask.assignedAgentID = nil
+            }
+            return resolvedTask
+        }
         let resolvedWIPLimits = board.wipLimits.reduce(into: [:]) { partialResult, pair in
             partialResult[pair.key] = max(1, pair.value)
         }
         return KanbanBoardRecord(
             id: board.id,
             name: resolvedName,
-            tasks: board.tasks,
+            tasks: resolvedTasks,
             agents: board.agents,
             wipLimits: resolvedWIPLimits
         )
+    }
+
+    private func normalizedImportedBoardRecords(_ importedBoards: [KanbanBoardRecord]) -> [KanbanBoardRecord] {
+        var usedNames: Set<String> = []
+        return importedBoards.map { board in
+            var normalizedBoard = normalizedBoardRecord(board)
+            let baseName = normalizedBoard.name
+            var candidateName = baseName
+            var suffix = 2
+            while usedNames.contains(candidateName.lowercased()) {
+                candidateName = "\(baseName) (\(suffix))"
+                suffix += 1
+            }
+            normalizedBoard.name = candidateName
+            usedNames.insert(candidateName.lowercased())
+            return normalizedBoard
+        }
+    }
+
+    private func mergedBoardRecords(
+        currentBoards: [KanbanBoardRecord],
+        importedBoards: [KanbanBoardRecord]
+    ) -> [KanbanBoardRecord] {
+        var mergedBoards = currentBoards
+        var usedNames = Set(currentBoards.map { $0.name.lowercased() })
+
+        for board in importedBoards {
+            var mergedBoard = board
+            let baseName = mergedBoard.name
+            var candidateName = baseName
+            var suffix = 2
+            while usedNames.contains(candidateName.lowercased()) {
+                candidateName = "\(baseName) (\(suffix))"
+                suffix += 1
+            }
+            mergedBoard.name = candidateName
+            usedNames.insert(candidateName.lowercased())
+            mergedBoards.append(mergedBoard)
+        }
+
+        return mergedBoards
     }
 
     private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {
