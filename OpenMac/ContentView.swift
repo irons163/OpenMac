@@ -2,6 +2,18 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct TaskDragPayload: Codable, Transferable {
+    let taskID: UUID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .openMACTaskDragPayload)
+    }
+}
+
+private extension UTType {
+    static let openMACTaskDragPayload = UTType(exportedAs: "com.irons.openmac.task-drag-payload")
+}
+
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
@@ -1619,9 +1631,9 @@ private struct KanbanColumnView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isDropTarget ? Color.accentColor : .clear, lineWidth: 3)
         )
-        .dropDestination(for: String.self) { items, _ in
-            guard let raw = items.first, let taskID = UUID(uuidString: raw) else { return false }
-            return onDropTask(taskID)
+        .dropDestination(for: TaskDragPayload.self) { items, _ in
+            guard let payload = items.first else { return false }
+            return onDropTask(payload.taskID)
         } isTargeted: { isTargeted in
             isDropTarget = isTargeted
         }
@@ -1826,7 +1838,7 @@ private struct TaskCardView: View {
             Button("Duplicate Task", action: onDuplicate)
             Button("Delete Task", role: .destructive, action: onDelete)
         }
-        .draggable(task.id.uuidString)
+        .draggable(TaskDragPayload(taskID: task.id))
     }
 
     private var storyPointBackground: Color {
