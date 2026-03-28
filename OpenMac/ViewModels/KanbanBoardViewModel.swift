@@ -777,18 +777,22 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func resolvedTriageAssignments(existing: [UUID: UUID] = [:]) -> [UUID: UUID] {
+        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
         var resolved: [UUID: UUID] = [:]
 
         for task in triageCandidates() {
-            let eligibleAgents = assignableAgents(for: task.id)
-            guard !eligibleAgents.isEmpty else { continue }
-
-            if let selectedAgentID = existing[task.id],
-               eligibleAgents.contains(where: { $0.id == selectedAgentID }) {
-                resolved[task.id] = selectedAgentID
-            } else {
-                resolved[task.id] = eligibleAgents[0].id
+            guard let selectedAgent = selectBulkTriageAgent(
+                for: task,
+                preferredAgentID: existing[task.id],
+                agentsByID: agentsByID,
+                loadsByAgentID: loadsByAgentID
+            ) else {
+                continue
             }
+
+            resolved[task.id] = selectedAgent.id
+            loadsByAgentID[selectedAgent.id, default: 0] += 1
         }
 
         return resolved

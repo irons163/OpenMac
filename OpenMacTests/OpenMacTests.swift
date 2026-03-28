@@ -1487,6 +1487,37 @@ struct KanbanPersistenceTests {
         #expect(resolved[task.id] == uiAgent.id)
     }
 
+    @Test("resolves triage assignments with capacity-aware fallback across multiple tasks")
+    func resolvesTriageAssignmentsWithCapacityAwareFallback() {
+        let highPriorityTask = WorkTask(
+            title: "Task High",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let lowPriorityTask = WorkTask(
+            title: "Task Low",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alphaAgent = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let betaAgent = AgentProfile(name: "Beta Agent", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let viewModel = KanbanBoardViewModel(tasks: [highPriorityTask, lowPriorityTask], agents: [alphaAgent, betaAgent])
+
+        let resolved = viewModel.resolvedTriageAssignments(existing: [
+            highPriorityTask.id: alphaAgent.id,
+            lowPriorityTask.id: alphaAgent.id
+        ])
+
+        #expect(resolved[highPriorityTask.id] == alphaAgent.id)
+        #expect(resolved[lowPriorityTask.id] == betaAgent.id)
+    }
+
     @Test("bulk triage assigns all currently eligible unassigned todo tasks")
     func bulkTriageAssignsEligibleTasks() {
         let uiTask = WorkTask(
