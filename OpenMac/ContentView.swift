@@ -654,6 +654,7 @@ struct ContentView: View {
 }
 
 private struct AgentRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let name: String
     let skillsText: String
     let loadCount: Int
@@ -678,11 +679,11 @@ private struct AgentRowView: View {
             }
             Text("Load: \(loadCount)/\(maxLoad)")
                 .font(.caption2)
-                .foregroundStyle(isOverloaded ? .red : .secondary)
+                .foregroundStyle(isOverloaded ? BoardSemanticTextPalette.color(for: .error, scheme: colorScheme) : .secondary)
             if isOverloaded {
                 Text("Overloaded")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
             }
         }
     }
@@ -1276,7 +1277,7 @@ private struct ManualTriageSheet: View {
                                 if eligibleAgents.isEmpty {
                                     Text("No eligible agents currently available.")
                                         .font(.caption)
-                                        .foregroundStyle(.red)
+                                        .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
                                 } else {
                                     Picker("Assign To", selection: selectionBinding(for: task.id, fallback: eligibleAgents[0].id)) {
                                         ForEach(eligibleAgents) { agent in
@@ -1610,6 +1611,7 @@ enum SummaryBadgePalette {
 enum BoardSemanticTextRole {
     case success
     case warning
+    case error
 }
 
 enum BoardSemanticTextPalette {
@@ -1619,12 +1621,16 @@ enum BoardSemanticTextPalette {
             return BoardMessageColorToken(red: 0.45, green: 0.92, blue: 0.59, opacity: 1.0)
         case (.dark, .warning):
             return BoardMessageColorToken(red: 0.94, green: 0.67, blue: 0.22, opacity: 1.0)
+        case (.dark, .error):
+            return BoardMessageColorToken(red: 0.96, green: 0.45, blue: 0.39, opacity: 1.0)
         case (.light, .success):
             return BoardMessageColorToken(red: 0.06, green: 0.45, blue: 0.18, opacity: 1.0)
         case (.light, .warning):
             return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+        case (.light, .error):
+            return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
         @unknown default:
-            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+            return BoardMessageColorToken(red: 0.74, green: 0.08, blue: 0.08, opacity: 1.0)
         }
     }
 

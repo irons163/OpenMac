@@ -198,16 +198,24 @@ struct AppearanceModeTests {
     func semanticStatusTextPaletteContrast() {
         let darkBackground = BoardMessageColorPalette.darkBoardBackground
         let lightBackground = BoardMessageColorPalette.lightBoardBackground
+        let darkSupplementary = BoardSurfacePalette.supplementaryCardToken(for: .dark)
+        let lightSupplementary = BoardSurfacePalette.supplementaryCardToken(for: .light)
 
         let successDark = BoardSemanticTextPalette.token(for: .success, scheme: .dark)
         let successLight = BoardSemanticTextPalette.token(for: .success, scheme: .light)
         let warningDark = BoardSemanticTextPalette.token(for: .warning, scheme: .dark)
         let warningLight = BoardSemanticTextPalette.token(for: .warning, scheme: .light)
+        let errorDark = BoardSemanticTextPalette.token(for: .error, scheme: .dark)
+        let errorLight = BoardSemanticTextPalette.token(for: .error, scheme: .light)
 
         #expect(successDark.contrastRatio(against: darkBackground) >= 4.0)
         #expect(successLight.contrastRatio(against: lightBackground) >= 4.0)
         #expect(warningDark.contrastRatio(against: darkBackground) >= 4.0)
         #expect(warningLight.contrastRatio(against: lightBackground) >= 4.0)
+        #expect(errorDark.contrastRatio(against: darkBackground) >= 4.0)
+        #expect(errorLight.contrastRatio(against: lightBackground) >= 4.0)
+        #expect(errorDark.contrastRatio(against: darkSupplementary) >= 4.0)
+        #expect(errorLight.contrastRatio(against: lightSupplementary) >= 4.0)
     }
 
     @Test("dark task cards stay visually distinct from each kanban column background")
