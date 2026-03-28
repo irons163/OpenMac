@@ -380,6 +380,12 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
     private static func defaultCodexBridgeRunner(request: CodexBridgeRequest) throws -> String {
+        guard let codexExecutable = resolvedCodexExecutableURL() else {
+            throw ExecutorError.codexBridgeFailed(
+                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+            )
+        }
+
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("openmac-codex-bridge-\(UUID().uuidString).txt")
         defer {
@@ -387,7 +393,6 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
 
         var arguments = [
-            "codex",
             "exec",
             "--skip-git-repo-check",
             "--sandbox", "read-only",
@@ -402,7 +407,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         arguments.append(request.prompt)
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.executableURL = codexExecutable
         process.arguments = arguments
 
         let outputPipe = Pipe()
@@ -434,24 +439,23 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
     private static func defaultCodexBridgePreflight() throws {
-        let status = try runCodex(arguments: ["login", "status"])
-        guard status.code == 0 else {
-            if status.output.contains("No such file") || status.output.contains("command not found") {
-                throw ExecutorError.codexBridgeFailed("Codex CLI is not installed or unavailable in PATH")
-            }
-            throw ExecutorError.codexBridgeFailed("Codex Bridge requires login. Run `codex login` first.")
-        }
-
-        let normalized = status.output.lowercased()
-        guard normalized.contains("logged in") else {
-            throw ExecutorError.codexBridgeFailed("Codex Bridge requires login. Run `codex login` first.")
+        guard resolvedCodexExecutableURL() != nil else {
+            throw ExecutorError.codexBridgeFailed(
+                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+            )
         }
     }
 
     private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
+        guard let executableURL = resolvedCodexExecutableURL() else {
+            throw ExecutorError.codexBridgeFailed(
+                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+            )
+        }
+
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["codex"] + arguments
+        process.executableURL = executableURL
+        process.arguments = arguments
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -464,6 +468,39 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let output = String(data: outputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return (process.terminationStatus, output)
+    }
+
+    private static func resolvedCodexExecutableURL() -> URL? {
+        let fileManager = FileManager.default
+
+        if let explicitPath = ProcessInfo.processInfo.environment["CODEX_CLI_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicitPath.isEmpty,
+           fileManager.isExecutableFile(atPath: explicitPath) {
+            return URL(fileURLWithPath: explicitPath)
+        }
+
+        let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let pathCandidates = pathValue
+            .split(separator: ":")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+            .map { directory in
+                (directory as NSString).appendingPathComponent("codex")
+            }
+
+        let fallbackCandidates = [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex",
+            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/codex")
+        ]
+
+        for candidate in pathCandidates + fallbackCandidates where fileManager.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+
+        return nil
     }
 }
 
