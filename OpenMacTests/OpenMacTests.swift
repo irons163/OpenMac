@@ -237,6 +237,32 @@ struct AppearanceModeTests {
         #expect(errorLight.contrastRatio(against: counterLight) >= 4.5)
     }
 
+    @Test("neutral secondary text palette remains readable across board surfaces")
+    func neutralSecondaryTextPaletteContrast() {
+        let secondaryDark = BoardNeutralTextPalette.token(for: .secondary, scheme: .dark)
+        let secondaryLight = BoardNeutralTextPalette.token(for: .secondary, scheme: .light)
+
+        let darkSurfaces = KanbanStatus.allCases.map { BoardSurfacePalette.columnToken(for: $0, scheme: .dark) }
+            + [
+                BoardSurfacePalette.taskCardToken(for: .dark),
+                BoardSurfacePalette.supplementaryCardToken(for: .dark)
+            ]
+
+        let lightSurfaces = KanbanStatus.allCases.map { BoardSurfacePalette.columnToken(for: $0, scheme: .light) }
+            + [
+                BoardSurfacePalette.taskCardToken(for: .light),
+                BoardSurfacePalette.supplementaryCardToken(for: .light)
+            ]
+
+        for surface in darkSurfaces {
+            #expect(secondaryDark.contrastRatio(against: surface) >= 4.5)
+        }
+
+        for surface in lightSurfaces {
+            #expect(secondaryLight.contrastRatio(against: surface) >= 4.5)
+        }
+    }
+
     @Test("dark task cards stay visually distinct from each kanban column background")
     func darkTaskCardsRemainDistinctFromColumns() {
         let taskCard = BoardSurfacePalette.taskCardToken(for: .dark)

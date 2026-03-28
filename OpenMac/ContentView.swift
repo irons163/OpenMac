@@ -112,7 +112,7 @@ struct ContentView: View {
 
                     Text("Showing \(filteredTaskCount) / \(viewModel.tasks.count)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
 
                     Button("Reset Filters") {
                         resetTaskFilters()
@@ -674,17 +674,21 @@ private struct AgentRowView: View {
                 .font(.headline)
             Text("Skills: \(skillsText)")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             HStack(spacing: 8) {
                 ProgressView(value: loadProgress, total: 1.0)
                     .progressViewStyle(.linear)
                 Text("\(loadPercent)%")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
             Text("Load: \(loadCount)/\(maxLoad)")
                 .font(.caption2)
-                .foregroundStyle(isOverloaded ? BoardSemanticTextPalette.color(for: .error, scheme: colorScheme) : .secondary)
+                .foregroundStyle(
+                    isOverloaded
+                        ? BoardSemanticTextPalette.color(for: .error, scheme: colorScheme)
+                        : BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
+                )
             if isOverloaded {
                 Text("Overloaded")
                     .font(.caption2.weight(.semibold))
@@ -752,7 +756,7 @@ private struct BoardHealthRecommendationsView: View {
                 HStack {
                     Text("Suggested Actions")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     Spacer()
                     if autoFixRecommendationCount > 0 {
                         Button("Apply All (\(autoFixRecommendationCount))") {
@@ -775,7 +779,7 @@ private struct BoardHealthRecommendationsView: View {
                                         .foregroundStyle(.primary)
                                     Text(recommendation.detail)
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                                         .multilineTextAlignment(.leading)
                                         .lineLimit(2)
                                 }
@@ -821,7 +825,7 @@ private struct SummaryBadge: View {
         let badgeContent = VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
             Text(value)
@@ -888,7 +892,7 @@ private struct KanbanColumnView: View {
             if tasks.isEmpty {
                 Text("No tasks")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .frame(maxWidth: .infinity, minHeight: 120)
                     .background(emptyStateBackground, in: RoundedRectangle(cornerRadius: 12))
             } else {
@@ -969,13 +973,13 @@ private struct TaskCardView: View {
             if !task.details.isEmpty {
                 Text(task.details)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
 
             if !task.requiredSkills.isEmpty {
                 Text("Skills: \(task.requiredSkills.sorted().joined(separator: ", "))")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
 
             HStack {
@@ -989,13 +993,13 @@ private struct TaskCardView: View {
 
                 Text(assigneeName)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
 
             if let assignmentReason, task.assignedAgentID != nil {
                 Text("Dispatch: \(assignmentReason)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .lineLimit(3)
             }
 
@@ -1265,7 +1269,7 @@ private struct ManualTriageSheet: View {
             if tasks.isEmpty {
                 Text("No tasks waiting for manual triage.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1275,7 +1279,7 @@ private struct ManualTriageSheet: View {
                                     .font(.headline)
                                 Text("Skills: \(task.requiredSkills.sorted().joined(separator: ", "))")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
 
                                 let eligibleAgents = assignableAgents(task)
 
@@ -1640,6 +1644,27 @@ enum BoardSemanticTextPalette {
     }
 
     static func color(for role: BoardSemanticTextRole, scheme: ColorScheme) -> Color {
+        token(for: role, scheme: scheme).color
+    }
+}
+
+enum BoardNeutralTextRole {
+    case secondary
+}
+
+enum BoardNeutralTextPalette {
+    static func token(for role: BoardNeutralTextRole, scheme: ColorScheme) -> BoardMessageColorToken {
+        switch (scheme, role) {
+        case (.dark, .secondary):
+            return BoardMessageColorToken(red: 0.82, green: 0.86, blue: 0.92, opacity: 1.0)
+        case (.light, .secondary):
+            return BoardMessageColorToken(red: 0.28, green: 0.33, blue: 0.42, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.28, green: 0.33, blue: 0.42, opacity: 1.0)
+        }
+    }
+
+    static func color(for role: BoardNeutralTextRole, scheme: ColorScheme) -> Color {
         token(for: role, scheme: scheme).color
     }
 }
