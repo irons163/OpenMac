@@ -1017,6 +1017,7 @@ struct KanbanFlowTests {
         #expect(viewModel.activeTaskCount(for: overloaded.id) == 1)
         #expect(viewModel.healthRecommendations().isEmpty)
         #expect(viewModel.lastBoardMessage == "Applied 4 health recommendation(s)")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
     @Test("reports when apply-all has no automatic fixes available")
@@ -1035,6 +1036,27 @@ struct KanbanFlowTests {
 
         #expect(appliedCount == 0)
         #expect(viewModel.lastBoardMessage == "No automatic fixes available for current recommendations")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("reports info tone when board is already stable during apply-all")
+    func applyAllReportsInfoWhenBoardAlreadyStable() {
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let appliedCount = viewModel.applyAllHealthRecommendations()
+
+        #expect(appliedCount == 0)
+        #expect(viewModel.lastBoardMessage == "Board health already stable")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
     @Test("returns no health recommendations when board is healthy")
@@ -1718,6 +1740,7 @@ struct KanbanPersistenceTests {
 
         #expect(assignedCount == 1)
         #expect(viewModel.lastBoardMessage == "Assigned 1 triage task. 1 task still needs manual attention")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
     @Test("bulk triage clears summary message when all triage tasks are assigned")
@@ -1745,6 +1768,7 @@ struct KanbanPersistenceTests {
 
         #expect(assignedCount == 2)
         #expect(viewModel.lastBoardMessage == nil)
+        #expect(viewModel.lastBoardMessageSeverity == nil)
     }
 
     @Test("bulk triage prefers selected agents from manual triage choices")
@@ -1841,6 +1865,7 @@ struct KanbanPersistenceTests {
 
         #expect(assignedCount == 0)
         #expect(viewModel.lastBoardMessage == "No eligible agents available for pending triage tasks")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
         #expect(store.savedSnapshots.isEmpty)
     }
 

@@ -127,7 +127,7 @@ struct ContentView: View {
                 if let message = viewModel.lastBoardMessage {
                     Text(message)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(boardMessageColor(for: viewModel.lastBoardMessageSeverity))
                 }
 
                 ScrollView(.horizontal) {
@@ -316,6 +316,7 @@ struct ContentView: View {
             ManualTriageSheet(
                 tasks: viewModel.triageCandidates(),
                 boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 selectedAgentByTaskID: $triageSelectionByTaskID,
                 assignAllEligibleCount: viewModel.bulkAssignableTriageTaskCount(using: triageSelectionByTaskID),
                 unassignableTaskCount: viewModel.bulkUnassignableTriageTaskCount(using: triageSelectionByTaskID),
@@ -619,6 +620,19 @@ struct ContentView: View {
             Color(red: 0.96, green: 0.98, blue: 1.0),
             Color(red: 0.93, green: 0.96, blue: 0.99)
         ]
+    }
+
+    private func boardMessageColor(for severity: BoardMessageSeverity?) -> Color {
+        switch severity {
+        case .info:
+            return colorScheme == .dark ? Color.cyan.opacity(0.9) : Color(red: 0.0, green: 0.42, blue: 0.56)
+        case .warning:
+            return colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0)
+        case .error:
+            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
+        case .none:
+            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
+        }
     }
 
     private var selectedAppearanceMode: AppAppearanceMode {
@@ -1253,6 +1267,7 @@ private struct ManualTriageSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     let tasks: [WorkTask]
     let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
     @Binding var selectedAgentByTaskID: [UUID: UUID]
     let assignAllEligibleCount: Int
     let unassignableTaskCount: Int
@@ -1270,7 +1285,7 @@ private struct ManualTriageSheet: View {
             if let boardMessage, !boardMessage.isEmpty {
                 Text(boardMessage)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(boardMessageColor)
             }
 
             HStack {
@@ -1348,6 +1363,19 @@ private struct ManualTriageSheet: View {
 
     private var triageCardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.94)
+    }
+
+    private var boardMessageColor: Color {
+        switch boardMessageSeverity {
+        case .info:
+            return colorScheme == .dark ? Color.cyan.opacity(0.9) : Color(red: 0.0, green: 0.42, blue: 0.56)
+        case .warning:
+            return colorScheme == .dark ? Color.orange.opacity(0.9) : Color(red: 0.72, green: 0.38, blue: 0.0)
+        case .error:
+            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
+        case .none:
+            return colorScheme == .dark ? Color.red.opacity(0.92) : Color.red
+        }
     }
 }
 

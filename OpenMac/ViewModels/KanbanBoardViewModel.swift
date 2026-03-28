@@ -25,6 +25,12 @@ enum BoardHealthAction: Equatable {
     }
 }
 
+enum BoardMessageSeverity: Equatable {
+    case info
+    case warning
+    case error
+}
+
 struct BoardHealthRecommendation: Identifiable, Equatable {
     let action: BoardHealthAction
     let title: String
@@ -52,7 +58,16 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var tasks: [WorkTask]
     @Published private(set) var lastUnassignedTaskIDs: Set<UUID> = []
     @Published private(set) var lastAssignmentReasons: [UUID: String] = [:]
-    @Published private(set) var lastBoardMessage: String?
+    @Published private(set) var lastBoardMessage: String? {
+        didSet {
+            if lastBoardMessage == nil {
+                lastBoardMessageSeverity = nil
+            } else {
+                lastBoardMessageSeverity = .error
+            }
+        }
+    }
+    @Published private(set) var lastBoardMessageSeverity: BoardMessageSeverity?
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
 
@@ -693,10 +708,13 @@ final class KanbanBoardViewModel: ObservableObject {
 
         if appliedCount > 0 {
             lastBoardMessage = "Applied \(appliedCount) health recommendation(s)"
+            lastBoardMessageSeverity = .info
         } else if !actions.isEmpty {
             lastBoardMessage = "No automatic fixes available for current recommendations"
+            lastBoardMessageSeverity = .warning
         } else {
             lastBoardMessage = "Board health already stable"
+            lastBoardMessageSeverity = .info
         }
 
         return appliedCount
@@ -867,15 +885,20 @@ final class KanbanBoardViewModel: ObservableObject {
         guard assignedCount > 0 else {
             if !candidates.isEmpty {
                 lastBoardMessage = "No eligible agents available for pending triage tasks"
+                lastBoardMessageSeverity = .warning
             }
             return 0
         }
 
         persistBoardState()
         let remainingTriageCount = triageCandidates().count
-        lastBoardMessage = remainingTriageCount > 0
+        let summaryMessage = remainingTriageCount > 0
             ? bulkTriageAssignmentSummary(assignedCount: assignedCount, remainingCount: remainingTriageCount)
             : nil
+        lastBoardMessage = summaryMessage
+        if summaryMessage != nil {
+            lastBoardMessageSeverity = .warning
+        }
         return assignedCount
     }
 
