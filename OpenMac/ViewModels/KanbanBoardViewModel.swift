@@ -1981,6 +1981,11 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return false
         }
+        guard !tasks[taskIndex].details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastBoardMessage = "Task details are required before running this task"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
 
         if tasks[taskIndex].status == .todo {
             guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
@@ -2008,30 +2013,46 @@ final class KanbanBoardViewModel: ObservableObject {
 
         switch outcome {
         case let .success(summary):
-            var finishedRecord = tasks[taskIndex].executionRecord ?? record
-            finishedRecord.status = .succeeded
-            finishedRecord.lastFinishedAt = finishedAt
-            finishedRecord.lastOutputSummary = normalizeExecutionText(summary)
-            finishedRecord.lastError = nil
-            finishedRecord.lastDebugOutput = nil
-            finishedRecord.lastAgentID = agent.id
-            tasks[taskIndex].executionRecord = finishedRecord
-            lastExecutionDebugLog = nil
-            lastCodexLoginCommand = nil
+            let normalizedSummary = normalizeExecutionText(summary)
+            if let normalizedSummary, let blockerMessage = blockedExecutionMessage(from: normalizedSummary) {
+                var blockedRecord = tasks[taskIndex].executionRecord ?? record
+                blockedRecord.status = .failed
+                blockedRecord.lastFinishedAt = finishedAt
+                blockedRecord.lastOutputSummary = normalizedSummary
+                blockedRecord.lastError = blockerMessage
+                blockedRecord.lastDebugOutput = nil
+                blockedRecord.lastAgentID = agent.id
+                tasks[taskIndex].executionRecord = blockedRecord
+                lastExecutionDebugLog = nil
+                lastCodexLoginCommand = nil
+                lastBoardMessage = blockerMessage
+                lastBoardMessageSeverity = .warning
+            } else {
+                var finishedRecord = tasks[taskIndex].executionRecord ?? record
+                finishedRecord.status = .succeeded
+                finishedRecord.lastFinishedAt = finishedAt
+                finishedRecord.lastOutputSummary = normalizedSummary
+                finishedRecord.lastError = nil
+                finishedRecord.lastDebugOutput = nil
+                finishedRecord.lastAgentID = agent.id
+                tasks[taskIndex].executionRecord = finishedRecord
+                lastExecutionDebugLog = nil
+                lastCodexLoginCommand = nil
 
-            if tasks[taskIndex].status == .inProgress {
-                if isWIPLimitReached(for: .review, excluding: taskID) {
-                    let limit = wipLimits[.review] ?? 0
-                    lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
-                    lastBoardMessageSeverity = .warning
+                if tasks[taskIndex].status == .inProgress {
+                    if isWIPLimitReached(for: .review, excluding: taskID) {
+                        let limit = wipLimits[.review] ?? 0
+                        lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
+                        lastBoardMessageSeverity = .warning
+                    } else {
+                        tasks[taskIndex].status = .review
+                        lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                        lastBoardMessageSeverity = .info
+                    }
                 } else {
-                    tasks[taskIndex].status = .review
                     lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
                     lastBoardMessageSeverity = .info
                 }
-            } else {
-                lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
-                lastBoardMessageSeverity = .info
             }
 
         case let .failure(message):
@@ -2319,6 +2340,23 @@ final class KanbanBoardViewModel: ObservableObject {
         let userMessage = String(value[..<range.lowerBound])
         let debugLog = String(value[range.upperBound...])
         return (userMessage, debugLog)
+    }
+
+    private func blockedExecutionMessage(from summary: String) -> String? {
+        let normalized = summary.lowercased()
+        let missingDetailsSignals = [
+            "no implementation details",
+            "acceptance criteria were provided",
+            "acceptance criteria provided",
+            "insufficient implementation details",
+            "missing task details",
+            "could not proceed beyond intake",
+            "unable to proceed"
+        ]
+        guard missingDetailsSignals.contains(where: { normalized.contains($0) }) else {
+            return nil
+        }
+        return "Execution blocked: missing task details or acceptance criteria"
     }
 
     private func extractCodexLoginCommand(from userMessage: String?, debugLog: String?) -> String? {

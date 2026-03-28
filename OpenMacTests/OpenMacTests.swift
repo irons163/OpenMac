@@ -3692,6 +3692,38 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("run task execution requires non-empty task details")
+    func runTaskExecutionRequiresTaskDetails() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Missing details",
+            details: "   ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Should not execute")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(!executed)
+        #expect(viewModel.tasks.first?.status == .todo)
+        #expect(viewModel.tasks.first?.executionRecord == nil)
+        #expect(viewModel.lastBoardMessage == "Task details are required before running this task")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(store.savedSnapshots.isEmpty)
+    }
+
     @Test("run task execution failure writes failed record and keeps task in progress")
     func runTaskExecutionFailureWritesRecord() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -3767,6 +3799,42 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastExecutionDebugLog == "RAW DEBUG")
         #expect(viewModel.lastCodexLoginCommand == nil)
         #expect(viewModel.lastBoardMessage == "Execution failed: Codex Bridge run failed: Network issue")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("run task execution marks blocker summaries as failed")
+    func runTaskExecutionMarksBlockerSummaryAsFailed() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "AAA",
+            details: "Draft objective captured; awaiting concrete acceptance criteria.",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let summary = "Execution summary: Reviewed Task \"AAA\" (1 story point) assigned to Agent A. No implementation details or acceptance criteria were provided, so execution could not proceed beyond intake."
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: summary)]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+
+        #expect(executed)
+        #expect(updatedTask?.status == .inProgress)
+        #expect(record?.status == .failed)
+        #expect(record?.lastOutputSummary == summary)
+        #expect(record?.lastError == "Execution blocked: missing task details or acceptance criteria")
+        #expect(viewModel.lastBoardMessage == "Execution blocked: missing task details or acceptance criteria")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
