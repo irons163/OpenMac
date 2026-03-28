@@ -779,11 +779,11 @@ private struct BoardHealthRecommendationsView: View {
     }
 
     private var recommendationCardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.75)
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.92)
     }
 
     private var recommendationCardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+        colorScheme == .dark ? Color.white.opacity(0.20) : Color.black.opacity(0.12)
     }
 
     private var hasMutatingRecommendations: Bool {
@@ -816,7 +816,11 @@ private struct SummaryBadge: View {
         .frame(minWidth: 78, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(color.opacity(colorScheme == .dark ? 0.22 : 0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(color.opacity(colorScheme == .dark ? 0.32 : 0.2), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1)
+        )
 
         if let helpText, !helpText.isEmpty {
             badgeContent.help(helpText)
@@ -914,37 +918,37 @@ private struct KanbanColumnView: View {
         if colorScheme == .dark {
             switch status {
             case .todo:
-                return Color(red: 0.17, green: 0.24, blue: 0.32)
+                return Color(red: 0.16, green: 0.23, blue: 0.31)
             case .inProgress:
-                return Color(red: 0.16, green: 0.28, blue: 0.22)
+                return Color(red: 0.15, green: 0.27, blue: 0.21)
             case .review:
-                return Color(red: 0.32, green: 0.26, blue: 0.16)
+                return Color(red: 0.30, green: 0.25, blue: 0.16)
             case .done:
-                return Color(red: 0.23, green: 0.23, blue: 0.27)
+                return Color(red: 0.21, green: 0.22, blue: 0.27)
             }
         }
         switch status {
         case .todo:
-            return Color(red: 0.84, green: 0.92, blue: 1.0)
+            return Color(red: 0.82, green: 0.9, blue: 0.98)
         case .inProgress:
-            return Color(red: 0.82, green: 0.95, blue: 0.88)
+            return Color(red: 0.81, green: 0.94, blue: 0.87)
         case .review:
-            return Color(red: 1.0, green: 0.93, blue: 0.79)
+            return Color(red: 0.99, green: 0.92, blue: 0.77)
         case .done:
-            return Color(red: 0.90, green: 0.90, blue: 0.93)
+            return Color(red: 0.89, green: 0.89, blue: 0.92)
         }
     }
 
     private var counterBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.14) : Color.white.opacity(0.7)
+        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white.opacity(0.82)
     }
 
     private var emptyStateBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.5)
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.68)
     }
 
     private var columnBorderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.65)
+        colorScheme == .dark ? Color.white.opacity(0.24) : Color.white.opacity(0.8)
     }
 }
 
@@ -1042,11 +1046,11 @@ private struct TaskCardView: View {
     }
 
     private var taskCardBackground: Color {
-        colorScheme == .dark ? Color(red: 0.16, green: 0.17, blue: 0.20) : Color.white
+        colorScheme == .dark ? Color(red: 0.19, green: 0.2, blue: 0.24) : Color.white
     }
 
     private var taskCardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.05)
+        colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.08)
     }
 }
 
@@ -1319,7 +1323,7 @@ private struct ManualTriageSheet: View {
     }
 
     private var triageCardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.85)
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.94)
     }
 }
 
