@@ -465,6 +465,32 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    func selectedBoardExportData() -> Data? {
+        syncCurrentBoardRecord()
+        guard let selectedBoard = boards.first(where: { $0.id == selectedBoardID }) else {
+            lastBoardMessage = "Board not found"
+            return nil
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        do {
+            return try encoder.encode(
+                KanbanBoardSnapshot(
+                    tasks: selectedBoard.tasks,
+                    agents: selectedBoard.agents,
+                    wipLimits: selectedBoard.wipLimits,
+                    boards: [selectedBoard],
+                    selectedBoardID: selectedBoard.id
+                )
+            )
+        } catch {
+            lastBoardMessage = "Failed to export board"
+            return nil
+        }
+    }
+
     func workspaceImportPreview(from data: Data) -> WorkspaceImportPreview? {
         guard let snapshot = decodeWorkspaceSnapshot(from: data) else {
             lastBoardMessage = "Invalid workspace JSON"
@@ -516,6 +542,21 @@ final class KanbanBoardViewModel: ObservableObject {
             return true
         } catch {
             lastBoardMessage = "Failed to write workspace file"
+            return false
+        }
+    }
+
+    @discardableResult
+    func exportSelectedBoard(to url: URL) -> Bool {
+        guard let data = selectedBoardExportData() else { return false }
+        do {
+            try data.write(to: url, options: .atomic)
+            let fileName = url.lastPathComponent.isEmpty ? "board.json" : url.lastPathComponent
+            lastBoardMessage = "Exported board to \(fileName)"
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = "Failed to write board file"
             return false
         }
     }

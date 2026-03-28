@@ -1721,6 +1721,39 @@ struct KanbanPersistenceTests {
         #expect(snapshot.selectedBoardID == viewModel.selectedBoardID)
     }
 
+    @Test("exports selected board snapshot JSON only")
+    func exportsSelectedBoardSnapshotJSON() throws {
+        let seedTask = WorkTask(
+            title: "Seed",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [seedTask], agents: [])
+        _ = viewModel.createBoard(name: "Ops Board")
+        _ = viewModel.addTask(
+            title: "Ops Task",
+            details: "Board-specific",
+            requiredSkillsText: "ops",
+            storyPoints: 2
+        )
+        let selectedBoardID = viewModel.selectedBoardID
+
+        let exported = viewModel.selectedBoardExportData()
+
+        #expect(exported != nil)
+        guard let exported else { return }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exported)
+        #expect(snapshot.boards?.count == 1)
+        #expect(snapshot.boards?.first?.id == selectedBoardID)
+        #expect(snapshot.selectedBoardID == selectedBoardID)
+    }
+
     @Test("imports workspace snapshot and persists board selection")
     func importsWorkspaceSnapshotAndPersistsSelection() throws {
         let deliveryTask = WorkTask(
@@ -1989,6 +2022,38 @@ struct KanbanPersistenceTests {
         let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exportedData)
         #expect(snapshot.boards?.count == 2)
         #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("exports selected board snapshot to JSON file URL")
+    func exportsSelectedBoardSnapshotToFileURL() throws {
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("openmac-board.json")
+        defer { try? FileManager.default.removeItem(at: workspaceURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: workspaceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let task = WorkTask(
+            title: "Seed",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let exported = viewModel.exportSelectedBoard(to: workspaceURL)
+
+        #expect(exported)
+        let exportedData = try Data(contentsOf: workspaceURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exportedData)
+        #expect(snapshot.boards?.count == 1)
+        #expect(snapshot.selectedBoardID == viewModel.selectedBoardID)
     }
 
     @Test("imports workspace snapshot from JSON file URL")

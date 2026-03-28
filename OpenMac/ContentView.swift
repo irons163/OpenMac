@@ -285,6 +285,11 @@ struct ContentView: View {
 
                         Divider()
 
+                        Button("Export Current Board JSON...") {
+                            exportSelectedBoardFromToolbar()
+                        }
+                        .keyboardShortcut("e", modifiers: [.command, .shift, .option])
+
                         Button("Export Workspace JSON...") {
                             exportWorkspaceFromToolbar()
                         }
@@ -686,6 +691,19 @@ struct ContentView: View {
         _ = viewModel.exportWorkspace(to: url)
     }
 
+    private func exportSelectedBoardFromToolbar() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = selectedBoardExportFileName()
+        panel.title = "Export Current Board"
+        panel.message = "Save only the current board as JSON."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        _ = viewModel.exportSelectedBoard(to: url)
+    }
+
     private func importWorkspaceFromToolbar() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType.json]
@@ -727,6 +745,17 @@ struct ContentView: View {
         default:
             return nil
         }
+    }
+
+    private func selectedBoardExportFileName() -> String {
+        let rawTokens = viewModel.selectedBoardName
+            .lowercased()
+            .split { character in
+                !(character.isLetter || character.isNumber)
+            }
+        let slug = rawTokens.joined(separator: "-")
+        let resolvedSlug = slug.isEmpty ? "board" : slug
+        return "openmac-\(resolvedSlug)-board.json"
     }
 
     private func assignManually(taskID: UUID) {
