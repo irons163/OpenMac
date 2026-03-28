@@ -70,6 +70,13 @@ final class KanbanBoardViewModel: ObservableObject {
         if boardHealthScore >= 60 { return "Watch" }
         return "Critical"
     }
+    var boardHealthBreakdownText: String {
+        let penalties = boardHealthPenaltyItems()
+        guard !penalties.isEmpty else { return "No active penalties" }
+        return penalties
+            .map { "\($0.label): -\($0.points)" }
+            .joined(separator: "\n")
+    }
 
     init(
         tasks: [WorkTask],
@@ -803,6 +810,34 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let limit = wipLimits[destination] else { return false }
         let currentCount = tasks.filter { $0.status == destination && $0.id != taskID }.count
         return currentCount >= limit
+    }
+
+    private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {
+        var items: [(label: String, points: Int)] = []
+
+        let unassignedPenalty = min(30, unassignedTodoTaskCount * 10)
+        if unassignedPenalty > 0 {
+            items.append(("Unassigned To Do", unassignedPenalty))
+        }
+
+        let overloadedPenalty = min(30, overloadedAgentCount * 10)
+        if overloadedPenalty > 0 {
+            items.append(("Overloaded Agents", overloadedPenalty))
+        }
+
+        if wipPressurePercent(for: .inProgress) >= 100 {
+            items.append(("In Progress WIP Pressure", 10))
+        }
+
+        if wipPressurePercent(for: .review) >= 100 {
+            items.append(("Review WIP Pressure", 10))
+        }
+
+        if doneTaskCount > 0 {
+            items.append(("Done Backlog", 5))
+        }
+
+        return items
     }
 
     private func isNavigationalHealthAction(_ action: BoardHealthAction) -> Bool {

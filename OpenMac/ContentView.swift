@@ -86,6 +86,7 @@ struct ContentView: View {
                     overloadedAgents: viewModel.overloadedAgentCount,
                     healthScore: viewModel.boardHealthScore,
                     healthLabel: viewModel.boardHealthLabel,
+                    healthBreakdownText: viewModel.boardHealthBreakdownText,
                     inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
                     reviewPressure: viewModel.wipPressurePercent(for: .review)
                 )
@@ -668,6 +669,7 @@ private struct BoardHealthSummaryView: View {
     let overloadedAgents: Int
     let healthScore: Int
     let healthLabel: String
+    let healthBreakdownText: String
     let inProgressPressure: Int
     let reviewPressure: Int
 
@@ -678,7 +680,12 @@ private struct BoardHealthSummaryView: View {
                 SummaryBadge(title: "To Do", value: "\(todoTasks)", color: .indigo)
                 SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", color: .orange)
                 SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", color: overloadedAgents > 0 ? .red : .green)
-                SummaryBadge(title: "Health", value: "\(healthScore) \(healthLabel)", color: healthScoreColor)
+                SummaryBadge(
+                    title: "Health",
+                    value: "\(healthScore) \(healthLabel)",
+                    color: healthScoreColor,
+                    helpText: healthBreakdownText
+                )
                 SummaryBadge(title: "InProg WIP", value: "\(inProgressPressure)%", color: inProgressPressure >= 100 ? .red : .teal)
                 SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", color: reviewPressure >= 100 ? .red : .mint)
                 Spacer(minLength: 0)
@@ -783,9 +790,10 @@ private struct SummaryBadge: View {
     let title: String
     let value: String
     let color: Color
+    var helpText: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let badgeContent = VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -801,6 +809,12 @@ private struct SummaryBadge: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(color.opacity(colorScheme == .dark ? 0.22 : 0.12), in: RoundedRectangle(cornerRadius: 8))
+
+        if let helpText, !helpText.isEmpty {
+            badgeContent.help(helpText)
+        } else {
+            badgeContent
+        }
     }
 }
 

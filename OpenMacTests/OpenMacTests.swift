@@ -505,6 +505,7 @@ struct KanbanFlowTests {
 
         #expect(viewModel.boardHealthScore == 100)
         #expect(viewModel.boardHealthLabel == "Excellent")
+        #expect(viewModel.boardHealthBreakdownText == "No active penalties")
     }
 
     @Test("reduces health score for unassigned work overload and WIP pressure")
@@ -567,6 +568,11 @@ struct KanbanFlowTests {
 
         #expect(viewModel.boardHealthScore == 55)
         #expect(viewModel.boardHealthLabel == "Critical")
+        #expect(viewModel.boardHealthBreakdownText.contains("Unassigned To Do: -10"))
+        #expect(viewModel.boardHealthBreakdownText.contains("Overloaded Agents: -10"))
+        #expect(viewModel.boardHealthBreakdownText.contains("In Progress WIP Pressure: -10"))
+        #expect(viewModel.boardHealthBreakdownText.contains("Review WIP Pressure: -10"))
+        #expect(viewModel.boardHealthBreakdownText.contains("Done Backlog: -5"))
     }
 
     @Test("maps medium health scores to watch label")
