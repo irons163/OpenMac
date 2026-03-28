@@ -106,3 +106,27 @@ struct WorkTask: Identifiable, Equatable, Codable {
         rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
+
+struct KanbanBoardRecord: Identifiable, Equatable, Codable {
+    let id: UUID
+    var name: String
+    var tasks: [WorkTask]
+    var agents: [AgentProfile]
+    var wipLimits: [KanbanStatus: Int]
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        tasks: [WorkTask] = [],
+        agents: [AgentProfile] = [],
+        wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2]
+    ) {
+        self.id = id
+        self.name = name
+        self.tasks = tasks
+        self.agents = agents
+        self.wipLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
+            partialResult[pair.key] = max(1, pair.value)
+        }
+    }
+}

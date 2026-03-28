@@ -1357,6 +1357,113 @@ struct KanbanPersistenceTests {
         #expect(viewModel.wipLimit(for: .inProgress) == 1)
     }
 
+    @Test("creates a new board and switches to it with isolated state")
+    func createsBoardAndSwitchesToIsolatedContext() {
+        let seedTask = WorkTask(
+            title: "Seed task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let seedAgent = AgentProfile(name: "Seed Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [seedTask], agents: [seedAgent])
+
+        let created = viewModel.createBoard(name: "Platform Board")
+
+        #expect(created)
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.selectedBoardName == "Platform Board")
+        #expect(viewModel.tasks.isEmpty)
+        #expect(viewModel.agents.isEmpty)
+        #expect(viewModel.wipLimit(for: .inProgress) == 3)
+        #expect(viewModel.wipLimit(for: .review) == 2)
+    }
+
+    @Test("switching boards restores each board's independent tasks and agents")
+    func switchingBoardsRestoresIndependentState() {
+        let defaultTask = WorkTask(
+            title: "Default task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let defaultAgent = AgentProfile(name: "Default Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [defaultTask], agents: [defaultAgent])
+        let defaultBoardID = viewModel.selectedBoardID
+
+        _ = viewModel.createBoard(name: "Research Board")
+        _ = viewModel.addTask(
+            title: "Research task",
+            details: "",
+            requiredSkillsText: "analysis",
+            storyPoints: 1
+        )
+        _ = viewModel.addAgent(name: "Research Agent", skillsText: "analysis", maxConcurrentTasks: 1)
+
+        let switchedBack = viewModel.switchBoard(to: defaultBoardID)
+        #expect(switchedBack)
+        #expect(viewModel.selectedBoardID == defaultBoardID)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "Default task")
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents.first?.name == "Default Agent")
+
+        let researchBoardID = viewModel.boards.first(where: { $0.name == "Research Board" })?.id
+        #expect(researchBoardID != nil)
+
+        if let researchBoardID {
+            let switchedToResearch = viewModel.switchBoard(to: researchBoardID)
+            #expect(switchedToResearch)
+            #expect(viewModel.selectedBoardID == researchBoardID)
+            #expect(viewModel.tasks.count == 1)
+            #expect(viewModel.tasks.first?.title == "Research task")
+            #expect(viewModel.agents.count == 1)
+            #expect(viewModel.agents.first?.name == "Research Agent")
+        }
+    }
+
+    @Test("loads selected board from multi-board snapshot")
+    func persistentBoardLoadsSelectedBoardFromMultiBoardSnapshot() {
+        let deliveryTask = WorkTask(
+            title: "Delivery task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let qaTask = WorkTask(
+            title: "QA task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let deliveryBoard = KanbanBoardRecord(name: "Delivery", tasks: [deliveryTask], agents: [], wipLimits: [.inProgress: 3, .review: 2])
+        let qaBoard = KanbanBoardRecord(name: "QA", tasks: [qaTask], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: deliveryBoard.tasks,
+            agents: deliveryBoard.agents,
+            wipLimits: deliveryBoard.wipLimits,
+            boards: [deliveryBoard, qaBoard],
+            selectedBoardID: qaBoard.id
+        )
+        let store = SpyBoardStore(loadSnapshot: snapshot)
+
+        let viewModel = KanbanBoardViewModel.persistentBoard(boardStore: store)
+
+        #expect(viewModel.boards.count == 2)
+        #expect(viewModel.selectedBoardID == qaBoard.id)
+        #expect(viewModel.selectedBoardName == "QA")
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "QA task")
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -55,6 +55,8 @@ struct BoardHealthRecommendation: Identifiable, Equatable {
 }
 
 final class KanbanBoardViewModel: ObservableObject {
+    @Published private(set) var boards: [KanbanBoardRecord]
+    @Published private(set) var selectedBoardID: UUID
     @Published private(set) var tasks: [WorkTask]
     @Published private(set) var lastUnassignedTaskIDs: Set<UUID> = []
     @Published private(set) var lastAssignmentReasons: [UUID: String] = [:]
@@ -73,6 +75,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private let assignmentEngine: AutoAssignmentEngine
     private let boardStore: KanbanBoardStore?
+    private static let defaultBoardName = "Default Board"
 
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
@@ -114,6 +117,9 @@ final class KanbanBoardViewModel: ObservableObject {
     var hasAutoFixableHealthRecommendations: Bool {
         autoFixableHealthRecommendationCount > 0
     }
+    var selectedBoardName: String {
+        boards.first(where: { $0.id == selectedBoardID })?.name ?? Self.defaultBoardName
+    }
 
     init(
         tasks: [WorkTask],
@@ -122,13 +128,80 @@ final class KanbanBoardViewModel: ObservableObject {
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         boardStore: KanbanBoardStore? = nil
     ) {
-        self.tasks = tasks
-        self.agents = agents
-        self.wipLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
+        let normalizedLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
             partialResult[pair.key] = max(1, pair.value)
         }
+        let initialBoard = KanbanBoardRecord(
+            name: Self.defaultBoardName,
+            tasks: tasks,
+            agents: agents,
+            wipLimits: normalizedLimits
+        )
+        self.boards = [initialBoard]
+        self.selectedBoardID = initialBoard.id
+        self.tasks = tasks
+        self.agents = agents
+        self.wipLimits = normalizedLimits
         self.assignmentEngine = assignmentEngine
         self.boardStore = boardStore
+    }
+
+    private init(
+        boards: [KanbanBoardRecord],
+        selectedBoardID: UUID,
+        assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        boardStore: KanbanBoardStore? = nil
+    ) {
+        let resolvedBoard: KanbanBoardRecord
+        if let selected = boards.first(where: { $0.id == selectedBoardID }) {
+            resolvedBoard = selected
+        } else if let first = boards.first {
+            resolvedBoard = first
+        } else {
+            resolvedBoard = KanbanBoardRecord(name: Self.defaultBoardName)
+        }
+
+        self.boards = boards.isEmpty ? [resolvedBoard] : boards
+        self.selectedBoardID = resolvedBoard.id
+        self.tasks = resolvedBoard.tasks
+        self.agents = resolvedBoard.agents
+        self.wipLimits = resolvedBoard.wipLimits
+        self.assignmentEngine = assignmentEngine
+        self.boardStore = boardStore
+    }
+
+    @discardableResult
+    func createBoard(name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Board name is required"
+            return false
+        }
+
+        if boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(trimmedName) == .orderedSame }) {
+            lastBoardMessage = "Board name already exists"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        let board = KanbanBoardRecord(name: trimmedName)
+        boards.append(board)
+        loadBoard(board.id)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
+    func switchBoard(to boardID: UUID) -> Bool {
+        guard boards.contains(where: { $0.id == boardID }) else { return false }
+        guard boardID != selectedBoardID else { return true }
+
+        syncCurrentBoardRecord()
+        loadBoard(boardID)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
     }
 
     func tasks(in status: KanbanStatus) -> [WorkTask] {
@@ -954,6 +1027,30 @@ final class KanbanBoardViewModel: ObservableObject {
         return currentCount >= limit
     }
 
+    private var selectedBoardIndex: Int? {
+        boards.firstIndex(where: { $0.id == selectedBoardID })
+    }
+
+    private func syncCurrentBoardRecord() {
+        guard let selectedBoardIndex else { return }
+        boards[selectedBoardIndex].tasks = tasks
+        boards[selectedBoardIndex].agents = agents
+        boards[selectedBoardIndex].wipLimits = wipLimits
+    }
+
+    private func loadBoard(_ boardID: UUID) {
+        guard let index = boards.firstIndex(where: { $0.id == boardID }) else { return }
+        let board = boards[index]
+        selectedBoardID = board.id
+        tasks = board.tasks
+        agents = board.agents
+        wipLimits = board.wipLimits
+        lastUnassignedTaskIDs = Set(tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.map(\.id))
+        lastAssignmentReasons = [:]
+        lastBoardMessage = nil
+        lastBoardMessageSeverity = nil
+    }
+
     private func boardHealthPenaltyItems() -> [(label: String, points: Int)] {
         var items: [(label: String, points: Int)] = []
 
@@ -984,7 +1081,14 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private func persistBoardState() {
         guard let boardStore else { return }
-        let snapshot = KanbanBoardSnapshot(tasks: tasks, agents: agents, wipLimits: wipLimits)
+        syncCurrentBoardRecord()
+        let snapshot = KanbanBoardSnapshot(
+            tasks: tasks,
+            agents: agents,
+            wipLimits: wipLimits,
+            boards: boards,
+            selectedBoardID: selectedBoardID
+        )
         try? boardStore.save(snapshot)
     }
 }
@@ -992,6 +1096,14 @@ final class KanbanBoardViewModel: ObservableObject {
 extension KanbanBoardViewModel {
     static func persistentBoard(boardStore: KanbanBoardStore = FileKanbanBoardStore()) -> KanbanBoardViewModel {
         if let snapshot = try? boardStore.load() {
+            if let boards = snapshot.boards, !boards.isEmpty {
+                let resolvedSelectedBoardID = snapshot.selectedBoardID ?? boards[0].id
+                return KanbanBoardViewModel(
+                    boards: boards,
+                    selectedBoardID: resolvedSelectedBoardID,
+                    boardStore: boardStore
+                )
+            }
             return KanbanBoardViewModel(
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,

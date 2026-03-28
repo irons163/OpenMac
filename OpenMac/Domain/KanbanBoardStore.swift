@@ -4,6 +4,36 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var tasks: [WorkTask]
     var agents: [AgentProfile]
     var wipLimits: [KanbanStatus: Int]
+    var boards: [KanbanBoardRecord]?
+    var selectedBoardID: UUID?
+
+    init(
+        tasks: [WorkTask],
+        agents: [AgentProfile],
+        wipLimits: [KanbanStatus: Int],
+        boards: [KanbanBoardRecord]? = nil,
+        selectedBoardID: UUID? = nil
+    ) {
+        self.tasks = tasks
+        self.agents = agents
+        self.wipLimits = wipLimits
+        self.boards = boards
+        self.selectedBoardID = selectedBoardID
+    }
+
+    init(
+        tasks: [WorkTask],
+        agents: [AgentProfile],
+        wipLimits: [KanbanStatus: Int]
+    ) {
+        self.init(
+            tasks: tasks,
+            agents: agents,
+            wipLimits: wipLimits,
+            boards: nil,
+            selectedBoardID: nil
+        )
+    }
 }
 
 protocol KanbanBoardStore {

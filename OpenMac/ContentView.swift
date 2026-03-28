@@ -9,8 +9,10 @@ struct ContentView: View {
     @State private var isShowingEditTaskSheet = false
     @State private var isShowingNewAgentSheet = false
     @State private var isShowingEditAgentSheet = false
+    @State private var isShowingNewBoardSheet = false
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
+    @State private var newBoardName = ""
     @State private var newTaskTitle = ""
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
@@ -70,8 +72,13 @@ struct ContentView: View {
         } detail: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("AI Agent Kanban Dispatch")
-                        .font(.title2.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI Agent Kanban Dispatch")
+                            .font(.title2.weight(.semibold))
+                        Text("Board: \(viewModel.selectedBoardName)")
+                            .font(.caption)
+                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    }
                     Spacer()
                     if !viewModel.triageCandidates().isEmpty {
                         Text("\(viewModel.triageCandidates().count) task(s) need manual triage")
@@ -190,6 +197,27 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .help("Create a new agent profile (Option-Command-N)")
+                Menu("Board: \(viewModel.selectedBoardName)") {
+                    Button("New Board") {
+                        openNewBoardSheet()
+                    }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+
+                    Divider()
+
+                    ForEach(viewModel.boards) { board in
+                        Button {
+                            switchBoard(board.id)
+                        } label: {
+                            if viewModel.selectedBoardID == board.id {
+                                Label(board.name, systemImage: "checkmark")
+                            } else {
+                                Text(board.name)
+                            }
+                        }
+                    }
+                }
+                .help("Create a board or switch board context")
                 Menu("Board Actions") {
                     Section("Health") {
                         if viewModel.hasAutoFixableHealthRecommendations {
@@ -242,6 +270,15 @@ struct ContentView: View {
                 }
                 .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
             }
+        }
+        .sheet(isPresented: $isShowingNewBoardSheet) {
+            NewBoardSheet(
+                name: $newBoardName,
+                boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+                onCancel: closeNewBoardSheet,
+                onCreate: createBoardFromSheet
+            )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
             NewTaskSheet(
@@ -336,6 +373,9 @@ struct ContentView: View {
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
         }
+        .onChange(of: viewModel.selectedBoardID) { _, _ in
+            handleBoardContextChanged()
+        }
         .environment(\.colorScheme, effectiveColorScheme)
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
     }
@@ -371,6 +411,41 @@ struct ContentView: View {
         newAgentSkills = ""
         newAgentCapacity = 3
         isShowingNewAgentSheet = false
+    }
+
+    private func openNewBoardSheet() {
+        newBoardName = ""
+        isShowingNewBoardSheet = true
+    }
+
+    private func closeNewBoardSheet() {
+        newBoardName = ""
+        isShowingNewBoardSheet = false
+    }
+
+    private func createBoardFromSheet() {
+        let created = viewModel.createBoard(name: newBoardName)
+        if created {
+            closeNewBoardSheet()
+            handleBoardContextChanged()
+        }
+    }
+
+    private func switchBoard(_ boardID: UUID) {
+        let switched = viewModel.switchBoard(to: boardID)
+        if switched {
+            handleBoardContextChanged()
+        }
+    }
+
+    private func handleBoardContextChanged() {
+        taskSearchQuery = ""
+        selectedAssigneeFilterKey = "all"
+        triageSelectionByTaskID = [:]
+        isShowingManualTriageSheet = false
+        closeEditTaskSheet()
+        closeEditAgentSheet()
+        normalizeAssigneeFilterSelection()
     }
 
     private func openWIPSettings() {
@@ -1051,6 +1126,37 @@ private struct TaskCardView: View {
 
     private var taskCardBorder: Color {
         BoardChromePalette.taskCardBorderColor(for: colorScheme)
+    }
+}
+
+private struct NewBoardSheet: View {
+    @Binding var name: String
+    let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
+    let onCancel: () -> Void
+    let onCreate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("New Board")
+                .font(.title3.weight(.semibold))
+
+            TextField("Board Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            if let boardMessage, !boardMessage.isEmpty {
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Create", action: onCreate)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
     }
 }
 
