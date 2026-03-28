@@ -200,6 +200,7 @@ struct AgentTaskExecutorTests {
             environmentProvider: { [:] },
             urlSession: .shared,
             timeoutSeconds: 1,
+            codexBridgePreflight: {},
             codexBridgeRunner: { request in
                 #expect(request.model == "gpt-5.2")
                 #expect(request.profile == "default")
@@ -241,6 +242,7 @@ struct AgentTaskExecutorTests {
             environmentProvider: { [:] },
             urlSession: .shared,
             timeoutSeconds: 1,
+            codexBridgePreflight: {},
             codexBridgeRunner: { _ in
                 struct BridgeError: LocalizedError {
                     var errorDescription: String? { "codex unavailable" }
@@ -258,6 +260,54 @@ struct AgentTaskExecutorTests {
             #expect(message.contains("Codex Bridge run failed"))
             #expect(message.contains("codex unavailable"))
         }
+    }
+
+    @Test("default executor codex bridge preflight failure stops execution")
+    func openAICompatibleCodexBridgePreflightFailure() {
+        let task = WorkTask(
+            title: "Bridge preflight",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var runnerCalled = false
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {
+                struct PreflightError: LocalizedError {
+                    var errorDescription: String? { "please run codex login" }
+                }
+                throw PreflightError()
+            },
+            codexBridgeRunner: { _ in
+                runnerCalled = true
+                return "should not run"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected Codex Bridge preflight failure")
+        case let .failure(message):
+            #expect(message.contains("Codex Bridge run failed"))
+            #expect(message.contains("please run codex login"))
+        }
+        #expect(runnerCalled == false)
     }
 }
 

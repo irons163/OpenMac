@@ -1958,6 +1958,9 @@ private struct NewAgentSheet: View {
                     switch openAIAuthMode {
                     case .apiKey:
                         TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                        Text("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField("Codex Profile (optional)", text: $codexProfile)
                         Text("Uses local `codex login` session to execute the task through Codex CLI.")
@@ -2027,6 +2030,9 @@ private struct EditAgentSheet: View {
                     switch openAIAuthMode {
                     case .apiKey:
                         TextField("Endpoint (optional)", text: $runtimeEndpoint)
+                        Text("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField("Codex Profile (optional)", text: $codexProfile)
                         Text("Uses local `codex login` session to execute the task through Codex CLI.")

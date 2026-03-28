@@ -98,6 +98,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
     var urlSession: URLSession = .shared
     var timeoutSeconds: TimeInterval = 30
+    var codexBridgePreflight: () throws -> Void = {
+        try Self.defaultCodexBridgePreflight()
+    }
     var codexBridgeRunner: (CodexBridgeRequest) throws -> String = { request in
         try Self.defaultCodexBridgeRunner(request: request)
     }
@@ -106,6 +109,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         environmentProvider: @escaping () -> [String: String] = { ProcessInfo.processInfo.environment },
         urlSession: URLSession = .shared,
         timeoutSeconds: TimeInterval = 30,
+        codexBridgePreflight: @escaping () throws -> Void = {
+            try Self.defaultCodexBridgePreflight()
+        },
         codexBridgeRunner: @escaping (CodexBridgeRequest) throws -> String = { request in
             try Self.defaultCodexBridgeRunner(request: request)
         }
@@ -113,6 +119,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         self.environmentProvider = environmentProvider
         self.urlSession = urlSession
         self.timeoutSeconds = timeoutSeconds
+        self.codexBridgePreflight = codexBridgePreflight
         self.codexBridgeRunner = codexBridgeRunner
     }
 
@@ -125,6 +132,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             environmentProvider: environmentProvider,
             urlSession: urlSession,
             timeoutSeconds: timeoutSeconds,
+            codexBridgePreflight: {
+                try Self.defaultCodexBridgePreflight()
+            },
             codexBridgeRunner: { request in
                 try Self.defaultCodexBridgeRunner(request: request)
             }
@@ -211,6 +221,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             profile: runtimeProfile.codexProfile
         )
         do {
+            try codexBridgePreflight()
             let summary = try codexBridgeRunner(request).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !summary.isEmpty else {
                 return .failure(message: "Codex Bridge returned empty output")
@@ -420,6 +431,39 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
 
         throw ExecutorError.emptyResponse
+    }
+
+    private static func defaultCodexBridgePreflight() throws {
+        let status = try runCodex(arguments: ["login", "status"])
+        guard status.code == 0 else {
+            if status.output.contains("No such file") || status.output.contains("command not found") {
+                throw ExecutorError.codexBridgeFailed("Codex CLI is not installed or unavailable in PATH")
+            }
+            throw ExecutorError.codexBridgeFailed("Codex Bridge requires login. Run `codex login` first.")
+        }
+
+        let normalized = status.output.lowercased()
+        guard normalized.contains("logged in") else {
+            throw ExecutorError.codexBridgeFailed("Codex Bridge requires login. Run `codex login` first.")
+        }
+    }
+
+    private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["codex"] + arguments
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (process.terminationStatus, output)
     }
 }
 
