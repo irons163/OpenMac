@@ -194,6 +194,22 @@ struct AppearanceModeTests {
         }
     }
 
+    @Test("semantic status text palette keeps contrast in dark and light board backgrounds")
+    func semanticStatusTextPaletteContrast() {
+        let darkBackground = BoardMessageColorPalette.darkBoardBackground
+        let lightBackground = BoardMessageColorPalette.lightBoardBackground
+
+        let successDark = BoardSemanticTextPalette.token(for: .success, scheme: .dark)
+        let successLight = BoardSemanticTextPalette.token(for: .success, scheme: .light)
+        let warningDark = BoardSemanticTextPalette.token(for: .warning, scheme: .dark)
+        let warningLight = BoardSemanticTextPalette.token(for: .warning, scheme: .light)
+
+        #expect(successDark.contrastRatio(against: darkBackground) >= 4.0)
+        #expect(successLight.contrastRatio(against: lightBackground) >= 4.0)
+        #expect(warningDark.contrastRatio(against: darkBackground) >= 4.0)
+        #expect(warningLight.contrastRatio(against: lightBackground) >= 4.0)
+    }
+
     @Test("dark task cards stay visually distinct from each kanban column background")
     func darkTaskCardsRemainDistinctFromColumns() {
         let taskCard = BoardSurfacePalette.taskCardToken(for: .dark)

@@ -76,7 +76,7 @@ struct ContentView: View {
                     if !viewModel.triageCandidates().isEmpty {
                         Text("\(viewModel.triageCandidates().count) task(s) need manual triage")
                             .font(.callout)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
                     }
                 }
 
@@ -741,7 +741,7 @@ private struct BoardHealthRecommendationsView: View {
             if recommendations.isEmpty {
                 Text("Board health looks stable. No immediate actions recommended.")
                     .font(.caption)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
             } else {
                 HStack {
                     Text("Suggested Actions")
@@ -1604,6 +1604,32 @@ enum SummaryBadgePalette {
 
     static func color(for accent: SummaryBadgeAccent, scheme: ColorScheme) -> Color {
         token(for: accent, scheme: scheme).color
+    }
+}
+
+enum BoardSemanticTextRole {
+    case success
+    case warning
+}
+
+enum BoardSemanticTextPalette {
+    static func token(for role: BoardSemanticTextRole, scheme: ColorScheme) -> BoardMessageColorToken {
+        switch (scheme, role) {
+        case (.dark, .success):
+            return BoardMessageColorToken(red: 0.45, green: 0.92, blue: 0.59, opacity: 1.0)
+        case (.dark, .warning):
+            return BoardMessageColorToken(red: 0.94, green: 0.67, blue: 0.22, opacity: 1.0)
+        case (.light, .success):
+            return BoardMessageColorToken(red: 0.06, green: 0.45, blue: 0.18, opacity: 1.0)
+        case (.light, .warning):
+            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.72, green: 0.38, blue: 0.00, opacity: 1.0)
+        }
+    }
+
+    static func color(for role: BoardSemanticTextRole, scheme: ColorScheme) -> Color {
+        token(for: role, scheme: scheme).color
     }
 }
 
