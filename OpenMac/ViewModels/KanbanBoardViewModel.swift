@@ -375,6 +375,37 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func moveTask(_ taskID: UUID, toBoard targetBoardID: UUID) -> Bool {
+        guard let sourceBoardIndex = selectedBoardIndex else { return false }
+        guard let targetBoardIndex = boards.firstIndex(where: { $0.id == targetBoardID }) else {
+            lastBoardMessage = "Board not found"
+            return false
+        }
+        guard sourceBoardIndex != targetBoardIndex else {
+            lastBoardMessage = "Select a different board"
+            return false
+        }
+
+        syncCurrentBoardRecord()
+        guard let taskIndex = boards[sourceBoardIndex].tasks.firstIndex(where: { $0.id == taskID }) else {
+            lastBoardMessage = "Task not found"
+            return false
+        }
+
+        var movedTask = boards[sourceBoardIndex].tasks.remove(at: taskIndex)
+        if let assignedAgentID = movedTask.assignedAgentID,
+           !boards[targetBoardIndex].agents.contains(where: { $0.id == assignedAgentID }) {
+            movedTask.assignedAgentID = nil
+        }
+        boards[targetBoardIndex].tasks.append(movedTask)
+
+        loadBoard(boards[sourceBoardIndex].id)
+        persistBoardState()
+        lastBoardMessage = nil
+        return true
+    }
+
+    @discardableResult
     func handleDrop(_ taskID: UUID, to status: KanbanStatus) -> Bool {
         moveTask(taskID, to: status)
     }

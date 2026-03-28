@@ -164,6 +164,8 @@ struct ContentView: View {
                                 onEditTask: openEditTask,
                                 onDeleteTask: removeTask,
                                 onUnassignTask: unassignTask,
+                                moveToBoardTargets: moveTaskBoardTargets,
+                                onMoveTaskToBoard: moveTaskToBoard,
                                 onDropTask: { taskID in
                                     viewModel.handleDrop(taskID, to: status)
                                 }
@@ -683,6 +685,13 @@ struct ContentView: View {
         }
     }
 
+    private func moveTaskToBoard(_ taskID: UUID, _ boardID: UUID) {
+        let moved = viewModel.moveTask(taskID, toBoard: boardID)
+        if moved {
+            refreshTriageSelections()
+        }
+    }
+
     private func openEditAgent(_ agent: AgentProfile) {
         editingAgentID = agent.id
         editAgentName = agent.name
@@ -754,6 +763,10 @@ struct ContentView: View {
         KanbanStatus.allCases.reduce(0) { partialResult, status in
             partialResult + filteredBoardTasks(in: status).count
         }
+    }
+
+    private var moveTaskBoardTargets: [KanbanBoardRecord] {
+        viewModel.boards.filter { $0.id != viewModel.selectedBoardID }
     }
 
     private func resetTaskFilters() {
@@ -1021,6 +1034,8 @@ private struct KanbanColumnView: View {
     let onEditTask: (WorkTask) -> Void
     let onDeleteTask: (UUID) -> Void
     let onUnassignTask: (UUID) -> Void
+    let moveToBoardTargets: [KanbanBoardRecord]
+    let onMoveTaskToBoard: (UUID, UUID) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -1062,9 +1077,13 @@ private struct KanbanColumnView: View {
                         canMoveBackward: status.previous != nil,
                         canMoveForward: status.next != nil,
                         canUnassign: task.assignedAgentID != nil && task.status != .done,
+                        moveToBoardTargets: moveToBoardTargets,
                         onEdit: { onEditTask(task) },
                         onUnassign: { onUnassignTask(task.id) },
                         onDelete: { onDeleteTask(task.id) },
+                        onMoveToBoard: { boardID in
+                            onMoveTaskToBoard(task.id, boardID)
+                        },
                         onMoveBackward: { moveBackward(task) },
                         onMoveForward: { moveForward(task) }
                     )
@@ -1118,9 +1137,11 @@ private struct TaskCardView: View {
     let canMoveBackward: Bool
     let canMoveForward: Bool
     let canUnassign: Bool
+    let moveToBoardTargets: [KanbanBoardRecord]
     let onEdit: () -> Void
     let onUnassign: () -> Void
     let onDelete: () -> Void
+    let onMoveToBoard: (UUID) -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -1193,6 +1214,15 @@ private struct TaskCardView: View {
             Button("Edit Task", action: onEdit)
             if canUnassign {
                 Button("Unassign Task", action: onUnassign)
+            }
+            if !moveToBoardTargets.isEmpty {
+                Menu("Move To Board") {
+                    ForEach(moveToBoardTargets) { board in
+                        Button(board.name) {
+                            onMoveToBoard(board.id)
+                        }
+                    }
+                }
             }
             Button("Delete Task", role: .destructive, action: onDelete)
         }

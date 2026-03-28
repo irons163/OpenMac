@@ -1581,6 +1581,60 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Board name already exists")
     }
 
+    @Test("moves task to another board and persists both board states")
+    func movesTaskToAnotherBoardAndPersists() {
+        let task = WorkTask(
+            title: "Cross board task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [], boardStore: store)
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Target Board")
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let moved = viewModel.moveTask(task.id, toBoard: targetBoardID)
+
+        #expect(moved)
+        #expect(viewModel.tasks.isEmpty)
+        #expect(store.savedSnapshots.last?.boards?.count == 2)
+
+        let switched = viewModel.switchBoard(to: targetBoardID)
+        #expect(switched)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "Cross board task")
+    }
+
+    @Test("moving task to board without assigned agent unassigns task")
+    func movingTaskToBoardWithoutAgentUnassignsTask() {
+        let agent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned cross board task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Agentless Target")
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let moved = viewModel.moveTask(task.id, toBoard: targetBoardID)
+
+        #expect(moved)
+        let switched = viewModel.switchBoard(to: targetBoardID)
+        #expect(switched)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
     @Test("file store saves and loads snapshot round trip")
     func fileStoreRoundTrip() throws {
         let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
