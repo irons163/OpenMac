@@ -173,6 +173,28 @@ struct AppearanceModeTests {
         #expect(warningContrast >= 4.0)
         #expect(errorContrast >= 4.0)
     }
+
+    @Test("dark task cards stay visually distinct from each kanban column background")
+    func darkTaskCardsRemainDistinctFromColumns() {
+        let taskCard = BoardSurfacePalette.taskCardToken(for: .dark)
+
+        for status in KanbanStatus.allCases {
+            let column = BoardSurfacePalette.columnToken(for: status, scheme: .dark)
+            #expect(taskCard.contrastRatio(against: column) >= 1.5)
+        }
+    }
+
+    @Test("dark board surfaces keep readable primary text contrast")
+    func darkBoardSurfacesKeepReadablePrimaryTextContrast() {
+        let primaryText = BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 1.0)
+        let taskCardContrast = primaryText.contrastRatio(against: BoardSurfacePalette.taskCardToken(for: .dark))
+
+        #expect(taskCardContrast >= 4.5)
+        for status in KanbanStatus.allCases {
+            let columnContrast = primaryText.contrastRatio(against: BoardSurfacePalette.columnToken(for: status, scheme: .dark))
+            #expect(columnContrast >= 4.5)
+        }
+    }
 }
 
 struct KanbanFlowTests {

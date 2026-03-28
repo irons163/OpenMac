@@ -614,16 +614,7 @@ struct ContentView: View {
     }
 
     private var detailBackgroundColors: [Color] {
-        if colorScheme == .dark {
-            return [
-                Color(red: 0.12, green: 0.14, blue: 0.18),
-                Color(red: 0.10, green: 0.12, blue: 0.16)
-            ]
-        }
-        return [
-            Color(red: 0.96, green: 0.98, blue: 1.0),
-            Color(red: 0.93, green: 0.96, blue: 0.99)
-        ]
+        BoardSurfacePalette.detailGradientTokens(for: colorScheme).map(\.color)
     }
 
     private var selectedAppearanceMode: AppAppearanceMode {
@@ -935,28 +926,7 @@ private struct KanbanColumnView: View {
     }
 
     private var columnColor: Color {
-        if colorScheme == .dark {
-            switch status {
-            case .todo:
-                return Color(red: 0.16, green: 0.23, blue: 0.31)
-            case .inProgress:
-                return Color(red: 0.15, green: 0.27, blue: 0.21)
-            case .review:
-                return Color(red: 0.30, green: 0.25, blue: 0.16)
-            case .done:
-                return Color(red: 0.21, green: 0.22, blue: 0.27)
-            }
-        }
-        switch status {
-        case .todo:
-            return Color(red: 0.82, green: 0.9, blue: 0.98)
-        case .inProgress:
-            return Color(red: 0.81, green: 0.94, blue: 0.87)
-        case .review:
-            return Color(red: 0.99, green: 0.92, blue: 0.77)
-        case .done:
-            return Color(red: 0.89, green: 0.89, blue: 0.92)
-        }
+        BoardSurfacePalette.color(for: status, scheme: colorScheme)
     }
 
     private var counterBackground: Color {
@@ -1066,7 +1036,7 @@ private struct TaskCardView: View {
     }
 
     private var taskCardBackground: Color {
-        colorScheme == .dark ? Color(red: 0.19, green: 0.2, blue: 0.24) : Color.white
+        BoardSurfacePalette.taskCardColor(for: colorScheme)
     }
 
     private var taskCardBorder: Color {
@@ -1408,6 +1378,66 @@ enum BoardMessageColorPalette {
 
     static func color(for severity: BoardMessageSeverity?, scheme: ColorScheme) -> Color {
         token(for: severity, scheme: scheme).color
+    }
+}
+
+enum BoardSurfacePalette {
+    static let darkBoardBackgroundStart = BoardMessageColorToken(red: 0.07, green: 0.09, blue: 0.13, opacity: 1.0)
+    static let darkBoardBackgroundEnd = BoardMessageColorToken(red: 0.10, green: 0.12, blue: 0.16, opacity: 1.0)
+    static let lightBoardBackgroundStart = BoardMessageColorToken(red: 0.96, green: 0.98, blue: 1.0, opacity: 1.0)
+    static let lightBoardBackgroundEnd = BoardMessageColorToken(red: 0.93, green: 0.96, blue: 0.99, opacity: 1.0)
+
+    static func detailGradientTokens(for scheme: ColorScheme) -> [BoardMessageColorToken] {
+        switch scheme {
+        case .dark:
+            return [darkBoardBackgroundStart, darkBoardBackgroundEnd]
+        case .light:
+            return [lightBoardBackgroundStart, lightBoardBackgroundEnd]
+        @unknown default:
+            return [darkBoardBackgroundStart, darkBoardBackgroundEnd]
+        }
+    }
+
+    static func columnToken(for status: KanbanStatus, scheme: ColorScheme) -> BoardMessageColorToken {
+        switch (scheme, status) {
+        case (.dark, .todo):
+            return BoardMessageColorToken(red: 0.18, green: 0.27, blue: 0.36, opacity: 1.0)
+        case (.dark, .inProgress):
+            return BoardMessageColorToken(red: 0.15, green: 0.31, blue: 0.24, opacity: 1.0)
+        case (.dark, .review):
+            return BoardMessageColorToken(red: 0.34, green: 0.27, blue: 0.17, opacity: 1.0)
+        case (.dark, .done):
+            return BoardMessageColorToken(red: 0.24, green: 0.25, blue: 0.31, opacity: 1.0)
+        case (.light, .todo):
+            return BoardMessageColorToken(red: 0.82, green: 0.9, blue: 0.98, opacity: 1.0)
+        case (.light, .inProgress):
+            return BoardMessageColorToken(red: 0.81, green: 0.94, blue: 0.87, opacity: 1.0)
+        case (.light, .review):
+            return BoardMessageColorToken(red: 0.99, green: 0.92, blue: 0.77, opacity: 1.0)
+        case (.light, .done):
+            return BoardMessageColorToken(red: 0.89, green: 0.89, blue: 0.92, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.24, green: 0.25, blue: 0.31, opacity: 1.0)
+        }
+    }
+
+    static func taskCardToken(for scheme: ColorScheme) -> BoardMessageColorToken {
+        switch scheme {
+        case .dark:
+            return BoardMessageColorToken(red: 0.11, green: 0.14, blue: 0.19, opacity: 1.0)
+        case .light:
+            return BoardMessageColorToken(red: 1.0, green: 1.0, blue: 1.0, opacity: 1.0)
+        @unknown default:
+            return BoardMessageColorToken(red: 0.11, green: 0.14, blue: 0.19, opacity: 1.0)
+        }
+    }
+
+    static func color(for status: KanbanStatus, scheme: ColorScheme) -> Color {
+        columnToken(for: status, scheme: scheme).color
+    }
+
+    static func taskCardColor(for scheme: ColorScheme) -> Color {
+        taskCardToken(for: scheme).color
     }
 }
 
