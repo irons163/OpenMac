@@ -56,6 +56,7 @@ struct ContentView: View {
     @State private var taskSearchQuery = ""
     @State private var globalTaskSearchQuery = ""
     @State private var selectedAssigneeFilterKey = "all"
+    @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -286,6 +287,7 @@ struct ContentView: View {
                                 moveToBoardTargets: moveTaskBoardTargets,
                                 onMoveTaskToBoard: moveTaskToBoard,
                                 onCopyTaskToBoard: copyTaskToBoard,
+                                onShowExecutionDetails: openExecutionDetails,
                                 onDropTask: { taskID in
                                     viewModel.handleDrop(taskID, to: status)
                                 }
@@ -599,6 +601,13 @@ struct ContentView: View {
                 onClose: { isShowingManualTriageSheet = false }
             )
         }
+        .sheet(item: $selectedExecutionDetails) { details in
+            ExecutionDetailsSheet(
+                details: details,
+                onCopy: copyToPasteboard,
+                onClose: { selectedExecutionDetails = nil }
+            )
+        }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
         }
@@ -629,6 +638,15 @@ struct ContentView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(value, forType: .string)
+    }
+
+    private func openExecutionDetails(_ task: WorkTask) {
+        guard let executionRecord = task.executionRecord else { return }
+        selectedExecutionDetails = ExecutionDetailsPresentation(
+            taskTitle: task.title,
+            assigneeName: viewModel.agentName(for: task.assignedAgentID),
+            executionRecord: executionRecord
+        )
     }
 
     private func openEditTask(_ task: WorkTask) {
@@ -1472,6 +1490,7 @@ private struct KanbanColumnView: View {
     let moveToBoardTargets: [KanbanBoardRecord]
     let onMoveTaskToBoard: (UUID, UUID) -> Void
     let onCopyTaskToBoard: (UUID, UUID) -> Void
+    let onShowExecutionDetails: (WorkTask) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -1538,6 +1557,9 @@ private struct KanbanColumnView: View {
                         },
                         onCopyToBoard: { boardID in
                             onCopyTaskToBoard(task.id, boardID)
+                        },
+                        onShowExecutionDetails: {
+                            onShowExecutionDetails(task)
                         },
                         onMoveBackward: { moveBackward(task) },
                         onMoveForward: { moveForward(task) }
@@ -1610,6 +1632,7 @@ private struct TaskCardView: View {
     let onDelete: () -> Void
     let onMoveToBoard: (UUID) -> Void
     let onCopyToBoard: (UUID) -> Void
+    let onShowExecutionDetails: () -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -1658,6 +1681,14 @@ private struct TaskCardView: View {
                     Text(executionStatusLabel(for: executionRecord.status))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(executionStatusColor(for: executionRecord.status))
+                    Spacer(minLength: 0)
+                    if executionRecord.lastOutputSummary != nil || executionRecord.lastError != nil {
+                        Button("Details") {
+                            onShowExecutionDetails()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
                 }
 
                 if let output = executionRecord.lastOutputSummary, executionRecord.status == .succeeded {
@@ -1713,6 +1744,9 @@ private struct TaskCardView: View {
             }
             if canRetryAgent {
                 Button("Retry Last Run", action: onRetryAgent)
+            }
+            if executionRecord?.lastOutputSummary != nil || executionRecord?.lastError != nil {
+                Button("View Execution Details", action: onShowExecutionDetails)
             }
             if !manualAssignableAgents.isEmpty {
                 Menu("Assign To Agent") {
@@ -1790,6 +1824,127 @@ private struct TaskCardView: View {
             return BoardSemanticTextPalette.color(for: .error, scheme: colorScheme)
         }
     }
+}
+
+private struct ExecutionDetailsPresentation: Identifiable {
+    let id = UUID()
+    let taskTitle: String
+    let assigneeName: String
+    let executionRecord: TaskExecutionRecord
+}
+
+private struct ExecutionDetailsSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let details: ExecutionDetailsPresentation
+    let onCopy: (String) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Execution Details")
+                .font(.title3.weight(.semibold))
+
+            Group {
+                Text("Task: \(details.taskTitle)")
+                Text("Assignee: \(details.assigneeName)")
+                Text("Status: \(statusLabel)")
+                Text("Runs: \(details.executionRecord.runCount)")
+                if let startedAt = details.executionRecord.lastStartedAt {
+                    Text("Started: \(Self.dateFormatter.string(from: startedAt))")
+                }
+                if let finishedAt = details.executionRecord.lastFinishedAt {
+                    Text("Finished: \(Self.dateFormatter.string(from: finishedAt))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+
+            if let output = details.executionRecord.lastOutputSummary, !output.isEmpty {
+                executionTextSection(
+                    title: "Output",
+                    value: output,
+                    tint: BoardSemanticTextPalette.color(for: .success, scheme: colorScheme),
+                    copyButtonTitle: "Copy Output"
+                )
+            }
+
+            if let error = details.executionRecord.lastError, !error.isEmpty {
+                executionTextSection(
+                    title: "Error",
+                    value: error,
+                    tint: BoardSemanticTextPalette.color(for: .error, scheme: colorScheme),
+                    copyButtonTitle: "Copy Error"
+                )
+            }
+
+            if let debug = details.executionRecord.lastDebugOutput, !debug.isEmpty {
+                executionTextSection(
+                    title: "Debug Log",
+                    value: debug,
+                    tint: BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme),
+                    copyButtonTitle: "Copy Debug Log"
+                )
+            }
+
+            HStack {
+                Spacer()
+                Button("Close", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 680, height: 520)
+    }
+
+    @ViewBuilder
+    private func executionTextSection(title: String, value: String, tint: Color, copyButtonTitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                Spacer()
+                Button(copyButtonTitle) {
+                    onCopy(value)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            ScrollView {
+                Text(value)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 150)
+            .padding(10)
+            .background(BoardSurfacePalette.supplementaryCardColor(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(BoardChromePalette.supplementaryCardBorderColor(for: colorScheme), lineWidth: 1)
+            )
+        }
+    }
+
+    private var statusLabel: String {
+        switch details.executionRecord.status {
+        case .running:
+            return "Running"
+        case .succeeded:
+            return "Succeeded"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter
+    }()
 }
 
 private struct GlobalTaskSearchSheet: View {

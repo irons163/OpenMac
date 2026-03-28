@@ -388,7 +388,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         Required skills: \(skillsLine)
         Story points: \(task.storyPoints)
 
-        Provide a concise execution summary and key outcomes.
+        Return plain text using these sections:
+        Summary:
+        Actions taken:
+        Evidence (files/commands/results):
+        Risks or blockers:
         """
         return [
             ChatMessage(role: "system", content: "You are an autonomous software execution agent. Respond with concise plain text."),
@@ -407,7 +411,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         Required skills: \(skillsLine)
         Story points: \(task.storyPoints)
 
-        Return a concise plain-text execution summary and key outcomes.
+        Return plain text using these sections:
+        Summary:
+        Actions taken:
+        Evidence (files/commands/results):
+        Risks or blockers:
         """
     }
 
