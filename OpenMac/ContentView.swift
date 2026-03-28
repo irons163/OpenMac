@@ -478,22 +478,7 @@ struct ContentView: View {
     }
 
     private func refreshTriageSelections() {
-        let candidates = viewModel.triageCandidates()
-        var refreshed: [UUID: UUID] = [:]
-
-        for task in candidates {
-            if let existing = triageSelectionByTaskID[task.id] {
-                refreshed[task.id] = existing
-            } else if let fallback = defaultTriageAgentID(for: task) {
-                refreshed[task.id] = fallback
-            }
-        }
-
-        triageSelectionByTaskID = refreshed
-    }
-
-    private func defaultTriageAgentID(for task: WorkTask) -> UUID? {
-        viewModel.assignableAgents(for: task.id).first?.id
+        triageSelectionByTaskID = viewModel.resolvedTriageAssignments(existing: triageSelectionByTaskID)
     }
 
     private func deleteAgents(at offsets: IndexSet) {

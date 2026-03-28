@@ -1435,6 +1435,58 @@ struct KanbanPersistenceTests {
         #expect(eligible.first?.id == qualifiedAgent.id)
     }
 
+    @Test("resolves triage assignments by keeping valid selections and dropping stale task ids")
+    func resolvesTriageAssignmentsKeepingValidSelections() {
+        let firstTask = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let qaAgent = AgentProfile(name: "QA Agent", skills: ["testing"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [firstTask, secondTask], agents: [uiAgent, qaAgent])
+
+        let staleTaskID = UUID()
+        let resolved = viewModel.resolvedTriageAssignments(existing: [
+            firstTask.id: uiAgent.id,
+            staleTaskID: qaAgent.id
+        ])
+
+        #expect(resolved[firstTask.id] == uiAgent.id)
+        #expect(resolved[secondTask.id] == qaAgent.id)
+        #expect(resolved[staleTaskID] == nil)
+    }
+
+    @Test("resolves triage assignments by replacing invalid selected agent with fallback")
+    func resolvesTriageAssignmentsReplacingInvalidSelection() {
+        let task = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let uiAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let backendAgent = AgentProfile(name: "Backend Agent", skills: ["backend"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [uiAgent, backendAgent])
+
+        let resolved = viewModel.resolvedTriageAssignments(existing: [task.id: backendAgent.id])
+
+        #expect(resolved[task.id] == uiAgent.id)
+    }
+
     @Test("bulk triage assigns all currently eligible unassigned todo tasks")
     func bulkTriageAssignsEligibleTasks() {
         let uiTask = WorkTask(

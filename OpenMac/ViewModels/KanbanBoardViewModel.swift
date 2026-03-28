@@ -776,6 +776,24 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
+    func resolvedTriageAssignments(existing: [UUID: UUID] = [:]) -> [UUID: UUID] {
+        var resolved: [UUID: UUID] = [:]
+
+        for task in triageCandidates() {
+            let eligibleAgents = assignableAgents(for: task.id)
+            guard !eligibleAgents.isEmpty else { continue }
+
+            if let selectedAgentID = existing[task.id],
+               eligibleAgents.contains(where: { $0.id == selectedAgentID }) {
+                resolved[task.id] = selectedAgentID
+            } else {
+                resolved[task.id] = eligibleAgents[0].id
+            }
+        }
+
+        return resolved
+    }
+
     @discardableResult
     func manuallyAssignTask(_ taskID: UUID, to agentID: UUID) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
