@@ -877,8 +877,16 @@ struct ContentView: View {
     }
 
     private func openWIPSettings() {
-        inProgressWIPLimitDraft = viewModel.wipLimit(for: .inProgress) ?? 1
-        reviewWIPLimitDraft = viewModel.wipLimit(for: .review) ?? 1
+        if let inProgressLimit = viewModel.wipLimit(for: .inProgress) {
+            inProgressWIPLimitDraft = inProgressLimit
+        } else {
+            inProgressWIPLimitDraft = 1
+        }
+        if let reviewLimit = viewModel.wipLimit(for: .review) {
+            reviewWIPLimitDraft = reviewLimit
+        } else {
+            reviewWIPLimitDraft = 1
+        }
         isShowingWIPSettingsSheet = true
     }
 
@@ -3730,6 +3738,9 @@ private extension ContentView {
         _ = viewModel.switchBoard(to: initialBoardID)
 
         let view = ContentView(viewModel: viewModel)
+        let fallbackWIPView = ContentView(
+            viewModel: KanbanBoardViewModel(tasks: [], agents: [], wipLimits: [:])
+        )
         let fileManager = FileManager.default
         let workspaceImportURL = fileManager.temporaryDirectory.appendingPathComponent(
             "openmac-coverage-import-\(UUID().uuidString).json"
@@ -3874,12 +3885,14 @@ private extension ContentView {
                 view.openGlobalTaskSearchResult(result)
             }
         }
+        hit {
+            view.globalTaskSearchQuery = "NoMatchCoverageQuery"
+            _ = view.globalTaskSearchResults.count
+        }
         hit { view.closeGlobalTaskFinder() }
 
         hit {
-            if let boardID = viewModel.boards.first?.id {
-                view.switchBoard(boardID)
-            }
+            view.switchBoard(viewModel.boards[0].id)
         }
         hit { view.handleBoardContextChanged() }
         hit {
@@ -3899,6 +3912,7 @@ private extension ContentView {
             _ = view.selectedAgentForConsole
         }
         hit { view.openWIPSettings() }
+        hit { fallbackWIPView.openWIPSettings() }
         hit { view.applyWIPSettings() }
 
         hit {
