@@ -2152,6 +2152,45 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
+    @Test("single-task auto assign rejects non-To-Do task")
+    func autoAssignSingleTaskRejectsNonTodoTask() {
+        let task = WorkTask(
+            title: "Already in progress",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(task.id)
+
+        #expect(!assigned)
+        #expect(viewModel.lastBoardMessage == "Only To Do tasks can be auto-assigned")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("single-task auto assign returns false when task id is unknown")
+    func autoAssignSingleTaskRejectsUnknownTaskID() {
+        let task = WorkTask(
+            title: "Known task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(UUID())
+
+        #expect(!assigned)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
     @Test("filters tasks by search query across title details skills and assignee name")
     func filtersTasksBySearchQuery() {
         let searchAgent = AgentProfile(name: "Search Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -4273,6 +4312,26 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Board name already exists")
     }
 
+    @Test("rejects board rename when new name is empty")
+    func rejectsBoardRenameWithEmptyName() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let renamed = viewModel.renameBoard(viewModel.selectedBoardID, to: "   ")
+
+        #expect(!renamed)
+        #expect(viewModel.lastBoardMessage == "Board name is required")
+    }
+
+    @Test("rejects board rename when board id is unknown")
+    func rejectsBoardRenameForUnknownBoard() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let renamed = viewModel.renameBoard(UUID(), to: "Strategy")
+
+        #expect(!renamed)
+        #expect(viewModel.lastBoardMessage == "Board not found")
+    }
+
     @Test("removes selected board and switches to remaining board")
     func removesSelectedBoardAndSwitchesContext() {
         let baselineTask = WorkTask(
@@ -5010,6 +5069,37 @@ struct KanbanPersistenceTests {
         #expect(viewModel.selectedBoardID == boardA.id)
     }
 
+    @Test("replace import supports legacy snapshot without boards array")
+    func replaceImportSupportsLegacySnapshotWithoutBoardsArray() throws {
+        let legacyTask = WorkTask(
+            title: "Legacy task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let legacyAgent = AgentProfile(name: "Legacy Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let legacySnapshot = KanbanBoardSnapshot(
+            tasks: [legacyTask],
+            agents: [legacyAgent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(legacySnapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let imported = viewModel.importWorkspaceData(data, strategy: .replace)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == 1)
+        #expect(viewModel.selectedBoardName == "Default Board")
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.title == "Legacy task")
+    }
+
     @Test("imports workspace snapshot with duplicate board names and resolves collisions")
     func importsWorkspaceSnapshotWithDuplicateBoardNames() throws {
         let firstBoard = KanbanBoardRecord(name: "Ops", tasks: [], agents: [], wipLimits: [.inProgress: 3, .review: 2])
@@ -5168,6 +5258,43 @@ struct KanbanPersistenceTests {
 
         #expect(imported)
         #expect(viewModel.selectedBoardID == currentSelectedBoardID)
+    }
+
+    @Test("merge import supports legacy snapshot and appends normalized board")
+    func mergeImportSupportsLegacySnapshotWithoutBoardsArray() throws {
+        let existingTask = WorkTask(
+            title: "Existing task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let legacyTask = WorkTask(
+            title: "Imported legacy task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let legacySnapshot = KanbanBoardSnapshot(
+            tasks: [legacyTask],
+            agents: [],
+            wipLimits: [.inProgress: 4, .review: 3]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(legacySnapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [existingTask], agents: [])
+        let initialBoardCount = viewModel.boards.count
+        let imported = viewModel.importWorkspaceData(data, strategy: .merge)
+
+        #expect(imported)
+        #expect(viewModel.boards.count == initialBoardCount + 1)
+        #expect(viewModel.boards.contains(where: { $0.name == "Default Board (2)" }))
     }
 
     @Test("builds workspace import preview counts from snapshot data")
@@ -7565,6 +7692,58 @@ struct KanbanPersistenceTests {
         #expect(viewModel.assignmentReason(for: task.id) == nil)
         #expect(viewModel.triageCandidates().contains(where: { $0.id == task.id }))
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("updating task clears assignment when assigned agent no longer exists")
+    func updateTaskUnassignsMissingAssignedAgent() {
+        let missingAgentID = UUID()
+        let task = WorkTask(
+            title: "Orphaned assignment",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: missingAgentID
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "Orphaned assignment",
+            details: "",
+            requiredSkillsText: "swiftui",
+            storyPoints: 2
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.triageCandidates().contains(where: { $0.id == task.id }))
+    }
+
+    @Test("updating non-todo task with missing assignee does not create triage candidate")
+    func updateTaskMissingAssigneeOnReviewTaskDoesNotCreateTriageCandidate() {
+        let missingAgentID = UUID()
+        let task = WorkTask(
+            title: "Review assignment",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: missingAgentID
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "Review assignment",
+            details: "",
+            requiredSkillsText: "testing",
+            storyPoints: 1
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks[0].assignedAgentID == nil)
+        #expect(viewModel.triageCandidates().isEmpty)
     }
 
     @Test("adds agent with parsed skills and persists board snapshot")
