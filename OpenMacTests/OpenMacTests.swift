@@ -4187,6 +4187,42 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.title == "QA task")
     }
 
+    @Test("persistent board falls back to first board when snapshot selection is missing")
+    func persistentBoardFallsBackToFirstBoardWhenSelectionMissing() {
+        let firstTask = WorkTask(
+            title: "First board task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let secondTask = WorkTask(
+            title: "Second board task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let firstBoard = KanbanBoardRecord(name: "First", tasks: [firstTask], agents: [], wipLimits: [.inProgress: 3, .review: 2])
+        let secondBoard = KanbanBoardRecord(name: "Second", tasks: [secondTask], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: firstBoard.tasks,
+            agents: firstBoard.agents,
+            wipLimits: firstBoard.wipLimits,
+            boards: [firstBoard, secondBoard],
+            selectedBoardID: nil
+        )
+        let store = SpyBoardStore(loadSnapshot: snapshot)
+
+        let viewModel = KanbanBoardViewModel.persistentBoard(boardStore: store)
+
+        #expect(viewModel.selectedBoardID == firstBoard.id)
+        #expect(viewModel.selectedBoardName == "First")
+        #expect(viewModel.tasks.first?.title == "First board task")
+    }
+
     @Test("renames selected board and persists updated board metadata")
     func renamesSelectedBoardAndPersists() {
         let store = SpyBoardStore()
@@ -4358,6 +4394,31 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
+    @Test("moving task to board with non-matching agents clears assignment")
+    func movingTaskToBoardWithNonMatchingAgentsClearsAssignment() {
+        let sourceAgent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned cross board task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: sourceAgent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [sourceAgent])
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Target With Agents")
+        _ = viewModel.addAgent(name: "Target Agent", skillsText: "swiftui", maxConcurrentTasks: 2)
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let moved = viewModel.moveTask(task.id, toBoard: targetBoardID)
+
+        #expect(moved)
+        _ = viewModel.switchBoard(to: targetBoardID)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
     @Test("copies task to another board while keeping source task intact")
     func copiesTaskToAnotherBoardAndKeepsSourceTask() {
         let task = WorkTask(
@@ -4417,6 +4478,31 @@ struct KanbanPersistenceTests {
         let switched = viewModel.switchBoard(to: targetBoardID)
         #expect(switched)
         #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.assignedAgentID == nil)
+    }
+
+    @Test("copying task to board with non-matching agents clears copied assignment")
+    func copyingTaskToBoardWithNonMatchingAgentsClearsCopiedAssignment() {
+        let sourceAgent = AgentProfile(name: "Source Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Assigned shared task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: sourceAgent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [sourceAgent])
+        let sourceBoardID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Copy Target With Agents")
+        _ = viewModel.addAgent(name: "Target Agent", skillsText: "swiftui", maxConcurrentTasks: 2)
+        let targetBoardID = viewModel.selectedBoardID
+        _ = viewModel.switchBoard(to: sourceBoardID)
+
+        let copied = viewModel.copyTask(task.id, toBoard: targetBoardID)
+
+        #expect(copied)
+        _ = viewModel.switchBoard(to: targetBoardID)
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
@@ -4676,6 +4762,29 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.last?.selectedBoardID == qaBoard.id)
     }
 
+    @Test("replace import falls back to first board when selected board id is missing")
+    func replaceImportFallsBackToFirstBoardWhenSelectedIDMissing() throws {
+        let boardA = KanbanBoardRecord(name: "Board A")
+        let boardB = KanbanBoardRecord(name: "Board B")
+        let snapshot = KanbanBoardSnapshot(
+            tasks: boardA.tasks,
+            agents: boardA.agents,
+            wipLimits: boardA.wipLimits,
+            boards: [boardA, boardB],
+            selectedBoardID: UUID()
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let imported = viewModel.importWorkspaceData(data, strategy: .replace)
+
+        #expect(imported)
+        #expect(viewModel.selectedBoardID == boardA.id)
+    }
+
     @Test("imports workspace snapshot with duplicate board names and resolves collisions")
     func importsWorkspaceSnapshotWithDuplicateBoardNames() throws {
         let firstBoard = KanbanBoardRecord(name: "Ops", tasks: [], agents: [], wipLimits: [.inProgress: 3, .review: 2])
@@ -4802,6 +4911,38 @@ struct KanbanPersistenceTests {
         #expect(imported)
         #expect(viewModel.boards.contains(where: { $0.name == "Ops" }))
         #expect(viewModel.boards.contains(where: { $0.name == "Ops (2)" }))
+    }
+
+    @Test("merge import keeps current selection when imported selected id is missing")
+    func mergeImportKeepsCurrentSelectionWhenImportedSelectedIDMissing() throws {
+        let localTask = WorkTask(
+            title: "Local Task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [localTask], agents: [])
+        let currentSelectedBoardID = viewModel.selectedBoardID
+
+        let importedBoard = KanbanBoardRecord(name: "Imported", tasks: [], agents: [], wipLimits: [.inProgress: 2, .review: 1])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: importedBoard.tasks,
+            agents: importedBoard.agents,
+            wipLimits: importedBoard.wipLimits,
+            boards: [importedBoard],
+            selectedBoardID: UUID()
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let imported = viewModel.importWorkspaceData(data, strategy: .merge)
+
+        #expect(imported)
+        #expect(viewModel.selectedBoardID == currentSelectedBoardID)
     }
 
     @Test("builds workspace import preview counts from snapshot data")
@@ -6629,7 +6770,8 @@ struct KanbanPersistenceTests {
         )
         let store = SpyBoardStore()
         let executor = StubTaskExecutor(
-            outcomesByTaskID: [task.id: .success(summary: "Retry succeeded")]
+            outcomesByTaskID: [task.id: .success(summary: "Retry succeeded")],
+            progressUpdatesByTaskID: [task.id: ["Retry step"]]
         )
         let viewModel = KanbanBoardViewModel(
             tasks: [task],
@@ -6648,6 +6790,7 @@ struct KanbanPersistenceTests {
         #expect(record?.runCount == 2)
         #expect(record?.lastOutputSummary == "Retry succeeded")
         #expect(record?.lastError == nil)
+        #expect(viewModel.executionEvents(for: agent.id).contains(where: { $0.message == "Retry step" }))
         #expect(store.savedSnapshots.count == 1)
     }
 
@@ -6813,6 +6956,59 @@ struct KanbanPersistenceTests {
         #expect(viewModel.activeTaskCount(for: overloaded.id) == 2)
         #expect(viewModel.activeTaskCount(for: available.id) == 1)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("rebalance chooses lower-load target first and breaks ties by name")
+    func rebalanceChoosesLowerLoadTargetThenName() {
+        let overloaded = AgentProfile(name: "Overloaded", skills: ["swiftui"], maxConcurrentTasks: 1)
+        let alpha = AgentProfile(name: "Alpha", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let beta = AgentProfile(name: "Beta", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let gammaLoaded = AgentProfile(name: "Gamma", skills: ["swiftui"], maxConcurrentTasks: 2)
+
+        let overloadedTaskA = WorkTask(
+            title: "Task A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let overloadedTaskB = WorkTask(
+            title: "Task B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let overloadedTaskC = WorkTask(
+            title: "Task C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: overloaded.id
+        )
+        let gammaExisting = WorkTask(
+            title: "Gamma Busy",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: gammaLoaded.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [overloadedTaskA, overloadedTaskB, overloadedTaskC, gammaExisting],
+            agents: [overloaded, beta, alpha, gammaLoaded]
+        )
+
+        let movedCount = viewModel.rebalanceTodoAssignments()
+
+        #expect(movedCount == 2)
+        #expect(viewModel.activeTaskCount(for: overloaded.id) == 1)
+        #expect(viewModel.activeTaskCount(for: alpha.id) == 1)
+        #expect(viewModel.activeTaskCount(for: beta.id) == 1)
+        #expect(viewModel.activeTaskCount(for: gammaLoaded.id) == 1)
     }
 
     @Test("rebalance does not move in-progress assignments")
@@ -7265,7 +7461,8 @@ struct KanbanPersistenceTests {
             )
         )
         let executor = StubTaskExecutor(
-            outcomesByTaskID: [task.id: .success(summary: "Retry success")]
+            outcomesByTaskID: [task.id: .success(summary: "Retry success")],
+            progressUpdatesByTaskID: [task.id: ["Retry step"]]
         )
         let viewModel = KanbanBoardViewModel(
             tasks: [task],
@@ -7284,6 +7481,7 @@ struct KanbanPersistenceTests {
         #expect(completionValue == true)
         #expect(viewModel.tasks[0].executionRecord?.status == .succeeded)
         #expect(viewModel.tasks[0].executionRecord?.runCount == 2)
+        #expect(viewModel.executionEvents(for: agent.id).contains(where: { $0.message == "Retry step" }))
     }
 
     @Test("retry task execution in background rejects non-failed task")
