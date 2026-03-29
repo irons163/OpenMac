@@ -207,6 +207,29 @@ struct AutoAssignmentEngineTests {
         #expect(decision?.agentID == earlierName.id)
     }
 
+    @Test("bestAgent remains deterministic when candidate names are identical")
+    func bestAgentHandlesIdenticalCandidateNames() {
+        let task = WorkTask(
+            title: "Build board shell",
+            details: "Implement kanban layout",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let firstAgent = AgentProfile(name: "Same Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let secondAgent = AgentProfile(name: "Same Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+
+        let decision = AutoAssignmentEngine().bestAgent(
+            for: task,
+            among: [task],
+            agents: [firstAgent, secondAgent]
+        )
+
+        #expect(decision != nil)
+        #expect([firstAgent.id, secondAgent.id].contains(decision?.agentID ?? UUID()))
+    }
+
     @Test("assign prefers lower load when candidate scores tie")
     func assignPrefersLowerLoadWhenScoresTie() {
         let task = WorkTask(
