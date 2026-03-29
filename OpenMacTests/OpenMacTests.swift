@@ -2715,6 +2715,81 @@ struct KanbanFlowTests {
         #expect(viewModel.wipLimit(for: .review) == 2)
     }
 
+    @Test("increase WIP recommendation fails when status has no configured WIP limit")
+    func increaseWIPRecommendationFailsWithoutConfiguredLimit() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let applied = viewModel.applyHealthRecommendation(.increaseWIPLimit(.todo))
+
+        #expect(!applied)
+        #expect(viewModel.lastBoardMessage == "To Do has no configured WIP limit")
+    }
+
+    @Test("open manual triage recommendation returns false when no triage candidates")
+    func openManualTriageRecommendationReturnsFalseWhenNoCandidates() {
+        let task = WorkTask(
+            title: "Already assigned",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: UUID()
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let applied = viewModel.applyHealthRecommendation(.openManualTriage)
+
+        #expect(!applied)
+    }
+
+    @Test("open new agent recommendation returns false when agents already exist")
+    func openNewAgentRecommendationReturnsFalseWhenAgentsExist() {
+        let agent = AgentProfile(name: "Existing Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent])
+
+        let applied = viewModel.applyHealthRecommendation(.openNewAgent)
+
+        #expect(!applied)
+    }
+
+    @Test("archive done recommendation returns false when there are no done tasks")
+    func archiveDoneRecommendationReturnsFalseWhenNoDoneTasks() {
+        let task = WorkTask(
+            title: "Todo task",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let applied = viewModel.applyHealthRecommendation(.archiveDone)
+
+        #expect(!applied)
+    }
+
+    @Test("health recommendations include review WIP increase when review reaches limit")
+    func includesReviewWIPIncreaseRecommendationWhenReviewAtLimit() {
+        let reviewTask = WorkTask(
+            title: "Review task",
+            details: "",
+            requiredSkills: ["testing"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [reviewTask],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 1]
+        )
+
+        let actions = viewModel.healthRecommendations().map(\.action)
+
+        #expect(actions.contains(.increaseWIPLimit(.review)))
+    }
+
     @Test("includes manual triage recommendation when unassigned todo exists")
     func includesManualTriageRecommendation() {
         let task = WorkTask(
@@ -7296,6 +7371,37 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastCodexLoginCommand == loginCommand)
         #expect(viewModel.lastExecutionDebugLog == "401 Unauthorized")
         #expect(viewModel.lastBoardMessage?.contains("Codex Bridge authentication missing") == true)
+    }
+
+    @Test("run task execution extracts codex login command when only plain command is present")
+    func runTaskExecutionExtractsPlainCodexLoginCommand() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Run command",
+            details: "Expect auth failure",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let plainLoginCommand = "codex login --device-auth"
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                task.id: .failure(
+                    message: "Authentication missing.\n\(plainLoginCommand)"
+                )
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(executed)
+        #expect(viewModel.lastCodexLoginCommand == plainLoginCommand)
     }
 
     @Test("retry task execution requires previous failed run")
