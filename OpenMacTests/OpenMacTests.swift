@@ -595,6 +595,24 @@ struct AgentTaskExecutorTests {
         #expect(update?.contains("All tests passed") == true)
     }
 
+    @Test("codex progress parser reports command live output delta events")
+    func codexProgressParsesCommandDeltaEvent() {
+        let line = #"{"type":"item.updated","item":{"type":"command_execution","command":"swift test","output_delta":"Compiling OpenMacTests.swift"}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Compiling OpenMacTests.swift")
+    }
+
+    @Test("codex progress parser surfaces top-level error messages")
+    func codexProgressParsesTopLevelErrorMessage() {
+        let line = #"{"type":"turn.error","error":{"message":"connection dropped during stream"}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Codex error: connection dropped during stream")
+    }
+
     @Test("codex progress parser ignores non-item json events")
     func codexProgressIgnoresNonItemEvents() {
         let line = #"{"type":"turn.started","turn_id":"abc"}"#

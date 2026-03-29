@@ -957,36 +957,57 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return normalized
         }
 
-        guard let item = json["item"] as? [String: Any] else {
-            return nil
+        if let item = json["item"] as? [String: Any],
+           let event = progressUpdateFromItemEvent(type: type, item: item) {
+            return event
         }
+
+        if let errorObject = json["error"] as? [String: Any],
+           let message = nonEmptyString(in: errorObject, keys: ["message", "detail", "error"]) {
+            return "Codex error: \(message)"
+        }
+
+        if let errorMessage = nonEmptyString(in: json, keys: ["error_message", "error", "message", "detail", "text"]) {
+            return type.lowercased().contains("error") ? "Codex error: \(errorMessage)" : errorMessage
+        }
+
+        return nil
+    }
+
+    private static func progressUpdateFromItemEvent(type: String, item: [String: Any]) -> String? {
+        guard let itemType = item["type"] as? String else { return nil }
 
         switch type {
         case "item.started":
-            guard let itemType = item["type"] as? String else { return nil }
             if itemType == "command_execution",
-               let command = item["command"] as? String,
-               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               let command = nonEmptyString(in: item, keys: ["command"]) {
                 return "Running command: \(command)"
             }
             return nil
 
-        case "item.completed":
-            guard let itemType = item["type"] as? String else { return nil }
+        case "item.updated", "item.delta":
             if itemType == "agent_message",
-               let text = item["text"] as? String {
-                let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return message.isEmpty ? nil : message
+               let text = nonEmptyString(in: item, keys: ["text", "delta", "content"]) {
+                return text
+            }
+            if itemType == "command_execution",
+               let output = nonEmptyString(in: item, keys: ["output_delta", "stdout", "stderr", "output"]) {
+                return summarizeCommandOutputForConsole(output, maxLines: 4, maxCharacters: 400)
+            }
+            return nil
+
+        case "item.completed":
+            if itemType == "agent_message",
+               let text = nonEmptyString(in: item, keys: ["text", "content"]) {
+                return text
             }
 
             if itemType == "command_execution" {
                 var progressParts: [String] = []
-                if let command = item["command"] as? String,
-                   !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let command = nonEmptyString(in: item, keys: ["command"]) {
                     progressParts.append("Command completed: \(command)")
                 }
-                if let output = item["aggregated_output"] as? String,
-                   !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let output = nonEmptyString(in: item, keys: ["aggregated_output", "output", "stdout", "stderr"]) {
                     progressParts.append(summarizeCommandOutputForConsole(output))
                 }
                 return progressParts.isEmpty ? nil : progressParts.joined(separator: "\n")
@@ -996,6 +1017,18 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         default:
             return nil
         }
+    }
+
+    private static func nonEmptyString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+        return nil
     }
 
     static func summarizeCommandOutputForConsole(
