@@ -59,7 +59,7 @@
 "Delete Board" = "刪除看板";
 "Duplicate Board" = "複製看板";
 "Export Workspace" = "匯出工作區";
-"Save boards, tasks, and agents as workspace JSON." = "將看板、任務與 Agent 匯出為工作區 JSON。";
+"Save boards, tasks, and agents as workspace JSON." = "將看板、任務與代理匯出為工作區 JSON。";
 "Export Current Board" = "匯出目前看板";
 "Save only the current board as JSON." = "僅將目前看板匯出為 JSON。";
 "Import Workspace" = "匯入工作區";
@@ -67,7 +67,7 @@
 "Merge" = "合併";
 "Replace" = "取代";
 "Choose Projects Folder" = "選擇專案資料夾";
-"Select a default working folder for agent project execution." = "為 Agent 專案執行選擇預設工作資料夾。";
+"Select a default working folder for agent project execution." = "為代理專案執行選擇預設工作資料夾。";
 "Projects Folder Error" = "專案資料夾錯誤";
 "Could not use folder:\n%@\n\n%@" = "無法使用此資料夾：\n%@\n\n%@";
 "OK" = "確定";
@@ -85,7 +85,7 @@
 "Board health looks stable. No immediate actions recommended." = "看板健康狀態穩定，暫無立即建議動作。";
 "Type to search all boards." = "輸入以搜尋所有看板。";
 "No matching tasks found." = "找不到符合的任務。";
-"No execution events yet. Run a task to see live updates for this agent." = "尚無執行事件。執行任務後可查看此 Agent 的即時更新。";
+"No execution events yet. Run a task to see live updates for this agent." = "尚無執行事件。執行任務後可查看此代理的即時更新。";
 "Clear" = "清除";
 "Execution Debug Log" = "執行除錯紀錄";
 "Codex Login Command" = "Codex 登入指令";
@@ -103,7 +103,7 @@
 "Cycle Appearance" = "切換外觀";
 "Health" = "健康";
 "Assign" = "指派";
-"No eligible agents currently available." = "目前沒有可用且符合條件的 Agent。";
+"No eligible agents currently available." = "目前沒有可用且符合條件的代理。";
 "No tasks waiting for manual triage." = "沒有待手動分流的任務。";
 "Create + Auto Assign" = "建立並自動指派";
 "Tip: limit cannot be smaller than the number of tasks currently in that column." = "提示：限制值不可小於該欄位目前任務數。";
@@ -112,7 +112,7 @@
 "Use Folder" = "使用此資料夾";
 "%@ (%@)" = "%@（%@）";
 "%d %@" = "%d %@";
-"%d task(s) currently have no eligible agent and will be skipped." = "目前有 %d 個任務沒有可用 Agent，將略過。";
+"%d task(s) currently have no eligible agent and will be skipped." = "目前有 %d 個任務沒有可用代理，將略過。";
 "%d task(s) need manual triage" = "有 %d 個任務需要手動分流";
 "%d%%" = "%d%%";
 "%d/%d" = "%d/%d";
@@ -206,12 +206,12 @@
 "Critical" = "嚴重";
 "Debug:\\n%@" = "除錯：\\n%@";
 "Delete \"%@\" and all tasks/agents in it? This cannot be undone." = "刪除「%@」及其中所有任務/代理？此操作無法復原。";
-"Delete Current Board" = "刪除目前板";
+"Delete Current Board" = "刪除目前看板";
 "Delete Task" = "刪除任務";
 "Developer Mode" = "開發者模式";
 "Done Backlog" = "完成待辦";
 "Done tasks cannot be executed" = "已完成的任務無法執行";
-"Duplicate Current Board" = "複製當前板";
+"Duplicate Current Board" = "複製目前看板";
 "Duplicate Task" = "複製任務";
 "Edit WIP Limits" = "編輯 WIP 限制";
 "Empty response" = "空白回應";
@@ -226,7 +226,7 @@
 "Execution succeeded: %@" = "執行成功：%@";
 "Exported board to %@" = "已將看板匯出至 %@";
 "Exported workspace to %@" = "已將工作區匯出至 %@";
-"Failed to export board" = "匯出板失敗";
+"Failed to export board" = "匯出看板失敗";
 "Failed to export workspace" = "匯出工作區失敗";
 "Failed to read workspace file" = "無法讀取工作區文件";
 "Failed to write board file" = "寫入看板檔案失敗";
