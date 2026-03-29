@@ -4511,6 +4511,33 @@ struct KanbanPersistenceTests {
         ])
     }
 
+    @Test("global task search resolves assignee names from board agent directory")
+    func globalTaskSearchResolvesAssigneeNamesFromBoardAgents() {
+        let agent = AgentProfile(name: "Ops Agent", skills: ["ops"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Incident triage",
+            details: "critical path",
+            requiredSkills: ["ops"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let board = KanbanBoardRecord(name: "Ops", tasks: [task], agents: [agent], wipLimits: [.inProgress: 3, .review: 2])
+        let snapshot = KanbanBoardSnapshot(
+            tasks: board.tasks,
+            agents: board.agents,
+            wipLimits: board.wipLimits,
+            boards: [board],
+            selectedBoardID: board.id
+        )
+        let viewModel = KanbanBoardViewModel.persistentBoard(boardStore: SpyBoardStore(loadSnapshot: snapshot))
+
+        let results = viewModel.globalTaskSearchResults(query: "ops agent")
+
+        #expect(results.count == 1)
+        #expect(results.first?.assigneeName == "Ops Agent")
+    }
+
     @Test("open task switches board context and persists selection")
     func openTaskSwitchesBoardContextAndPersists() {
         let defaultTask = WorkTask(
