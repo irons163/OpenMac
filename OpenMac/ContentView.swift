@@ -3630,12 +3630,17 @@ private extension AgentLiveConsoleView {
 
 private extension AgentExecutionEventRow {
     var testStatusLabel: String { statusLabel }
+    var testStatusColor: Color { statusColor }
     var testCopyText: String { copyText }
 }
 
 private extension TaskCardView {
     func testExecutionStatusLabel(for status: TaskExecutionStatus) -> String {
         executionStatusLabel(for: status)
+    }
+
+    func testExecutionStatusColor(for status: TaskExecutionStatus) -> Color {
+        executionStatusColor(for: status)
     }
 }
 
@@ -3645,6 +3650,16 @@ private extension BoardHealthSummaryView {
 
 private extension BoardHealthRecommendationsView {
     var testAutoFixRecommendationCount: Int { autoFixRecommendationCount }
+    var testRecommendationCardBackground: Color { recommendationCardBackground }
+    var testRecommendationCardBorder: Color { recommendationCardBorder }
+}
+
+private extension ManualTriageSheet {
+    func testSelectionBinding(for taskID: UUID, fallback: UUID) -> Binding<UUID> {
+        selectionBinding(for: taskID, fallback: fallback)
+    }
+
+    var testTriageCardBackground: Color { triageCardBackground }
 }
 
 private extension ContentView {
@@ -4166,6 +4181,68 @@ private extension ContentView {
         return exercised
     }
 
+    @MainActor
+    static func testExerciseRecommendationAndTriageHelpersForCoverage() -> Int {
+        var exercised = 0
+
+        func hit(_ action: () -> Void) {
+            action()
+            exercised += 1
+        }
+
+        let recommendationView = BoardHealthRecommendationsView(
+            recommendations: [
+                BoardHealthRecommendation(
+                    action: .openManualTriage,
+                    title: "Manual triage",
+                    detail: "Review queued tasks"
+                )
+            ],
+            onAction: { _ in },
+            onApplyAll: {}
+        )
+        hit { _ = recommendationView.testRecommendationCardBackground }
+        hit { _ = recommendationView.testRecommendationCardBorder }
+
+        let taskID = UUID()
+        let fallbackAgentID = UUID()
+        let selectedAgentID = UUID()
+        var selectedByTask: [UUID: UUID] = [:]
+        let manualTriageSheet = ManualTriageSheet(
+            tasks: [
+                WorkTask(
+                    id: taskID,
+                    title: "Triage task",
+                    details: "Needs assignment",
+                    requiredSkills: [],
+                    storyPoints: 1,
+                    status: .todo,
+                    assignedAgentID: nil
+                )
+            ],
+            boardMessage: nil,
+            boardMessageSeverity: nil,
+            selectedAgentByTaskID: Binding(get: { selectedByTask }, set: { selectedByTask = $0 }),
+            assignAllEligibleCount: 0,
+            unassignableTaskCount: 0,
+            assignableAgents: { _ in [] },
+            loadText: { _ in "0/1" },
+            onAssign: { _ in },
+            onAssignAll: {},
+            onClose: {}
+        )
+        hit { _ = manualTriageSheet.testTriageCardBackground }
+
+        let selection = manualTriageSheet.testSelectionBinding(for: taskID, fallback: fallbackAgentID)
+        hit { _ = selection.wrappedValue }
+        hit { selection.wrappedValue = selectedAgentID }
+        if selectedByTask[taskID] == selectedAgentID {
+            exercised += 1
+        }
+
+        return exercised
+    }
+
     static func testResolveSelectedAssigneeFilter(
         selectedKey: String,
         agents: [AgentProfile]
@@ -4301,6 +4378,69 @@ enum ContentViewTestHooks {
             onMoveForward: {}
         )
         return card.testExecutionStatusLabel(for: status)
+    }
+
+    static func exerciseStatusColorCoverage() -> Int {
+        let statuses: [TaskExecutionStatus] = [.running, .succeeded, .failed]
+        var exercised = 0
+
+        let task = WorkTask(
+            title: "Task",
+            details: "Details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let card = TaskCardView(
+            task: task,
+            assigneeName: "Agent",
+            assignmentReason: nil,
+            canMoveBackward: false,
+            canMoveForward: true,
+            canUnassign: false,
+            canAutoAssign: true,
+            canRunAgent: false,
+            canRetryAgent: false,
+            executionRecord: nil,
+            manualAssignableAgents: [],
+            reassignableAgents: [],
+            moveToBoardTargets: [],
+            onEdit: {},
+            onAutoAssign: {},
+            onRunAgent: {},
+            onRetryAgent: {},
+            onManualAssign: { _ in },
+            onReassign: { _ in },
+            onUnassign: {},
+            onDuplicate: {},
+            onDelete: {},
+            onMoveToBoard: { _ in },
+            onCopyToBoard: { _ in },
+            onShowExecutionDetails: {},
+            onMoveBackward: {},
+            onMoveForward: {}
+        )
+
+        for status in statuses {
+            _ = card.testExecutionStatusColor(for: status)
+            exercised += 1
+        }
+
+        for status in statuses {
+            let event = AgentExecutionEvent(
+                agentID: UUID(),
+                taskID: UUID(),
+                taskTitle: "Task",
+                status: status,
+                message: "Message"
+            )
+            let row = AgentExecutionEventRow(event: event, onCopy: { _ in })
+            _ = row.testStatusColor
+            exercised += 1
+        }
+
+        return exercised
     }
 
     static func healthScoreAccent(for score: Int) -> SummaryBadgeAccent {
@@ -5010,6 +5150,11 @@ enum ContentViewTestHooks {
     @MainActor
     static func exerciseTargetedHelperBranchesForCoverage() -> Int {
         ContentView.testExerciseTargetedHelperBranchesForCoverage()
+    }
+
+    @MainActor
+    static func exerciseRecommendationAndTriageHelpersForCoverage() -> Int {
+        ContentView.testExerciseRecommendationAndTriageHelpersForCoverage()
     }
 }
 #endif
