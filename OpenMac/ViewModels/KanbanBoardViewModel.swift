@@ -156,6 +156,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
     var urlSession: URLSession = .shared
     var timeoutSeconds: TimeInterval = 30
+    var appLanguageOverrideProvider: () -> String? = {
+        UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
+    }
     var codexBridgePreflight: () throws -> Void = {
         try Self.defaultCodexBridgePreflight()
     }
@@ -170,6 +173,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         environmentProvider: @escaping () -> [String: String] = { ProcessInfo.processInfo.environment },
         urlSession: URLSession = .shared,
         timeoutSeconds: TimeInterval = 30,
+        appLanguageOverrideProvider: @escaping () -> String? = {
+            UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
+        },
         codexBridgePreflight: @escaping () throws -> Void = {
             try Self.defaultCodexBridgePreflight()
         },
@@ -183,6 +189,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         self.environmentProvider = environmentProvider
         self.urlSession = urlSession
         self.timeoutSeconds = timeoutSeconds
+        self.appLanguageOverrideProvider = appLanguageOverrideProvider
         self.codexBridgePreflight = codexBridgePreflight
         self.codexBridgeRunner = codexBridgeRunner
         self.codexBridgeRecovery = codexBridgeRecovery
@@ -197,6 +204,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             environmentProvider: environmentProvider,
             urlSession: urlSession,
             timeoutSeconds: timeoutSeconds,
+            appLanguageOverrideProvider: {
+                UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
+            },
             codexBridgePreflight: {
                 try Self.defaultCodexBridgePreflight()
             },
@@ -551,7 +561,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
     private func executionPromptTemplate() -> ExecutionPromptTemplate {
-        switch AppLanguageResolver.resolvedLanguage() {
+        switch AppLanguageResolver.resolvedLanguage(overrideRawValue: appLanguageOverrideProvider()) {
         case .english:
             return ExecutionPromptTemplate(
                 systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in English.",

@@ -220,6 +220,53 @@ struct AgentTaskExecutorTests {
         }
     }
 
+    @Test("default executor codex bridge prompt follows selected app language")
+    func openAICompatibleCodexBridgePromptFollowsSelectedLanguage() {
+        let task = WorkTask(
+            title: "建立",
+            details: "建立 macOS 專用 app",
+            requiredSkills: [],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+
+        var capturedPrompt = ""
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            appLanguageOverrideProvider: { AppLanguage.traditionalChinese.rawValue },
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                capturedPrompt = request.prompt
+                return "Bridge run complete"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Bridge run complete")
+        case .failure:
+            #expect(Bool(false), "Expected success for Codex Bridge runtime")
+        }
+        #expect(capturedPrompt.contains("你正在看板執行系統中支援一位已指派的 AI 代理。"))
+        #expect(capturedPrompt.contains("任務標題"))
+        #expect(capturedPrompt.contains("摘要："))
+        #expect(capturedPrompt.contains("所需技能: 無"))
+    }
+
     @Test("default executor codex bridge request honors projects directory override environment")
     func openAICompatibleCodexBridgeUsesProjectsDirectoryOverride() {
         let task = WorkTask(
