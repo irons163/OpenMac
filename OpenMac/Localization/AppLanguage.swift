@@ -151,15 +151,27 @@ enum L10n {
     private static var runtimeLocaleIdentifier: String?
     private static let tableName = "Localizable"
 
-    private static var isRunningTests: Bool {
+    fileprivate static var isRunningTests: Bool {
+        isRunningTests(
+            environment: ProcessInfo.processInfo.environment,
+            xctestClassExists: NSClassFromString("XCTestCase") != nil,
+            bundlePaths: Bundle.allBundles.map(\.bundlePath)
+        )
+    }
+
+    fileprivate static func isRunningTests(
+        environment: [String: String],
+        xctestClassExists: Bool,
+        bundlePaths: [String]
+    ) -> Bool {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        if environment["XCTestConfigurationFilePath"] != nil {
             return true
         }
-        if NSClassFromString("XCTestCase") != nil {
+        if xctestClassExists {
             return true
         }
-        return Bundle.allBundles.contains { $0.bundlePath.hasSuffix(".xctest") }
+        return bundlePaths.contains { $0.hasSuffix(".xctest") }
         #else
         return false
         #endif
@@ -171,7 +183,7 @@ enum L10n {
         runtimeLocaleLock.unlock()
     }
 
-    private static var activeRuntimeLocale: Locale? {
+    fileprivate static var activeRuntimeLocale: Locale? {
         runtimeLocaleLock.lock()
         defer { runtimeLocaleLock.unlock() }
         guard let runtimeLocaleIdentifier else { return nil }
@@ -228,12 +240,15 @@ enum L10n {
         return runtimeLocale
     }
 
-    private static func resolvedDefaultLocale() -> Locale {
-        if isRunningTests {
+    fileprivate static func resolvedDefaultLocale(
+        storedOverride: String?,
+        runtimeLocale: Locale?,
+        runningTests: Bool
+    ) -> Locale {
+        if runningTests {
             return Locale(identifier: AppLanguage.english.rawValue)
         }
 
-        let storedOverride = UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
         let normalizedOverride = storedOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let resolverOverride: String?
@@ -247,7 +262,15 @@ enum L10n {
 
         return resolvedDefaultLocale(
             overrideRawValue: resolverOverride,
-            runtimeLocale: activeRuntimeLocale
+            runtimeLocale: runtimeLocale
+        )
+    }
+
+    fileprivate static func resolvedDefaultLocale() -> Locale {
+        resolvedDefaultLocale(
+            storedOverride: UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey),
+            runtimeLocale: activeRuntimeLocale,
+            runningTests: isRunningTests
         )
     }
 
@@ -276,3 +299,37 @@ enum L10n {
         setRuntimeLocale(Locale(identifier: AppLanguage.english.rawValue))
     }
 }
+
+#if DEBUG
+enum AppLanguageTestHooks {
+    static func l10nIsRunningTests(
+        environment: [String: String],
+        xctestClassExists: Bool,
+        bundlePaths: [String]
+    ) -> Bool {
+        L10n.isRunningTests(
+            environment: environment,
+            xctestClassExists: xctestClassExists,
+            bundlePaths: bundlePaths
+        )
+    }
+
+    static func l10nResolvedDefaultLocale(
+        storedOverride: String?,
+        runtimeLocaleIdentifier: String?,
+        runningTests: Bool
+    ) -> Locale {
+        L10n.resolvedDefaultLocale(
+            storedOverride: storedOverride,
+            runtimeLocale: runtimeLocaleIdentifier.map { Locale(identifier: $0) },
+            runningTests: runningTests
+        )
+    }
+
+    static func l10nSetAndReadActiveRuntimeLocale(_ identifier: String?) -> String? {
+        let locale = identifier.map { Locale(identifier: $0) }
+        L10n.setRuntimeLocale(locale)
+        return L10n.activeRuntimeLocale?.identifier
+    }
+}
+#endif

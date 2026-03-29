@@ -6376,6 +6376,7 @@ struct KanbanPersistenceTests {
 
 struct AppLanguageResolverTests {
     private static let userDefaultsMutationLock = NSLock()
+    private static let runtimeLocaleMutationLock = NSLock()
 
     private func withLanguageOverrideInDefaults<T>(_ value: String?, run body: () throws -> T) rethrows -> T {
         Self.userDefaultsMutationLock.lock()
@@ -6533,6 +6534,84 @@ struct AppLanguageResolverTests {
         )
 
         #expect(AppLanguage.resolve(preferredLanguages: [resolved.identifier]) == .french)
+    }
+
+    @Test("L10n test-host detection covers environment class and bundle fallbacks")
+    func l10nIsRunningTestsDetectionCoverage() {
+        #expect(
+            AppLanguageTestHooks.l10nIsRunningTests(
+                environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
+                xctestClassExists: false,
+                bundlePaths: []
+            )
+        )
+        #expect(
+            AppLanguageTestHooks.l10nIsRunningTests(
+                environment: [:],
+                xctestClassExists: true,
+                bundlePaths: []
+            )
+        )
+        #expect(
+            AppLanguageTestHooks.l10nIsRunningTests(
+                environment: [:],
+                xctestClassExists: false,
+                bundlePaths: ["/tmp/OpenMacTests.xctest"]
+            )
+        )
+        #expect(
+            !AppLanguageTestHooks.l10nIsRunningTests(
+                environment: [:],
+                xctestClassExists: false,
+                bundlePaths: ["/tmp/OpenMac.app"]
+            )
+        )
+    }
+
+    @Test("L10n active runtime locale getter tracks set and clear operations")
+    func l10nActiveRuntimeLocaleCoverage() {
+        Self.runtimeLocaleMutationLock.lock()
+        defer {
+            _ = AppLanguageTestHooks.l10nSetAndReadActiveRuntimeLocale(nil)
+            Self.runtimeLocaleMutationLock.unlock()
+        }
+
+        let assignedIdentifier = AppLanguageTestHooks.l10nSetAndReadActiveRuntimeLocale("fr-FR")
+        #expect(assignedIdentifier == "fr-FR")
+
+        let clearedIdentifier = AppLanguageTestHooks.l10nSetAndReadActiveRuntimeLocale(nil)
+        #expect(clearedIdentifier == nil)
+    }
+
+    @Test("L10n internal default locale resolver normalizes overrides and runtime matching")
+    func l10nInternalResolvedDefaultLocaleCoverage() {
+        let forcedEnglish = AppLanguageTestHooks.l10nResolvedDefaultLocale(
+            storedOverride: nil,
+            runtimeLocaleIdentifier: "ja-JP",
+            runningTests: true
+        )
+        #expect(AppLanguage.resolve(preferredLanguages: [forcedEnglish.identifier]) == .english)
+
+        let systemNormalized = AppLanguageTestHooks.l10nResolvedDefaultLocale(
+            storedOverride: " system ",
+            runtimeLocaleIdentifier: nil,
+            runningTests: false
+        )
+        #expect(AppLanguage.resolve(preferredLanguages: [systemNormalized.identifier]) == .english)
+
+        let matchedRuntime = AppLanguageTestHooks.l10nResolvedDefaultLocale(
+            storedOverride: AppLanguage.japanese.rawValue,
+            runtimeLocaleIdentifier: "ja-JP",
+            runningTests: false
+        )
+        #expect(matchedRuntime.identifier == "ja-JP")
+
+        let mismatchedRuntime = AppLanguageTestHooks.l10nResolvedDefaultLocale(
+            storedOverride: AppLanguage.japanese.rawValue,
+            runtimeLocaleIdentifier: "fr-FR",
+            runningTests: false
+        )
+        #expect(AppLanguage.resolve(preferredLanguages: [mismatchedRuntime.identifier]) == .japanese)
     }
 
     @Test("L10n string resolves localized value for explicit locale and falls back to key for unknown key")
