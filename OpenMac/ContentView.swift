@@ -981,6 +981,49 @@ struct ContentView: View {
     }
 
     private func exportWorkspaceFromToolbar() {
+        let panel = Self.configuredWorkspaceExportPanel()
+
+        _ = Self.handleSavePanelResult(
+            modalResponse: panel.runModal(),
+            url: panel.url
+        ) { url in
+            viewModel.exportWorkspace(to: url)
+        }
+    }
+
+    private func exportSelectedBoardFromToolbar() {
+        let panel = Self.configuredSelectedBoardExportPanel(defaultFileName: selectedBoardExportFileName())
+
+        _ = Self.handleSavePanelResult(
+            modalResponse: panel.runModal(),
+            url: panel.url
+        ) { url in
+            viewModel.exportSelectedBoard(to: url)
+        }
+    }
+
+    private func importWorkspaceFromToolbar() {
+        let panel = Self.configuredWorkspaceImportPanel()
+
+        _ = Self.handleWorkspaceImport(
+            modalResponse: panel.runModal(),
+            url: panel.url,
+            previewProvider: { url in
+                viewModel.workspaceImportPreview(from: url)
+            },
+            strategyChooser: { preview in
+                chooseWorkspaceImportStrategy(preview: preview)
+            },
+            importer: { url, strategy in
+                viewModel.importWorkspace(from: url, strategy: strategy)
+            },
+            onImported: {
+                handleBoardContextChanged()
+            }
+        )
+    }
+
+    fileprivate static func configuredWorkspaceExportPanel() -> NSSavePanel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType.json]
         panel.canCreateDirectories = true
@@ -988,25 +1031,21 @@ struct ContentView: View {
         panel.nameFieldStringValue = "openmac-workspace.json"
         panel.title = L10n.string("Export Workspace")
         panel.message = L10n.string("Save boards, tasks, and agents as workspace JSON.")
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = viewModel.exportWorkspace(to: url)
+        return panel
     }
 
-    private func exportSelectedBoardFromToolbar() {
+    fileprivate static func configuredSelectedBoardExportPanel(defaultFileName: String) -> NSSavePanel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType.json]
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        panel.nameFieldStringValue = selectedBoardExportFileName()
+        panel.nameFieldStringValue = defaultFileName
         panel.title = L10n.string("Export Current Board")
         panel.message = L10n.string("Save only the current board as JSON.")
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = viewModel.exportSelectedBoard(to: url)
+        return panel
     }
 
-    private func importWorkspaceFromToolbar() {
+    fileprivate static func configuredWorkspaceImportPanel() -> NSOpenPanel {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType.json]
         panel.allowsMultipleSelection = false
@@ -1014,20 +1053,11 @@ struct ContentView: View {
         panel.canChooseFiles = true
         panel.title = L10n.string("Import Workspace")
         panel.message = L10n.string("Select workspace JSON to import.")
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let preview = viewModel.workspaceImportPreview(from: url) else { return }
-        guard let strategy = chooseWorkspaceImportStrategy(preview: preview) else { return }
-        let imported = viewModel.importWorkspace(from: url, strategy: strategy)
-        if imported {
-            handleBoardContextChanged()
-        }
+        return panel
     }
 
-    private func chooseWorkspaceImportStrategy(preview: WorkspaceImportPreview) -> WorkspaceImportStrategy? {
-        let alert = NSAlert()
-        alert.messageText = L10n.string("Import Workspace")
-        alert.informativeText = L10n.format(
+    fileprivate static func workspaceImportInformativeText(preview: WorkspaceImportPreview) -> String {
+        L10n.format(
             """
             Boards: %d
             Tasks: %d
@@ -1040,11 +1070,20 @@ struct ContentView: View {
             preview.taskCount,
             preview.agentCount
         )
+    }
+
+    fileprivate static func configuredWorkspaceImportAlert(preview: WorkspaceImportPreview) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = L10n.string("Import Workspace")
+        alert.informativeText = workspaceImportInformativeText(preview: preview)
         alert.addButton(withTitle: L10n.string("Merge"))
         alert.addButton(withTitle: L10n.string("Replace"))
         alert.addButton(withTitle: L10n.string("Cancel"))
+        return alert
+    }
 
-        switch alert.runModal() {
+    fileprivate static func workspaceImportStrategy(for modalResponse: NSApplication.ModalResponse) -> WorkspaceImportStrategy? {
+        switch modalResponse {
         case .alertFirstButtonReturn:
             return .merge
         case .alertSecondButtonReturn:
@@ -1052,6 +1091,11 @@ struct ContentView: View {
         default:
             return nil
         }
+    }
+
+    private func chooseWorkspaceImportStrategy(preview: WorkspaceImportPreview) -> WorkspaceImportStrategy? {
+        let alert = Self.configuredWorkspaceImportAlert(preview: preview)
+        return Self.workspaceImportStrategy(for: alert.runModal())
     }
 
     private func selectedBoardExportFileName() -> String {
@@ -1559,6 +1603,33 @@ struct ContentView: View {
             }
             return !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    fileprivate static func handleSavePanelResult(
+        modalResponse: NSApplication.ModalResponse,
+        url: URL?,
+        exporter: (URL) -> Bool
+    ) -> Bool {
+        guard modalResponse == .OK, let url else { return false }
+        return exporter(url)
+    }
+
+    fileprivate static func handleWorkspaceImport(
+        modalResponse: NSApplication.ModalResponse,
+        url: URL?,
+        previewProvider: (URL) -> WorkspaceImportPreview?,
+        strategyChooser: (WorkspaceImportPreview) -> WorkspaceImportStrategy?,
+        importer: (URL, WorkspaceImportStrategy) -> Bool,
+        onImported: () -> Void
+    ) -> Bool {
+        guard modalResponse == .OK, let url else { return false }
+        guard let preview = previewProvider(url) else { return false }
+        guard let strategy = strategyChooser(preview) else { return false }
+        let imported = importer(url, strategy)
+        if imported {
+            onImported()
+        }
+        return imported
     }
 
     fileprivate static func applyTaskEdits(
@@ -3854,6 +3925,60 @@ enum ContentViewTestHooks {
         isBatchRunning: Bool
     ) -> Bool {
         return ContentView.testCanBatchRunAssignedTasks(tasks: tasks, isBatchRunning: isBatchRunning)
+    }
+
+    static func handleSavePanelResult(
+        modalResponse: NSApplication.ModalResponse,
+        url: URL?,
+        exporter: (URL) -> Bool
+    ) -> Bool {
+        ContentView.handleSavePanelResult(
+            modalResponse: modalResponse,
+            url: url,
+            exporter: exporter
+        )
+    }
+
+    static func handleWorkspaceImport(
+        modalResponse: NSApplication.ModalResponse,
+        url: URL?,
+        previewProvider: (URL) -> WorkspaceImportPreview?,
+        strategyChooser: (WorkspaceImportPreview) -> WorkspaceImportStrategy?,
+        importer: (URL, WorkspaceImportStrategy) -> Bool,
+        onImported: () -> Void
+    ) -> Bool {
+        ContentView.handleWorkspaceImport(
+            modalResponse: modalResponse,
+            url: url,
+            previewProvider: previewProvider,
+            strategyChooser: strategyChooser,
+            importer: importer,
+            onImported: onImported
+        )
+    }
+
+    static func workspaceImportInformativeText(preview: WorkspaceImportPreview) -> String {
+        ContentView.workspaceImportInformativeText(preview: preview)
+    }
+
+    static func configuredWorkspaceExportPanel() -> NSSavePanel {
+        ContentView.configuredWorkspaceExportPanel()
+    }
+
+    static func configuredSelectedBoardExportPanel(defaultFileName: String) -> NSSavePanel {
+        ContentView.configuredSelectedBoardExportPanel(defaultFileName: defaultFileName)
+    }
+
+    static func configuredWorkspaceImportPanel() -> NSOpenPanel {
+        ContentView.configuredWorkspaceImportPanel()
+    }
+
+    static func configuredWorkspaceImportAlert(preview: WorkspaceImportPreview) -> NSAlert {
+        ContentView.configuredWorkspaceImportAlert(preview: preview)
+    }
+
+    static func workspaceImportStrategy(for modalResponse: NSApplication.ModalResponse) -> WorkspaceImportStrategy? {
+        ContentView.workspaceImportStrategy(for: modalResponse)
     }
 
     static func applyTaskEdits(

@@ -3157,6 +3157,164 @@ struct ContentViewLogicTests {
         #expect(!rejected)
     }
 
+    @Test("save panel helper handles cancel, missing URL, and exporter result")
+    func savePanelHelperCoverage() {
+        let fileURL = URL(fileURLWithPath: "/tmp/openmac-export.json")
+        var exportedURLs: [URL] = []
+
+        let cancelled = ContentViewTestHooks.handleSavePanelResult(
+            modalResponse: .cancel,
+            url: fileURL
+        ) { url in
+            exportedURLs.append(url)
+            return true
+        }
+        #expect(!cancelled)
+        #expect(exportedURLs.isEmpty)
+
+        let missingURL = ContentViewTestHooks.handleSavePanelResult(
+            modalResponse: .OK,
+            url: nil
+        ) { url in
+            exportedURLs.append(url)
+            return true
+        }
+        #expect(!missingURL)
+        #expect(exportedURLs.isEmpty)
+
+        let exported = ContentViewTestHooks.handleSavePanelResult(
+            modalResponse: .OK,
+            url: fileURL
+        ) { url in
+            exportedURLs.append(url)
+            return true
+        }
+        #expect(exported)
+        #expect(exportedURLs == [fileURL])
+    }
+
+    @Test("workspace import helper handles preview strategy and import outcomes")
+    func workspaceImportHelperCoverage() {
+        let fileURL = URL(fileURLWithPath: "/tmp/openmac-import.json")
+        let preview = WorkspaceImportPreview(boardCount: 2, taskCount: 5, agentCount: 3)
+        var importedPayloads: [(URL, WorkspaceImportStrategy)] = []
+        var importedCallbackCount = 0
+
+        let cancelled = ContentViewTestHooks.handleWorkspaceImport(
+            modalResponse: .cancel,
+            url: fileURL,
+            previewProvider: { _ in preview },
+            strategyChooser: { _ in .merge },
+            importer: { url, strategy in
+                importedPayloads.append((url, strategy))
+                return true
+            },
+            onImported: {
+                importedCallbackCount += 1
+            }
+        )
+        #expect(!cancelled)
+        #expect(importedPayloads.isEmpty)
+        #expect(importedCallbackCount == 0)
+
+        let missingPreview = ContentViewTestHooks.handleWorkspaceImport(
+            modalResponse: .OK,
+            url: fileURL,
+            previewProvider: { _ in nil },
+            strategyChooser: { _ in .merge },
+            importer: { _, _ in true },
+            onImported: {}
+        )
+        #expect(!missingPreview)
+
+        let cancelledStrategy = ContentViewTestHooks.handleWorkspaceImport(
+            modalResponse: .OK,
+            url: fileURL,
+            previewProvider: { _ in preview },
+            strategyChooser: { _ in nil },
+            importer: { _, _ in true },
+            onImported: {}
+        )
+        #expect(!cancelledStrategy)
+
+        let failedImport = ContentViewTestHooks.handleWorkspaceImport(
+            modalResponse: .OK,
+            url: fileURL,
+            previewProvider: { _ in preview },
+            strategyChooser: { _ in .replace },
+            importer: { url, strategy in
+                importedPayloads.append((url, strategy))
+                return false
+            },
+            onImported: {
+                importedCallbackCount += 1
+            }
+        )
+        #expect(!failedImport)
+        #expect(importedCallbackCount == 0)
+
+        let succeededImport = ContentViewTestHooks.handleWorkspaceImport(
+            modalResponse: .OK,
+            url: fileURL,
+            previewProvider: { _ in preview },
+            strategyChooser: { _ in .merge },
+            importer: { url, strategy in
+                importedPayloads.append((url, strategy))
+                return true
+            },
+            onImported: {
+                importedCallbackCount += 1
+            }
+        )
+        #expect(succeededImport)
+        #expect(importedPayloads.last?.0 == fileURL)
+        #expect(importedPayloads.last?.1 == .merge)
+        #expect(importedCallbackCount == 1)
+    }
+
+    @Test("workspace import strategy helper maps button responses and summary text")
+    func workspaceImportStrategyHelperCoverage() {
+        #expect(ContentViewTestHooks.workspaceImportStrategy(for: .alertFirstButtonReturn) == .merge)
+        #expect(ContentViewTestHooks.workspaceImportStrategy(for: .alertSecondButtonReturn) == .replace)
+        #expect(ContentViewTestHooks.workspaceImportStrategy(for: .cancel) == nil)
+
+        let preview = WorkspaceImportPreview(boardCount: 3, taskCount: 8, agentCount: 2)
+        let text = ContentViewTestHooks.workspaceImportInformativeText(preview: preview)
+        #expect(text.contains("Boards: 3"))
+        #expect(text.contains("Tasks: 8"))
+        #expect(text.contains("Agents: 2"))
+        #expect(text.contains("Merge keeps current boards"))
+    }
+
+    @Test("workspace panel and alert helpers configure expected defaults")
+    func workspacePanelConfigurationCoverage() {
+        let workspaceExportPanel = ContentViewTestHooks.configuredWorkspaceExportPanel()
+        #expect(workspaceExportPanel.canCreateDirectories)
+        #expect(!workspaceExportPanel.isExtensionHidden)
+        #expect(workspaceExportPanel.nameFieldStringValue == "openmac-workspace.json")
+        #expect(workspaceExportPanel.title == "Export Workspace")
+
+        let boardExportPanel = ContentViewTestHooks.configuredSelectedBoardExportPanel(
+            defaultFileName: "openmac-board-1.json"
+        )
+        #expect(boardExportPanel.canCreateDirectories)
+        #expect(!boardExportPanel.isExtensionHidden)
+        #expect(boardExportPanel.nameFieldStringValue == "openmac-board-1.json")
+        #expect(boardExportPanel.title == "Export Current Board")
+
+        let importPanel = ContentViewTestHooks.configuredWorkspaceImportPanel()
+        #expect(!importPanel.allowsMultipleSelection)
+        #expect(!importPanel.canChooseDirectories)
+        #expect(importPanel.canChooseFiles)
+        #expect(importPanel.title == "Import Workspace")
+
+        let preview = WorkspaceImportPreview(boardCount: 1, taskCount: 2, agentCount: 1)
+        let importAlert = ContentViewTestHooks.configuredWorkspaceImportAlert(preview: preview)
+        let buttonTitles = importAlert.buttons.map(\.title)
+        #expect(importAlert.messageText == "Import Workspace")
+        #expect(buttonTitles == ["Merge", "Replace", "Cancel"])
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
