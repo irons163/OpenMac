@@ -2893,6 +2893,12 @@ struct ContentViewLogicTests {
         #expect(exercisedCount >= 6)
     }
 
+    @Test("palette token helpers cover both color schemes and enum variants")
+    func paletteTokenCoverage() {
+        let exercisedCount = ContentViewTestHooks.exercisePaletteTokenCoverage()
+        #expect(exercisedCount >= 50)
+    }
+
     @Test("board health score accent thresholds are stable")
     func boardHealthScoreAccentThresholds() {
         #expect(ContentViewTestHooks.healthScoreAccent(for: 90) == .green)
