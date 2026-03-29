@@ -17,7 +17,10 @@
 "Assignee" = "負責人";
 "All Assignees" = "所有負責人";
 "Reset Filters" = "重設篩選";
+"Total" = "總計";
 "To Do" = "待辦";
+"In Progress WIP" = "進行中 WIP";
+"Review WIP" = "審查 WIP";
 "In Progress" = "進行中";
 "Review" = "審查";
 "Done" = "完成";
@@ -232,7 +235,7 @@
 "Invalid move: %@ -> %@" = "無效移動：%@ -> %@";
 "Invalid response" = "無效回應";
 "Invalid workspace JSON" = "工作區 JSON 無效";
-"Live: Running" = "直播：跑步";
+"Live: Running" = "即時：執行中";
 "Merged workspace (+%d %@)" = "合併工作區 (+%d %@)";
 "Missing OPENAI_API_KEY for OpenAI-compatible runtime" = "缺少 OpenAI 相容運行時的 OPENAI_API_KEY";
 "Mock run completed by %@ for \"%@\"" = "由 %@ 為「%@」完成模擬運行";

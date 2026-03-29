@@ -17,7 +17,10 @@
 "Assignee" = "Asignado a";
 "All Assignees" = "Todos los asignados";
 "Reset Filters" = "Restablecer filtros";
+"Total" = "Total";
 "To Do" = "Por hacer";
+"In Progress WIP" = "WIP en progreso";
+"Review WIP" = "WIP de revisión";
 "In Progress" = "En progreso";
 "Review" = "Revisión";
 "Done" = "Hecho";

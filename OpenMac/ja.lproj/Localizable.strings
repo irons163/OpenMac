@@ -17,7 +17,10 @@
 "Assignee" = "担当者";
 "All Assignees" = "すべての担当者";
 "Reset Filters" = "フィルターをリセット";
+"Total" = "合計";
 "To Do" = "未着手";
+"In Progress WIP" = "進行中 WIP";
+"Review WIP" = "レビュー WIP";
 "In Progress" = "進行中";
 "Review" = "レビュー";
 "Done" = "完了";

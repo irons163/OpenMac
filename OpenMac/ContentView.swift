@@ -106,26 +106,26 @@ struct ContentView: View {
                             : Color.clear
                     )
                     .contextMenu {
-                        Button("Edit Agent") {
+                        Button(L10n.string("Edit Agent")) {
                             openEditAgent(agent)
                         }
-                        Button("Unassign Todo Tasks") {
+                        Button(L10n.string("Unassign Todo Tasks")) {
                             unassignTodoTasks(for: agent.id)
                         }
                         .disabled(!hasAssignedTodoTasks(for: agent.id))
-                        Button("Remove Agent", role: .destructive) {
+                        Button(L10n.string("Remove Agent"), role: .destructive) {
                             removeAgent(agent.id)
                         }
                     }
                 }
                 .onDelete(perform: deleteAgents)
             }
-            .navigationTitle("AI Agents")
+            .navigationTitle(L10n.string("AI Agents"))
         } detail: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("AI Agent Kanban Dispatch")
+                        Text(L10n.string("AI Agent Kanban Dispatch"))
                             .font(.title2.weight(.semibold))
                         Text(L10n.format("Board: %@", viewModel.selectedBoardName))
                             .font(.caption)
@@ -158,11 +158,11 @@ struct ContentView: View {
                 )
 
                 HStack(spacing: 12) {
-                    TextField("Search tasks", text: $taskSearchQuery)
+                    TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 300)
 
-                    Picker("Assignee", selection: $selectedAssigneeFilterKey) {
+                    Picker(L10n.string("Assignee"), selection: $selectedAssigneeFilterKey) {
                         ForEach(assigneeFilterOptions, id: \.key) { option in
                             Text(option.label).tag(option.key)
                         }
@@ -173,7 +173,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
 
-                    Button("Reset Filters") {
+                    Button(L10n.string("Reset Filters")) {
                         resetTaskFilters()
                     }
                     .buttonStyle(.bordered)
@@ -1560,12 +1560,12 @@ private struct AgentRowView: View {
                         : BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
                 )
             if isOverloaded {
-                Text("Overloaded")
+                Text(L10n.string("Overloaded"))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
             }
             if isRunning {
-                Text("Live: Running")
+                Text(L10n.string("Live: Running"))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
             } else if let recentEventMessage, !recentEventMessage.isEmpty {
@@ -1597,18 +1597,18 @@ private struct BoardHealthSummaryView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                SummaryBadge(title: "Total", value: "\(totalTasks)", accent: .blue)
-                SummaryBadge(title: "To Do", value: "\(todoTasks)", accent: .indigo)
-                SummaryBadge(title: "Unassigned", value: "\(unassignedTodoTasks)", accent: .amber)
-                SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", accent: overloadedAgents > 0 ? .red : .green)
+                SummaryBadge(title: L10n.string("Total"), value: "\(totalTasks)", accent: .blue)
+                SummaryBadge(title: L10n.string("To Do"), value: "\(todoTasks)", accent: .indigo)
+                SummaryBadge(title: L10n.string("Unassigned"), value: "\(unassignedTodoTasks)", accent: .amber)
+                SummaryBadge(title: L10n.string("Overloaded"), value: "\(overloadedAgents)", accent: overloadedAgents > 0 ? .red : .green)
                 SummaryBadge(
-                    title: "Health",
+                    title: L10n.string("Health"),
                     value: L10n.format("%d %@", healthScore, L10n.string(healthLabel)),
                     accent: healthScoreAccent,
                     helpText: healthBreakdownText
                 )
-                SummaryBadge(title: "InProg WIP", value: "\(inProgressPressure)%", accent: inProgressPressure >= 100 ? .red : .teal)
-                SummaryBadge(title: "Review WIP", value: "\(reviewPressure)%", accent: reviewPressure >= 100 ? .red : .mint)
+                SummaryBadge(title: L10n.string("In Progress WIP"), value: "\(inProgressPressure)%", accent: inProgressPressure >= 100 ? .red : .teal)
+                SummaryBadge(title: L10n.string("Review WIP"), value: "\(reviewPressure)%", accent: reviewPressure >= 100 ? .red : .mint)
                 Spacer(minLength: 0)
             }
         }
@@ -1634,12 +1634,12 @@ private struct BoardHealthRecommendationsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if recommendations.isEmpty {
-                Text("Board health looks stable. No immediate actions recommended.")
+                Text(L10n.string("Board health looks stable. No immediate actions recommended."))
                     .font(.caption)
                     .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
             } else {
                 HStack {
-                    Text("Suggested Actions")
+                    Text(L10n.string("Suggested Actions"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     Spacer()

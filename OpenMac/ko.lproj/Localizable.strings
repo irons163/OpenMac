@@ -17,7 +17,10 @@
 "Assignee" = "담당자";
 "All Assignees" = "모든 담당자";
 "Reset Filters" = "필터 재설정";
+"Total" = "전체";
 "To Do" = "할 일";
+"In Progress WIP" = "진행 중 WIP";
+"Review WIP" = "검토 WIP";
 "In Progress" = "진행 중";
 "Review" = "검토";
 "Done" = "완료";
