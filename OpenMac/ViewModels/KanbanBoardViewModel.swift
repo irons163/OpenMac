@@ -657,6 +657,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         var arguments = [
             "exec",
             "--skip-git-repo-check",
+            "--json",
             "--output-last-message", outputURL.path
         ]
         if let sandboxMode {
@@ -693,15 +694,72 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         process.standardOutput = outputPipe
         process.standardError = outputPipe
         let outputHandle = outputPipe.fileHandleForReading
-        var streamedChunks: [String] = []
+        let streamStateQueue = DispatchQueue(label: "openmac.codex.stream-state")
+        let heartbeatQueue = DispatchQueue(label: "openmac.codex.heartbeat")
+        var bufferedOutput = ""
+        var rawOutputLines: [String] = []
+        var lastProgressDate = Date()
+
+        func appendStreamChunk(_ chunk: String) {
+            guard !chunk.isEmpty else { return }
+
+            var completedLines: [String] = []
+            streamStateQueue.sync {
+                bufferedOutput += chunk
+                while let newlineRange = bufferedOutput.range(of: "\n") {
+                    let line = String(bufferedOutput[..<newlineRange.lowerBound])
+                    completedLines.append(line)
+                    bufferedOutput.removeSubrange(bufferedOutput.startIndex ... newlineRange.lowerBound)
+                }
+            }
+
+            for line in completedLines {
+                handleStreamLine(line)
+            }
+        }
+
+        func handleStreamLine(_ line: String) {
+            let normalized = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { return }
+
+            streamStateQueue.sync {
+                rawOutputLines.append(normalized)
+            }
+
+            if let progressUpdate = codexProgressUpdate(from: normalized) {
+                onProgress(progressUpdate)
+                streamStateQueue.sync {
+                    lastProgressDate = Date()
+                }
+            }
+        }
+
+        let heartbeatInterval: TimeInterval = 8
+        let heartbeatTimer = DispatchSource.makeTimerSource(queue: heartbeatQueue)
+        heartbeatTimer.schedule(
+            deadline: .now() + heartbeatInterval,
+            repeating: heartbeatInterval
+        )
+        heartbeatTimer.setEventHandler {
+            let elapsedSeconds: Int = streamStateQueue.sync {
+                Int(Date().timeIntervalSince(lastProgressDate).rounded())
+            }
+            guard elapsedSeconds >= Int(heartbeatInterval) else { return }
+            onProgress("Codex still running... (\(elapsedSeconds)s)")
+            streamStateQueue.sync {
+                lastProgressDate = Date()
+            }
+        }
+        heartbeatTimer.resume()
+        defer {
+            heartbeatTimer.cancel()
+        }
+
         outputHandle.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             guard let chunk = String(data: data, encoding: .utf8) else { return }
-            let trimmedChunk = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedChunk.isEmpty else { return }
-            streamedChunks.append(trimmedChunk)
-            onProgress(trimmedChunk)
+            appendStreamChunk(chunk)
         }
 
         try process.run()
@@ -709,14 +767,22 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         outputHandle.readabilityHandler = nil
 
         let trailingOutputData = outputHandle.readDataToEndOfFile()
-        let trailingOutput = String(data: trailingOutputData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var rawOutputParts = streamedChunks
-        if !trailingOutput.isEmpty {
-            rawOutputParts.append(trailingOutput)
+        if let trailingOutput = String(data: trailingOutputData, encoding: .utf8), !trailingOutput.isEmpty {
+            appendStreamChunk(trailingOutput)
         }
-        let rawOutput = rawOutputParts
-            .joined(separator: "\n")
+
+        let bufferedRemainder = streamStateQueue.sync { () -> String in
+            let remainder = bufferedOutput
+            bufferedOutput = ""
+            return remainder
+        }
+        if !bufferedRemainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            handleStreamLine(bufferedRemainder)
+        }
+
+        let rawOutput = streamStateQueue.sync {
+            rawOutputLines.joined(separator: "\n")
+        }
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard process.terminationStatus == 0 else {
@@ -734,6 +800,84 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
 
         throw ExecutorError.emptyResponse
+    }
+
+    static func codexProgressUpdate(from rawLine: String) -> String? {
+        let normalized = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+
+        guard normalized.first == "{",
+              let data = normalized.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            return normalized
+        }
+
+        guard let item = json["item"] as? [String: Any] else {
+            return nil
+        }
+
+        switch type {
+        case "item.started":
+            guard let itemType = item["type"] as? String else { return nil }
+            if itemType == "command_execution",
+               let command = item["command"] as? String,
+               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Running command: \(command)"
+            }
+            return nil
+
+        case "item.completed":
+            guard let itemType = item["type"] as? String else { return nil }
+            if itemType == "agent_message",
+               let text = item["text"] as? String {
+                let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return message.isEmpty ? nil : message
+            }
+
+            if itemType == "command_execution" {
+                var progressParts: [String] = []
+                if let command = item["command"] as? String,
+                   !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    progressParts.append("Command completed: \(command)")
+                }
+                if let output = item["aggregated_output"] as? String,
+                   !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    progressParts.append(summarizeCommandOutputForConsole(output))
+                }
+                return progressParts.isEmpty ? nil : progressParts.joined(separator: "\n")
+            }
+            return nil
+
+        default:
+            return nil
+        }
+    }
+
+    static func summarizeCommandOutputForConsole(
+        _ output: String,
+        maxLines: Int = 8,
+        maxCharacters: Int = 1200
+    ) -> String {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let lines = trimmed
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        let limitedLines = Array(lines.prefix(maxLines))
+        var summarized = limitedLines.joined(separator: "\n")
+
+        if lines.count > maxLines {
+            summarized += "\n..."
+        }
+
+        if summarized.count > maxCharacters {
+            let endIndex = summarized.index(summarized.startIndex, offsetBy: maxCharacters)
+            summarized = String(summarized[..<endIndex]) + "..."
+        }
+
+        return summarized
     }
 
     private static func defaultCodexBridgePreflight() throws {

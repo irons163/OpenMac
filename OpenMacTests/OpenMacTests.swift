@@ -516,6 +516,82 @@ struct AgentTaskExecutorTests {
         #expect(seenRequests.first?.model == "gpt-4.1-mini")
         #expect(seenRequests.last?.model == "")
     }
+
+    @Test("codex progress parser reports command start events")
+    func codexProgressParsesCommandStartEvent() {
+        let line = #"{"type":"item.started","item":{"type":"command_execution","command":"ls -la"}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Running command: ls -la")
+    }
+
+    @Test("codex progress parser reports agent message completion events")
+    func codexProgressParsesAgentMessageEvent() {
+        let line = #"{"type":"item.completed","item":{"type":"agent_message","text":"Implemented task and added tests."}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Implemented task and added tests.")
+    }
+
+    @Test("codex progress parser reports command completion with summarized output")
+    func codexProgressParsesCommandCompletionEvent() {
+        let line = #"{"type":"item.completed","item":{"type":"command_execution","command":"swift test","aggregated_output":"Build started\nBuild finished\nAll tests passed"}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update?.contains("Command completed: swift test") == true)
+        #expect(update?.contains("Build started") == true)
+        #expect(update?.contains("All tests passed") == true)
+    }
+
+    @Test("codex progress parser ignores non-item json events")
+    func codexProgressIgnoresNonItemEvents() {
+        let line = #"{"type":"turn.started","turn_id":"abc"}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == nil)
+    }
+
+    @Test("codex progress parser falls back to raw text for non-json lines")
+    func codexProgressReturnsRawTextForNonJSON() {
+        let line = "ERROR: Reconnecting... 2/5"
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == line)
+    }
+
+    @Test("codex output summary limits line count and appends ellipsis")
+    func codexOutputSummaryTruncatesLines() {
+        let output = """
+        line1
+        line2
+        line3
+        line4
+        """
+
+        let summary = DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+            output,
+            maxLines: 3,
+            maxCharacters: 1_000
+        )
+
+        #expect(summary == "line1\nline2\nline3\n...")
+    }
+
+    @Test("codex output summary limits character count")
+    func codexOutputSummaryTruncatesCharacters() {
+        let summary = DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+            "123456789",
+            maxLines: 8,
+            maxCharacters: 5
+        )
+
+        #expect(summary == "12345...")
+    }
 }
 
 struct AppearanceModeTests {
