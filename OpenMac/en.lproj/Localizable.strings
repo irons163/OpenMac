@@ -45,6 +45,7 @@
 "Rename" = "Rename";
 "Close" = "Close";
 "Copy" = "Copy";
+"Copy All" = "Copy All";
 "Details" = "Details";
 "Run Agent" = "Run Agent";
 "Retry Last Run" = "Retry Last Run";

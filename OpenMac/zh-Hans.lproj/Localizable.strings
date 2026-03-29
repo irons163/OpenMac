@@ -45,6 +45,7 @@
 "Rename" = "重命名";
 "Close" = "关闭";
 "Copy" = "复制";
+"Copy All" = "全部复制";
 "Details" = "详情";
 "Run Agent" = "运行代理";
 "Retry Last Run" = "重试上次运行";

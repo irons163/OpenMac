@@ -2280,6 +2280,11 @@ private struct AgentLiveConsoleView: View {
                             : BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
                     )
                 if !events.isEmpty {
+                    Button(L10n.string("Copy All")) {
+                        onCopy(allEventsText)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     Button(L10n.string("Clear"), action: onClear)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -2316,6 +2321,38 @@ private struct AgentLiveConsoleView: View {
             }
         }
     }
+
+    private var allEventsText: String {
+        events.map { event in
+            let header = "[\(statusLabel(for: event))] \(Self.eventDateFormatter.string(from: event.timestamp)) \(event.taskTitle)"
+            return [header, event.message, event.details]
+                .compactMap { value in
+                    guard let value else { return nil }
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
+                .joined(separator: "\n")
+        }
+        .joined(separator: "\n\n")
+    }
+
+    private func statusLabel(for event: AgentExecutionEvent) -> String {
+        switch event.status {
+        case .running:
+            return L10n.string("Running")
+        case .succeeded:
+            return L10n.string("Succeeded")
+        case .failed:
+            return L10n.string("Failed")
+        }
+    }
+
+    private static let eventDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }()
 }
 
 private struct AgentExecutionEventRow: View {

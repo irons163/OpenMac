@@ -45,6 +45,7 @@
 "Rename" = "Renombrar";
 "Close" = "Cerrar";
 "Copy" = "Copiar";
+"Copy All" = "Copiar todo";
 "Details" = "Detalles";
 "Run Agent" = "Ejecutar agente";
 "Retry Last Run" = "Reintentar última ejecución";

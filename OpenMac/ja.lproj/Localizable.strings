@@ -45,6 +45,7 @@
 "Rename" = "名前を変更";
 "Close" = "閉じる";
 "Copy" = "コピー";
+"Copy All" = "すべてコピー";
 "Details" = "詳細";
 "Run Agent" = "エージェントを実行";
 "Retry Last Run" = "前回実行を再試行";

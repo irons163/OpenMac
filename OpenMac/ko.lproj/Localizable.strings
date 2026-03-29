@@ -45,6 +45,7 @@
 "Rename" = "이름 바꾸기";
 "Close" = "닫기";
 "Copy" = "복사";
+"Copy All" = "모두 복사";
 "Details" = "상세";
 "Run Agent" = "에이전트 실행";
 "Retry Last Run" = "마지막 실행 재시도";
