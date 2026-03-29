@@ -797,16 +797,14 @@ struct ContentView: View {
     }
 
     private func createBoardFromSheet() {
-        _ = Self.handleBoolResult(viewModel.createBoard(name: newBoardName)) {
+        if viewModel.createBoard(name: newBoardName) {
             closeNewBoardSheet()
             handleBoardContextChanged()
         }
     }
 
     private func renameBoardFromSheet() {
-        _ = Self.handleBoolResult(
-            viewModel.renameBoard(viewModel.selectedBoardID, to: renameBoardName)
-        ) {
+        if viewModel.renameBoard(viewModel.selectedBoardID, to: renameBoardName) {
             closeRenameBoardSheet()
         }
     }
@@ -879,18 +877,13 @@ struct ContentView: View {
     }
 
     private func applyTaskEdits() {
-        _ = Self.applyEditableChange(
-            editingID: editingTaskID,
-            apply: { taskID in
-                Self.applyTaskEdits(
-                    viewModel: viewModel,
-                    taskID: taskID,
-                    title: editTaskTitle,
-                    details: editTaskDetails,
-                    requiredSkillsText: editTaskSkills,
-                    storyPoints: editTaskPoints
-                )
-            }
+        if Self.applyTaskEdits(
+            viewModel: viewModel,
+            editingTaskID: editingTaskID,
+            title: editTaskTitle,
+            details: editTaskDetails,
+            requiredSkillsText: editTaskSkills,
+            storyPoints: editTaskPoints
         ) {
             refreshTriageSelections()
             closeEditTaskSheet()
@@ -898,14 +891,12 @@ struct ContentView: View {
     }
 
     private func createTaskFromSheet(autoAssign: Bool) {
-        _ = Self.handleBoolResult(
-            viewModel.addTask(
-                title: newTaskTitle,
-                details: newTaskDetails,
-                requiredSkillsText: newTaskSkills,
-                storyPoints: newTaskPoints,
-                autoAssign: autoAssign
-            )
+        if viewModel.addTask(
+            title: newTaskTitle,
+            details: newTaskDetails,
+            requiredSkillsText: newTaskSkills,
+            storyPoints: newTaskPoints,
+            autoAssign: autoAssign
         ) {
             refreshTriageSelections()
             resetDraftAndClose()
@@ -913,13 +904,13 @@ struct ContentView: View {
     }
 
     private func archiveDoneTasks() {
-        _ = Self.handlePositiveCountResult(viewModel.clearDoneTasks()) {
+        if viewModel.clearDoneTasks() > 0 {
             refreshTriageSelections()
         }
     }
 
     private func rebalanceTodoAssignments() {
-        _ = Self.handlePositiveCountResult(viewModel.rebalanceTodoAssignments()) {
+        if viewModel.rebalanceTodoAssignments() > 0 {
             refreshTriageSelections()
         }
     }
@@ -1109,7 +1100,7 @@ struct ContentView: View {
                 viewModel.manuallyAssignTask(taskID, to: agentID)
             }
         )
-        _ = Self.handleBoolResult(assigned) {
+        if assigned {
             triageSelectionByTaskID.removeValue(forKey: taskID)
             refreshTriageSelections()
             if viewModel.triageCandidates().isEmpty {
@@ -1146,7 +1137,7 @@ struct ContentView: View {
     }
 
     private func unassignTodoTasks(for agentID: UUID) {
-        _ = Self.handlePositiveCountResult(viewModel.unassignTodoTasks(for: agentID)) {
+        if viewModel.unassignTodoTasks(for: agentID) > 0 {
             refreshTriageSelections()
         }
     }
@@ -1187,7 +1178,7 @@ struct ContentView: View {
     }
 
     private func autoAssignTask(_ taskID: UUID) {
-        _ = Self.handleBoolResult(viewModel.autoAssignTask(taskID)) {
+        if viewModel.autoAssignTask(taskID) {
             refreshTriageSelections()
         }
     }
@@ -1216,7 +1207,7 @@ struct ContentView: View {
     }
 
     private func reassignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
-        _ = Self.handleBoolResult(viewModel.reassignTask(taskID, to: agentID)) {
+        if viewModel.reassignTask(taskID, to: agentID) {
             refreshTriageSelections()
         }
     }
@@ -1252,27 +1243,23 @@ struct ContentView: View {
     }
 
     private func applyAgentEdits() {
-        _ = Self.applyEditableChange(
-            editingID: editingAgentID,
-            apply: { agentID in
-                let runtimeProfile = buildRuntimeProfile(
-                    isEnabled: editAgentRuntimeEnabled,
-                    provider: editAgentRuntimeProvider,
-                    model: editAgentRuntimeModel,
-                    endpoint: editAgentRuntimeEndpoint,
-                    toolsText: editAgentRuntimeTools,
-                    openAIAuthMode: editAgentOpenAIAuthMode,
-                    codexProfile: editAgentCodexProfile
-                )
-                return Self.applyAgentEdits(
-                    viewModel: viewModel,
-                    agentID: agentID,
-                    name: editAgentName,
-                    skillsText: editAgentSkills,
-                    maxConcurrentTasks: editAgentCapacity,
-                    runtimeProfile: runtimeProfile
-                )
-            }
+        let runtimeProfile = buildRuntimeProfile(
+            isEnabled: editAgentRuntimeEnabled,
+            provider: editAgentRuntimeProvider,
+            model: editAgentRuntimeModel,
+            endpoint: editAgentRuntimeEndpoint,
+            toolsText: editAgentRuntimeTools,
+            openAIAuthMode: editAgentOpenAIAuthMode,
+            codexProfile: editAgentCodexProfile
+        )
+
+        if Self.applyAgentEdits(
+            viewModel: viewModel,
+            editingAgentID: editingAgentID,
+            name: editAgentName,
+            skillsText: editAgentSkills,
+            maxConcurrentTasks: editAgentCapacity,
+            runtimeProfile: runtimeProfile
         ) {
             refreshTriageSelections()
             closeEditAgentSheet()
@@ -1633,6 +1620,44 @@ struct ContentView: View {
     ) -> Bool {
         guard let selectedAgentID else { return false }
         return assigner(taskID, selectedAgentID)
+    }
+
+    fileprivate static func applyTaskEdits(
+        viewModel: KanbanBoardViewModel,
+        editingTaskID: UUID?,
+        title: String,
+        details: String,
+        requiredSkillsText: String,
+        storyPoints: Int
+    ) -> Bool {
+        guard let editingTaskID else { return false }
+        return applyTaskEdits(
+            viewModel: viewModel,
+            taskID: editingTaskID,
+            title: title,
+            details: details,
+            requiredSkillsText: requiredSkillsText,
+            storyPoints: storyPoints
+        )
+    }
+
+    fileprivate static func applyAgentEdits(
+        viewModel: KanbanBoardViewModel,
+        editingAgentID: UUID?,
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int,
+        runtimeProfile: AgentRuntimeProfile?
+    ) -> Bool {
+        guard let editingAgentID else { return false }
+        return applyAgentEdits(
+            viewModel: viewModel,
+            agentID: editingAgentID,
+            name: name,
+            skillsText: skillsText,
+            maxConcurrentTasks: maxConcurrentTasks,
+            runtimeProfile: runtimeProfile
+        )
     }
 
     fileprivate static func postAutoAssign(
