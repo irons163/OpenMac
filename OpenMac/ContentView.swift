@@ -3634,9 +3634,14 @@ private extension ContentView {
         hit { view.resetDraftAndClose() }
         hit { view.copyToPasteboard("coverage") }
         hit { view.openExecutionDetails(todoAssigned) }
+        hit { view.applyTaskEdits() }
         hit {
             view.openEditTask(todoAssigned)
             view.editingTaskID = todoAssigned.id
+        }
+        hit {
+            view.editTaskTitle = " "
+            view.applyTaskEdits()
         }
         hit {
             view.editTaskTitle = "Assigned Task Updated"
@@ -3660,6 +3665,7 @@ private extension ContentView {
         }
         hit { view.openRenameBoardSheet() }
         hit { view.closeRenameBoardSheet() }
+        hit { view.createBoardFromSheet() }
         hit {
             view.renameBoardName = "Coverage Board Renamed"
             view.renameBoardFromSheet()
@@ -3668,6 +3674,7 @@ private extension ContentView {
             view.renameBoardName = viewModel.selectedBoardName
             view.renameBoardFromSheet()
         }
+        hit { view.renameBoardFromSheet() }
         hit { view.duplicateSelectedBoard() }
         hit { view.removeSelectedBoard() }
 
@@ -3745,6 +3752,11 @@ private extension ContentView {
                 view.assignManually(taskID: candidate.id)
             }
         }
+        hit {
+            if let assignedTaskID = viewModel.tasks.first(where: { $0.assignedAgentID != nil })?.id {
+                view.assignManually(taskID: assignedTaskID)
+            }
+        }
         hit { view.assignAllManually() }
         hit { view.refreshTriageSelections() }
 
@@ -3758,12 +3770,19 @@ private extension ContentView {
                 view.unassignTodoTasks(for: firstAgent.id)
             }
         }
+        hit {
+            if let firstAgent = viewModel.agents.first {
+                view.unassignTodoTasks(for: firstAgent.id)
+            }
+        }
 
         hit {
             if let task = viewModel.tasks.first {
                 view.duplicateTask(task.id)
                 view.autoAssignTask(task.id)
                 view.unassignTask(task.id)
+                view.autoAssignTask(task.id)
+                view.autoAssignTask(task.id)
             }
         }
         hit {
@@ -3782,17 +3801,29 @@ private extension ContentView {
         hit {
             if let task = viewModel.tasks.first,
                let firstAgent = viewModel.agents.first {
+                _ = viewModel.addAgent(
+                    name: "Coverage Reassign",
+                    skillsText: "swiftui",
+                    maxConcurrentTasks: 3,
+                    runtimeProfile: nil
+                )
                 view.assignTaskToAgent(task.id, firstAgent.id)
                 view.reassignTaskToAgent(task.id, firstAgent.id)
+                if let otherAgent = viewModel.agents.first(where: { $0.id != firstAgent.id }) {
+                    view.reassignTaskToAgent(task.id, otherAgent.id)
+                }
                 view.runTaskExecution(task.id)
                 view.retryTaskExecution(task.id)
                 view.removeTask(task.id)
             }
         }
+        hit { view.applyAgentEdits() }
         hit {
             if let firstAgent = viewModel.agents.first {
                 view.openEditAgent(firstAgent)
                 view.editingAgentID = firstAgent.id
+                view.editAgentName = " "
+                view.applyAgentEdits()
                 view.editAgentName = "\(firstAgent.name) Updated"
                 view.editAgentSkills = "swiftui"
                 view.editAgentCapacity = firstAgent.maxConcurrentTasks
@@ -4175,6 +4206,24 @@ enum ContentViewTestHooks {
         )
     }
 
+    static func applyTaskEdits(
+        viewModel: KanbanBoardViewModel,
+        editingTaskID: UUID?,
+        title: String,
+        details: String,
+        requiredSkillsText: String,
+        storyPoints: Int
+    ) -> Bool {
+        ContentView.applyTaskEdits(
+            viewModel: viewModel,
+            editingTaskID: editingTaskID,
+            title: title,
+            details: details,
+            requiredSkillsText: requiredSkillsText,
+            storyPoints: storyPoints
+        )
+    }
+
     static func applyAgentEdits(
         viewModel: KanbanBoardViewModel,
         agentID: UUID,
@@ -4186,6 +4235,24 @@ enum ContentViewTestHooks {
         ContentView.applyAgentEdits(
             viewModel: viewModel,
             agentID: agentID,
+            name: name,
+            skillsText: skillsText,
+            maxConcurrentTasks: maxConcurrentTasks,
+            runtimeProfile: runtimeProfile
+        )
+    }
+
+    static func applyAgentEdits(
+        viewModel: KanbanBoardViewModel,
+        editingAgentID: UUID?,
+        name: String,
+        skillsText: String,
+        maxConcurrentTasks: Int,
+        runtimeProfile: AgentRuntimeProfile?
+    ) -> Bool {
+        ContentView.applyAgentEdits(
+            viewModel: viewModel,
+            editingAgentID: editingAgentID,
             name: name,
             skillsText: skillsText,
             maxConcurrentTasks: maxConcurrentTasks,

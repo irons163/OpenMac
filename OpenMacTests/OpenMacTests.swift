@@ -3355,6 +3355,40 @@ struct ContentViewLogicTests {
         #expect(!rejected)
     }
 
+    @Test("task edit helper with optional editing id covers nil and valid id paths")
+    func applyTaskEditsOptionalIDCoverage() {
+        let task = WorkTask(
+            title: "Optional Original",
+            details: "details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let nilID = ContentViewTestHooks.applyTaskEdits(
+            viewModel: viewModel,
+            editingTaskID: nil,
+            title: "Updated",
+            details: "details",
+            requiredSkillsText: "",
+            storyPoints: 2
+        )
+        #expect(!nilID)
+
+        let valid = ContentViewTestHooks.applyTaskEdits(
+            viewModel: viewModel,
+            editingTaskID: task.id,
+            title: "Optional Updated",
+            details: "updated",
+            requiredSkillsText: "swift",
+            storyPoints: 3
+        )
+        #expect(valid)
+        #expect(viewModel.tasks.first?.title == "Optional Updated")
+    }
+
     @Test("agent edit helper applies profile updates and rejects empty name")
     func applyAgentEditsHelperCoverage() {
         let agent = AgentProfile(
@@ -3386,6 +3420,38 @@ struct ContentViewLogicTests {
             runtimeProfile: nil
         )
         #expect(!rejected)
+    }
+
+    @Test("agent edit helper with optional editing id covers nil and valid id paths")
+    func applyAgentEditsOptionalIDCoverage() {
+        let agent = AgentProfile(
+            name: "Optional Agent",
+            skills: ["swiftui"],
+            maxConcurrentTasks: 2
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent])
+        let runtimeProfile = AgentRuntimeProfile(provider: .localMock, model: "local", openAIAuthMode: .apiKey)
+
+        let nilID = ContentViewTestHooks.applyAgentEdits(
+            viewModel: viewModel,
+            editingAgentID: nil,
+            name: "Updated",
+            skillsText: "swift",
+            maxConcurrentTasks: 3,
+            runtimeProfile: runtimeProfile
+        )
+        #expect(!nilID)
+
+        let valid = ContentViewTestHooks.applyAgentEdits(
+            viewModel: viewModel,
+            editingAgentID: agent.id,
+            name: "Optional Agent Updated",
+            skillsText: "swiftui, qa",
+            maxConcurrentTasks: 3,
+            runtimeProfile: runtimeProfile
+        )
+        #expect(valid)
+        #expect(viewModel.agents.first?.name == "Optional Agent Updated")
     }
 
     @Test("save panel helper handles cancel, missing URL, and exporter result")
