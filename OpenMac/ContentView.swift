@@ -1217,16 +1217,17 @@ struct ContentView: View {
     }
 
     private func assignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
-        let assigned = viewModel.manuallyAssignTask(taskID, to: agentID)
-        if assigned {
-            refreshTriageSelections()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.manuallyAssignTask(taskID, to: agentID),
+            onChanged: refreshTriageSelections
+        )
     }
 
     private func reassignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
-        if viewModel.reassignTask(taskID, to: agentID) {
-            refreshTriageSelections()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.reassignTask(taskID, to: agentID),
+            onChanged: refreshTriageSelections
+        )
     }
 
     private func openEditAgent(_ agent: AgentProfile) {
