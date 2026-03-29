@@ -1255,17 +1255,10 @@ struct ContentView: View {
     }
 
     private var selectedAssigneeFilter: TaskAssigneeFilter {
-        if selectedAssigneeFilterKey == "all" {
-            return .all
-        }
-        if selectedAssigneeFilterKey == "unassigned" {
-            return .unassigned
-        }
-        guard let id = UUID(uuidString: selectedAssigneeFilterKey),
-              viewModel.agents.contains(where: { $0.id == id }) else {
-            return .all
-        }
-        return .assigned(id)
+        Self.resolveSelectedAssigneeFilter(
+            selectedKey: selectedAssigneeFilterKey,
+            agents: viewModel.agents
+        )
     }
 
     private func filteredBoardTasks(in status: KanbanStatus) -> [WorkTask] {
@@ -1383,18 +1376,14 @@ struct ContentView: View {
     }
 
     private var canAutoAssignFromToolbar: Bool {
-        viewModel.unassignedTodoTaskCount > 0 && !viewModel.agents.isEmpty
+        Self.canAutoAssignFromToolbar(
+            unassignedTodoTaskCount: viewModel.unassignedTodoTaskCount,
+            hasAgents: !viewModel.agents.isEmpty
+        )
     }
 
     private var canBatchRunAssignedTasks: Bool {
-        guard !isBatchRunning else { return false }
-        return viewModel.tasks.contains { task in
-            guard (task.status == .todo || task.status == .inProgress),
-                  task.assignedAgentID != nil else {
-                return false
-            }
-            return !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        Self.canBatchRunAssignedTasks(tasks: viewModel.tasks, isBatchRunning: isBatchRunning)
     }
 
     private func runtimeSummary(for agent: AgentProfile) -> String {
@@ -1528,6 +1517,44 @@ struct ContentView: View {
             return L10n.string("System Default")
         }
         return L10n.string(language.displayNameKey)
+    }
+
+    private static func resolveSelectedAssigneeFilter(
+        selectedKey: String,
+        agents: [AgentProfile]
+    ) -> TaskAssigneeFilter {
+        if selectedKey == "all" {
+            return .all
+        }
+        if selectedKey == "unassigned" {
+            return .unassigned
+        }
+        guard let id = UUID(uuidString: selectedKey),
+              agents.contains(where: { $0.id == id }) else {
+            return .all
+        }
+        return .assigned(id)
+    }
+
+    private static func canAutoAssignFromToolbar(
+        unassignedTodoTaskCount: Int,
+        hasAgents: Bool
+    ) -> Bool {
+        unassignedTodoTaskCount > 0 && hasAgents
+    }
+
+    private static func canBatchRunAssignedTasks(
+        tasks: [WorkTask],
+        isBatchRunning: Bool
+    ) -> Bool {
+        guard !isBatchRunning else { return false }
+        return tasks.contains { task in
+            guard (task.status == .todo || task.status == .inProgress),
+                  task.assignedAgentID != nil else {
+                return false
+            }
+            return !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 }
 
@@ -3267,6 +3294,665 @@ private struct BoardMessageBanner: View {
             .foregroundStyle(BoardMessageColorPalette.color(for: severity, scheme: colorScheme))
     }
 }
+
+#if DEBUG
+private extension ExecutionDetailsSheet {
+    var testStatusLabel: String { statusLabel }
+}
+
+private extension AgentLiveConsoleView {
+    func testStatusLabel(for event: AgentExecutionEvent) -> String {
+        statusLabel(for: event)
+    }
+
+    var testAllEventsText: String { allEventsText }
+}
+
+private extension AgentExecutionEventRow {
+    var testStatusLabel: String { statusLabel }
+    var testCopyText: String { copyText }
+}
+
+private extension TaskCardView {
+    func testExecutionStatusLabel(for status: TaskExecutionStatus) -> String {
+        executionStatusLabel(for: status)
+    }
+}
+
+private extension BoardHealthSummaryView {
+    var testHealthScoreAccent: SummaryBadgeAccent { healthScoreAccent }
+}
+
+private extension BoardHealthRecommendationsView {
+    var testAutoFixRecommendationCount: Int { autoFixRecommendationCount }
+}
+
+private extension ContentView {
+    func testRuntimeSummary(for agent: AgentProfile) -> String {
+        runtimeSummary(for: agent)
+    }
+
+    func testBuildRuntimeProfile(
+        isEnabled: Bool,
+        provider: AgentRuntimeProvider,
+        model: String,
+        endpoint: String,
+        toolsText: String,
+        openAIAuthMode: OpenAICompatibleAuthMode,
+        codexProfile: String
+    ) -> AgentRuntimeProfile? {
+        buildRuntimeProfile(
+            isEnabled: isEnabled,
+            provider: provider,
+            model: model,
+            endpoint: endpoint,
+            toolsText: toolsText,
+            openAIAuthMode: openAIAuthMode,
+            codexProfile: codexProfile
+        )
+    }
+
+    static func testResolveSelectedAssigneeFilter(
+        selectedKey: String,
+        agents: [AgentProfile]
+    ) -> TaskAssigneeFilter {
+        resolveSelectedAssigneeFilter(selectedKey: selectedKey, agents: agents)
+    }
+
+    static func testCanAutoAssignFromToolbar(tasks: [WorkTask], agents: [AgentProfile]) -> Bool {
+        let unassignedTodoTaskCount = tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count
+        return canAutoAssignFromToolbar(
+            unassignedTodoTaskCount: unassignedTodoTaskCount,
+            hasAgents: !agents.isEmpty
+        )
+    }
+
+    static func testCanBatchRunAssignedTasks(
+        tasks: [WorkTask],
+        isBatchRunning: Bool
+    ) -> Bool {
+        canBatchRunAssignedTasks(tasks: tasks, isBatchRunning: isBatchRunning)
+    }
+}
+
+enum ContentViewTestHooks {
+    static func normalizedExecutionSummary(_ summary: String) -> String {
+        normalizedExecutionSummaryForDisplay(summary)
+    }
+
+    static func executionDetailsStatusLabel(for status: TaskExecutionStatus) -> String {
+        let details = ExecutionDetailsPresentation(
+            taskTitle: "Task",
+            assigneeName: "Agent",
+            executionRecord: TaskExecutionRecord(status: status)
+        )
+        let sheet = ExecutionDetailsSheet(details: details, onCopy: { _ in }, onClose: {})
+        return sheet.testStatusLabel
+    }
+
+    static func agentLiveConsoleStatusLabel(for status: TaskExecutionStatus) -> String {
+        let event = AgentExecutionEvent(
+            agentID: UUID(),
+            taskID: UUID(),
+            taskTitle: "Task",
+            status: status,
+            message: "Message"
+        )
+        let view = AgentLiveConsoleView(
+            agentName: "Agent",
+            isRunning: false,
+            events: [event],
+            onCopy: { _ in },
+            onClear: {}
+        )
+        return view.testStatusLabel(for: event)
+    }
+
+    static func agentLiveConsoleAllEventsText(_ events: [AgentExecutionEvent]) -> String {
+        let view = AgentLiveConsoleView(
+            agentName: "Agent",
+            isRunning: false,
+            events: events,
+            onCopy: { _ in },
+            onClear: {}
+        )
+        return view.testAllEventsText
+    }
+
+    static func agentExecutionEventRowStatusLabel(for status: TaskExecutionStatus) -> String {
+        let event = AgentExecutionEvent(
+            agentID: UUID(),
+            taskID: UUID(),
+            taskTitle: "Task",
+            status: status,
+            message: "Message"
+        )
+        let row = AgentExecutionEventRow(event: event, onCopy: { _ in })
+        return row.testStatusLabel
+    }
+
+    static func agentExecutionEventRowCopyText(
+        status: TaskExecutionStatus,
+        message: String,
+        details: String?
+    ) -> String {
+        let event = AgentExecutionEvent(
+            agentID: UUID(),
+            taskID: UUID(),
+            taskTitle: "Task",
+            status: status,
+            message: message,
+            details: details
+        )
+        let row = AgentExecutionEventRow(event: event, onCopy: { _ in })
+        return row.testCopyText
+    }
+
+    static func taskCardExecutionStatusLabel(for status: TaskExecutionStatus) -> String {
+        let task = WorkTask(
+            title: "Task",
+            details: "Details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let card = TaskCardView(
+            task: task,
+            assigneeName: "Agent",
+            assignmentReason: nil,
+            canMoveBackward: false,
+            canMoveForward: true,
+            canUnassign: false,
+            canAutoAssign: true,
+            canRunAgent: false,
+            canRetryAgent: false,
+            executionRecord: nil,
+            manualAssignableAgents: [],
+            reassignableAgents: [],
+            moveToBoardTargets: [],
+            onEdit: {},
+            onAutoAssign: {},
+            onRunAgent: {},
+            onRetryAgent: {},
+            onManualAssign: { _ in },
+            onReassign: { _ in },
+            onUnassign: {},
+            onDuplicate: {},
+            onDelete: {},
+            onMoveToBoard: { _ in },
+            onCopyToBoard: { _ in },
+            onShowExecutionDetails: {},
+            onMoveBackward: {},
+            onMoveForward: {}
+        )
+        return card.testExecutionStatusLabel(for: status)
+    }
+
+    static func healthScoreAccent(for score: Int) -> SummaryBadgeAccent {
+        let summary = BoardHealthSummaryView(
+            totalTasks: 1,
+            todoTasks: 1,
+            unassignedTodoTasks: 0,
+            overloadedAgents: 0,
+            healthScore: score,
+            healthLabel: "Excellent",
+            healthBreakdownText: "",
+            inProgressPressure: 0,
+            reviewPressure: 0
+        )
+        return summary.testHealthScoreAccent
+    }
+
+    static func autoFixRecommendationCount(for recommendations: [BoardHealthRecommendation]) -> Int {
+        let view = BoardHealthRecommendationsView(
+            recommendations: recommendations,
+            onAction: { _ in },
+            onApplyAll: {}
+        )
+        return view.testAutoFixRecommendationCount
+    }
+
+    static func runtimeSummary(runtimeProfile: AgentRuntimeProfile?) -> String {
+        let agent = AgentProfile(
+            name: "Agent",
+            skills: [],
+            maxConcurrentTasks: 1,
+            runtimeProfile: runtimeProfile
+        )
+        let view = ContentView(viewModel: KanbanBoardViewModel(tasks: [], agents: [agent]))
+        return view.testRuntimeSummary(for: agent)
+    }
+
+    static func buildRuntimeProfile(
+        isEnabled: Bool,
+        provider: AgentRuntimeProvider,
+        model: String,
+        endpoint: String,
+        toolsText: String,
+        openAIAuthMode: OpenAICompatibleAuthMode,
+        codexProfile: String
+    ) -> AgentRuntimeProfile? {
+        let view = ContentView(viewModel: KanbanBoardViewModel(tasks: [], agents: []))
+        return view.testBuildRuntimeProfile(
+            isEnabled: isEnabled,
+            provider: provider,
+            model: model,
+            endpoint: endpoint,
+            toolsText: toolsText,
+            openAIAuthMode: openAIAuthMode,
+            codexProfile: codexProfile
+        )
+    }
+
+    static func selectedAssigneeFilter(
+        selectedKey: String,
+        agents: [AgentProfile]
+    ) -> TaskAssigneeFilter {
+        ContentView.testResolveSelectedAssigneeFilter(selectedKey: selectedKey, agents: agents)
+    }
+
+    static func canAutoAssignFromToolbar(tasks: [WorkTask], agents: [AgentProfile]) -> Bool {
+        ContentView.testCanAutoAssignFromToolbar(tasks: tasks, agents: agents)
+    }
+
+    static func canBatchRunAssignedTasks(
+        tasks: [WorkTask],
+        isBatchRunning: Bool
+    ) -> Bool {
+        return ContentView.testCanBatchRunAssignedTasks(tasks: tasks, isBatchRunning: isBatchRunning)
+    }
+
+    @MainActor
+    static func renderSubviewBodiesForCoverage() -> Int {
+        var rendered = 0
+
+        func render<V: View>(_ view: V) {
+            _ = view.body
+            rendered += 1
+        }
+
+        let agentA = AgentProfile(name: "A", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let agentB = AgentProfile(name: "B", skills: ["swift", "qa"], maxConcurrentTasks: 2)
+
+        let successRecord = TaskExecutionRecord(
+            status: .succeeded,
+            runCount: 1,
+            lastStartedAt: Date(timeIntervalSince1970: 1_735_000_000),
+            lastFinishedAt: Date(timeIntervalSince1970: 1_735_000_030),
+            lastOutputSummary: "Summary: Completed successfully"
+        )
+        let failedRecord = TaskExecutionRecord(
+            status: .failed,
+            runCount: 2,
+            lastStartedAt: Date(timeIntervalSince1970: 1_735_000_060),
+            lastFinishedAt: Date(timeIntervalSince1970: 1_735_000_090),
+            lastError: "Execution failed",
+            lastDebugOutput: "stderr output"
+        )
+
+        let todoTask = WorkTask(
+            title: "Todo",
+            details: "Task details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agentA.id,
+            executionRecord: successRecord
+        )
+        let reviewTask = WorkTask(
+            title: "Review",
+            details: "Review details",
+            requiredSkills: [],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: agentB.id,
+            executionRecord: failedRecord
+        )
+
+        let boardTarget = KanbanBoardRecord(name: "Target Board")
+        let searchResult = GlobalTaskSearchResult(
+            taskID: todoTask.id,
+            taskTitle: todoTask.title,
+            taskDetails: todoTask.details,
+            status: todoTask.status,
+            boardID: boardTarget.id,
+            boardName: boardTarget.name,
+            assigneeName: "A"
+        )
+
+        let event = AgentExecutionEvent(
+            timestamp: Date(timeIntervalSince1970: 1_735_000_100),
+            agentID: agentA.id,
+            taskID: todoTask.id,
+            taskTitle: todoTask.title,
+            status: .running,
+            message: "Running command",
+            details: "Step 1/3"
+        )
+
+        render(AgentRowView(
+            name: "A",
+            skillsText: "swiftui",
+            runtimeText: "Runtime",
+            loadCount: 2,
+            maxLoad: 3,
+            loadPercent: 67,
+            loadProgress: 0.67,
+            isOverloaded: false,
+            isRunning: false,
+            recentEventMessage: "Last update",
+            isSelected: false
+        ))
+        render(AgentRowView(
+            name: "B",
+            skillsText: "qa",
+            runtimeText: "Runtime",
+            loadCount: 3,
+            maxLoad: 2,
+            loadPercent: 150,
+            loadProgress: 1.0,
+            isOverloaded: true,
+            isRunning: true,
+            recentEventMessage: nil,
+            isSelected: true
+        ))
+
+        render(BoardHealthSummaryView(
+            totalTasks: 2,
+            todoTasks: 1,
+            unassignedTodoTasks: 0,
+            overloadedAgents: 1,
+            healthScore: 72,
+            healthLabel: "Watch",
+            healthBreakdownText: "Needs attention",
+            inProgressPressure: 50,
+            reviewPressure: 100
+        ))
+        render(BoardHealthRecommendationsView(
+            recommendations: [],
+            onAction: { _ in },
+            onApplyAll: {}
+        ))
+        render(BoardHealthRecommendationsView(
+            recommendations: [
+                BoardHealthRecommendation(action: .autoAssignUnassignedTodo, title: "Auto Assign", detail: "Assign todo"),
+                BoardHealthRecommendation(action: .openManualTriage, title: "Manual Triage", detail: "Review assignments")
+            ],
+            onAction: { _ in },
+            onApplyAll: {}
+        ))
+
+        render(SummaryBadge(title: "Total", value: "2", accent: .blue, helpText: nil))
+        render(SummaryBadge(title: "Health", value: "72", accent: .amber, helpText: "Needs attention"))
+
+        render(KanbanColumnView(
+            status: .todo,
+            tasks: [],
+            wipLimit: nil,
+            assigneeName: { _ in "Unassigned" },
+            assignmentReason: { _ in nil },
+            moveBackward: { _ in },
+            moveForward: { _ in },
+            onEditTask: { _ in },
+            onDeleteTask: { _ in },
+            onDuplicateTask: { _ in },
+            onUnassignTask: { _ in },
+            onAutoAssignTask: { _ in },
+            onRunTaskExecution: { _ in },
+            onRetryTaskExecution: { _ in },
+            assignableAgents: { _ in [agentA] },
+            reassignableAgents: { _ in [agentB] },
+            onManualAssignTask: { _, _ in },
+            onReassignTask: { _, _ in },
+            moveToBoardTargets: [boardTarget],
+            onMoveTaskToBoard: { _, _ in },
+            onCopyTaskToBoard: { _, _ in },
+            onShowExecutionDetails: { _ in },
+            onDropTask: { _ in true }
+        ))
+        render(KanbanColumnView(
+            status: .review,
+            tasks: [reviewTask],
+            wipLimit: 2,
+            assigneeName: { _ in "B" },
+            assignmentReason: { _ in "skills[qa]" },
+            moveBackward: { _ in },
+            moveForward: { _ in },
+            onEditTask: { _ in },
+            onDeleteTask: { _ in },
+            onDuplicateTask: { _ in },
+            onUnassignTask: { _ in },
+            onAutoAssignTask: { _ in },
+            onRunTaskExecution: { _ in },
+            onRetryTaskExecution: { _ in },
+            assignableAgents: { _ in [agentA] },
+            reassignableAgents: { _ in [agentA] },
+            onManualAssignTask: { _, _ in },
+            onReassignTask: { _, _ in },
+            moveToBoardTargets: [boardTarget],
+            onMoveTaskToBoard: { _, _ in },
+            onCopyTaskToBoard: { _, _ in },
+            onShowExecutionDetails: { _ in },
+            onDropTask: { _ in true }
+        ))
+
+        render(TaskCardView(
+            task: todoTask,
+            assigneeName: "A",
+            assignmentReason: "skills[swiftui]",
+            canMoveBackward: false,
+            canMoveForward: true,
+            canUnassign: true,
+            canAutoAssign: false,
+            canRunAgent: true,
+            canRetryAgent: false,
+            executionRecord: successRecord,
+            manualAssignableAgents: [agentB],
+            reassignableAgents: [agentB],
+            moveToBoardTargets: [boardTarget],
+            onEdit: {},
+            onAutoAssign: {},
+            onRunAgent: {},
+            onRetryAgent: {},
+            onManualAssign: { _ in },
+            onReassign: { _ in },
+            onUnassign: {},
+            onDuplicate: {},
+            onDelete: {},
+            onMoveToBoard: { _ in },
+            onCopyToBoard: { _ in },
+            onShowExecutionDetails: {},
+            onMoveBackward: {},
+            onMoveForward: {}
+        ))
+        render(TaskCardView(
+            task: reviewTask,
+            assigneeName: "B",
+            assignmentReason: nil,
+            canMoveBackward: true,
+            canMoveForward: true,
+            canUnassign: true,
+            canAutoAssign: false,
+            canRunAgent: true,
+            canRetryAgent: true,
+            executionRecord: failedRecord,
+            manualAssignableAgents: [agentA],
+            reassignableAgents: [agentA],
+            moveToBoardTargets: [boardTarget],
+            onEdit: {},
+            onAutoAssign: {},
+            onRunAgent: {},
+            onRetryAgent: {},
+            onManualAssign: { _ in },
+            onReassign: { _ in },
+            onUnassign: {},
+            onDuplicate: {},
+            onDelete: {},
+            onMoveToBoard: { _ in },
+            onCopyToBoard: { _ in },
+            onShowExecutionDetails: {},
+            onMoveBackward: {},
+            onMoveForward: {}
+        ))
+
+        var emptyQuery = ""
+        var filledQuery = "todo"
+        render(GlobalTaskSearchSheet(
+            query: Binding(get: { emptyQuery }, set: { emptyQuery = $0 }),
+            results: [],
+            onOpenResult: { _ in },
+            onClose: {}
+        ))
+        render(GlobalTaskSearchSheet(
+            query: Binding(get: { filledQuery }, set: { filledQuery = $0 }),
+            results: [searchResult],
+            onOpenResult: { _ in },
+            onClose: {}
+        ))
+
+        var boardName = "New Board"
+        render(NewBoardSheet(
+            name: Binding(get: { boardName }, set: { boardName = $0 }),
+            boardMessage: "Board created",
+            boardMessageSeverity: .info,
+            onCancel: {},
+            onCreate: {}
+        ))
+        render(RenameBoardSheet(
+            name: Binding(get: { boardName }, set: { boardName = $0 }),
+            boardMessage: nil,
+            boardMessageSeverity: nil,
+            onCancel: {},
+            onRename: {}
+        ))
+
+        var taskTitle = "Task"
+        var taskDetails = "Details"
+        var taskSkills = "swiftui"
+        var taskPoints = 3
+        render(NewTaskSheet(
+            title: Binding(get: { taskTitle }, set: { taskTitle = $0 }),
+            details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
+            skills: Binding(get: { taskSkills }, set: { taskSkills = $0 }),
+            storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
+            boardMessage: nil,
+            boardMessageSeverity: nil,
+            onCancel: {},
+            onCreate: {},
+            onCreateAutoAssign: {}
+        ))
+        render(EditTaskSheet(
+            title: Binding(get: { taskTitle }, set: { taskTitle = $0 }),
+            details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
+            skills: Binding(get: { taskSkills }, set: { taskSkills = $0 }),
+            storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
+            boardMessage: "Saved",
+            boardMessageSeverity: .info,
+            onCancel: {},
+            onSave: {}
+        ))
+
+        var inProgressLimit = 3
+        var reviewLimit = 2
+        render(WIPSettingsSheet(
+            inProgressLimit: Binding(get: { inProgressLimit }, set: { inProgressLimit = $0 }),
+            reviewLimit: Binding(get: { reviewLimit }, set: { reviewLimit = $0 }),
+            onCancel: {},
+            onApply: {}
+        ))
+
+        var runtimeEnabled = true
+        var runtimeProvider: AgentRuntimeProvider = .openAICompatible
+        var runtimeModel = "gpt-5"
+        var runtimeEndpoint = "https://api.openai.com/v1"
+        var runtimeTools = "shell,git"
+        var authMode: OpenAICompatibleAuthMode = .apiKey
+        var codexProfile = "default"
+        var agentName = "Agent"
+        var agentSkills = "swiftui"
+        var agentCapacity = 3
+        render(NewAgentSheet(
+            name: Binding(get: { agentName }, set: { agentName = $0 }),
+            skills: Binding(get: { agentSkills }, set: { agentSkills = $0 }),
+            maxConcurrentTasks: Binding(get: { agentCapacity }, set: { agentCapacity = $0 }),
+            runtimeEnabled: Binding(get: { runtimeEnabled }, set: { runtimeEnabled = $0 }),
+            runtimeProvider: Binding(get: { runtimeProvider }, set: { runtimeProvider = $0 }),
+            runtimeModel: Binding(get: { runtimeModel }, set: { runtimeModel = $0 }),
+            runtimeEndpoint: Binding(get: { runtimeEndpoint }, set: { runtimeEndpoint = $0 }),
+            runtimeTools: Binding(get: { runtimeTools }, set: { runtimeTools = $0 }),
+            openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
+            codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
+            boardMessage: nil,
+            boardMessageSeverity: nil,
+            onCancel: {},
+            onCreate: {}
+        ))
+        authMode = .codexBridge
+        render(EditAgentSheet(
+            name: Binding(get: { agentName }, set: { agentName = $0 }),
+            skills: Binding(get: { agentSkills }, set: { agentSkills = $0 }),
+            maxConcurrentTasks: Binding(get: { agentCapacity }, set: { agentCapacity = $0 }),
+            runtimeEnabled: Binding(get: { runtimeEnabled }, set: { runtimeEnabled = $0 }),
+            runtimeProvider: Binding(get: { runtimeProvider }, set: { runtimeProvider = $0 }),
+            runtimeModel: Binding(get: { runtimeModel }, set: { runtimeModel = $0 }),
+            runtimeEndpoint: Binding(get: { runtimeEndpoint }, set: { runtimeEndpoint = $0 }),
+            runtimeTools: Binding(get: { runtimeTools }, set: { runtimeTools = $0 }),
+            openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
+            codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
+            boardMessage: "Updated",
+            boardMessageSeverity: .info,
+            onCancel: {},
+            onSave: {}
+        ))
+
+        var triageSelections: [UUID: UUID] = [todoTask.id: agentA.id]
+        render(ManualTriageSheet(
+            tasks: [todoTask],
+            boardMessage: nil,
+            boardMessageSeverity: nil,
+            selectedAgentByTaskID: Binding(get: { triageSelections }, set: { triageSelections = $0 }),
+            assignAllEligibleCount: 1,
+            unassignableTaskCount: 0,
+            assignableAgents: { _ in [agentA, agentB] },
+            loadText: { _ in "1/3" },
+            onAssign: { _ in },
+            onAssignAll: {},
+            onClose: {}
+        ))
+
+        let detailsPresentation = ExecutionDetailsPresentation(
+            taskTitle: "Task",
+            assigneeName: "A",
+            executionRecord: failedRecord
+        )
+        render(ExecutionDetailsSheet(
+            details: detailsPresentation,
+            onCopy: { _ in },
+            onClose: {}
+        ))
+
+        render(AgentLiveConsoleView(
+            agentName: "A",
+            isRunning: false,
+            events: [],
+            onCopy: { _ in },
+            onClear: {}
+        ))
+        render(AgentLiveConsoleView(
+            agentName: "A",
+            isRunning: true,
+            events: [event],
+            onCopy: { _ in },
+            onClear: {}
+        ))
+        render(AgentExecutionEventRow(event: event, onCopy: { _ in }))
+        render(BoardMessageBanner(message: "Info message", severity: .info))
+
+        return rendered
+    }
+}
+#endif
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {

@@ -2225,6 +2225,314 @@ struct KanbanSupportTypeTests {
 
 @Suite(.serialized)
 @MainActor
+struct ContentViewLogicTests {
+
+    @Test("normalizes execution summary headings across locales")
+    func normalizedExecutionSummaryRemovesHeadingTokens() {
+        #expect(ContentViewTestHooks.normalizedExecutionSummary("Summary: Done") == "Done")
+        #expect(ContentViewTestHooks.normalizedExecutionSummary("摘要：完成") == "完成")
+        #expect(
+            ContentViewTestHooks.normalizedExecutionSummary(
+                "Resumen:\nFinalizado"
+            ) == "Finalizado"
+        )
+        #expect(ContentViewTestHooks.normalizedExecutionSummary("  Already clean  ") == "Already clean")
+        #expect(ContentViewTestHooks.normalizedExecutionSummary("   ") == "   ")
+    }
+
+    @Test("execution details status label maps each execution status")
+    func executionDetailsStatusLabelMapping() {
+        #expect(ContentViewTestHooks.executionDetailsStatusLabel(for: .running) == "Running")
+        #expect(ContentViewTestHooks.executionDetailsStatusLabel(for: .succeeded) == "Succeeded")
+        #expect(ContentViewTestHooks.executionDetailsStatusLabel(for: .failed) == "Failed")
+    }
+
+    @Test("agent live console status label maps each execution status")
+    func agentLiveConsoleStatusLabelMapping() {
+        #expect(ContentViewTestHooks.agentLiveConsoleStatusLabel(for: .running) == "Running")
+        #expect(ContentViewTestHooks.agentLiveConsoleStatusLabel(for: .succeeded) == "Succeeded")
+        #expect(ContentViewTestHooks.agentLiveConsoleStatusLabel(for: .failed) == "Failed")
+    }
+
+    @Test("agent execution row status label maps each execution status")
+    func agentExecutionRowStatusLabelMapping() {
+        #expect(ContentViewTestHooks.agentExecutionEventRowStatusLabel(for: .running) == "Running")
+        #expect(ContentViewTestHooks.agentExecutionEventRowStatusLabel(for: .succeeded) == "Succeeded")
+        #expect(ContentViewTestHooks.agentExecutionEventRowStatusLabel(for: .failed) == "Failed")
+    }
+
+    @Test("agent execution row copy text includes optional details when present")
+    func agentExecutionRowCopyTextIncludesDetailsConditionally() {
+        let withDetails = ContentViewTestHooks.agentExecutionEventRowCopyText(
+            status: .failed,
+            message: "Command failed",
+            details: "stderr details"
+        )
+        #expect(withDetails.contains("[Failed] Task"))
+        #expect(withDetails.contains("Command failed"))
+        #expect(withDetails.contains("stderr details"))
+
+        let withoutDetails = ContentViewTestHooks.agentExecutionEventRowCopyText(
+            status: .running,
+            message: "Still running",
+            details: nil
+        )
+        #expect(withoutDetails.contains("[Running] Task"))
+        #expect(withoutDetails.contains("Still running"))
+        #expect(!withoutDetails.contains("stderr details"))
+    }
+
+    @Test("agent live console copy text composes event message and details")
+    func agentLiveConsoleAllEventsTextComposition() {
+        let agentID = UUID()
+        let eventA = AgentExecutionEvent(
+            timestamp: Date(timeIntervalSince1970: 1_735_000_000),
+            agentID: agentID,
+            taskID: UUID(),
+            taskTitle: "Task A",
+            status: .succeeded,
+            message: "Completed",
+            details: "Summary line"
+        )
+        let eventB = AgentExecutionEvent(
+            timestamp: Date(timeIntervalSince1970: 1_735_000_030),
+            agentID: agentID,
+            taskID: UUID(),
+            taskTitle: "Task B",
+            status: .failed,
+            message: "Failed",
+            details: nil
+        )
+
+        let text = ContentViewTestHooks.agentLiveConsoleAllEventsText([eventA, eventB])
+
+        #expect(text.contains("[Succeeded]"))
+        #expect(text.contains("[Failed]"))
+        #expect(text.contains("Task A"))
+        #expect(text.contains("Task B"))
+        #expect(text.contains("Completed"))
+        #expect(text.contains("Summary line"))
+        #expect(text.contains("Failed"))
+    }
+
+    @Test("task card execution status labels map correctly")
+    func taskCardExecutionStatusLabelMapping() {
+        #expect(ContentViewTestHooks.taskCardExecutionStatusLabel(for: .running) == "Running")
+        #expect(ContentViewTestHooks.taskCardExecutionStatusLabel(for: .succeeded) == "Succeeded")
+        #expect(ContentViewTestHooks.taskCardExecutionStatusLabel(for: .failed) == "Failed")
+    }
+
+    @Test("board health score accent thresholds are stable")
+    func boardHealthScoreAccentThresholds() {
+        #expect(ContentViewTestHooks.healthScoreAccent(for: 90) == .green)
+        #expect(ContentViewTestHooks.healthScoreAccent(for: 70) == .amber)
+        #expect(ContentViewTestHooks.healthScoreAccent(for: 50) == .red)
+    }
+
+    @Test("board health recommendations count only auto-fixable actions")
+    func boardHealthAutoFixRecommendationCount() {
+        let recommendations = [
+            BoardHealthRecommendation(action: .autoAssignUnassignedTodo, title: "", detail: ""),
+            BoardHealthRecommendation(action: .openManualTriage, title: "", detail: ""),
+            BoardHealthRecommendation(action: .increaseWIPLimit(.review), title: "", detail: ""),
+            BoardHealthRecommendation(action: .archiveDone, title: "", detail: "")
+        ]
+
+        #expect(ContentViewTestHooks.autoFixRecommendationCount(for: recommendations) == 3)
+    }
+
+    @Test("runtime summary reflects runtime profile configuration")
+    func runtimeSummaryReflectsProfile() {
+        let disabled = ContentViewTestHooks.runtimeSummary(runtimeProfile: nil)
+        #expect(disabled == L10n.string("Runtime: Disabled"))
+
+        let local = AgentRuntimeProfile(provider: .localMock, model: "mock-v2")
+        let localSummary = ContentViewTestHooks.runtimeSummary(runtimeProfile: local)
+        #expect(localSummary.contains(local.provider.displayName))
+        #expect(localSummary.contains("mock-v2"))
+        #expect(!localSummary.contains(OpenAICompatibleAuthMode.apiKey.displayName))
+
+        let codex = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5",
+            openAIAuthMode: .codexBridge
+        )
+        let codexSummary = ContentViewTestHooks.runtimeSummary(runtimeProfile: codex)
+        #expect(codexSummary.contains(codex.provider.displayName))
+        #expect(codexSummary.contains("gpt-5"))
+        #expect(codexSummary.contains(OpenAICompatibleAuthMode.codexBridge.displayName))
+    }
+
+    @Test("build runtime profile normalizes endpoint, tools, and auth mode")
+    func buildRuntimeProfileNormalization() {
+        #expect(
+            ContentViewTestHooks.buildRuntimeProfile(
+                isEnabled: false,
+                provider: .localMock,
+                model: "",
+                endpoint: "",
+                toolsText: "",
+                openAIAuthMode: .apiKey,
+                codexProfile: ""
+            ) == nil
+        )
+
+        let openAIAPIKey = ContentViewTestHooks.buildRuntimeProfile(
+            isEnabled: true,
+            provider: .openAICompatible,
+            model: " ",
+            endpoint: "https://api.example.com/v1",
+            toolsText: " Git , shell,git ",
+            openAIAuthMode: .apiKey,
+            codexProfile: "ignored"
+        )
+        #expect(openAIAPIKey?.model == AgentRuntimeProvider.openAICompatible.defaultModel)
+        #expect(openAIAPIKey?.endpoint == "https://api.example.com/v1")
+        #expect(openAIAPIKey?.openAIAuthMode == .apiKey)
+        #expect(openAIAPIKey?.codexProfile == nil)
+        #expect(openAIAPIKey?.tools == Set(["git", "shell"]))
+
+        let openAICodex = ContentViewTestHooks.buildRuntimeProfile(
+            isEnabled: true,
+            provider: .openAICompatible,
+            model: "gpt-5-codex",
+            endpoint: "https://should-be-ignored",
+            toolsText: "",
+            openAIAuthMode: .codexBridge,
+            codexProfile: "team-profile"
+        )
+        #expect(openAICodex?.openAIAuthMode == .codexBridge)
+        #expect(openAICodex?.endpoint == nil)
+        #expect(openAICodex?.codexProfile == "team-profile")
+
+        let localRuntime = ContentViewTestHooks.buildRuntimeProfile(
+            isEnabled: true,
+            provider: .localMock,
+            model: "local-v2",
+            endpoint: "https://ignored-for-local",
+            toolsText: "",
+            openAIAuthMode: .codexBridge,
+            codexProfile: "ignored"
+        )
+        #expect(localRuntime?.provider == .localMock)
+        #expect(localRuntime?.openAIAuthMode == .apiKey)
+        #expect(localRuntime?.endpoint == nil)
+        #expect(localRuntime?.codexProfile == nil)
+    }
+
+    @Test("assignee filter selection resolves to valid enum values")
+    func assigneeFilterSelectionMapping() {
+        let agent = AgentProfile(name: "A", skills: [], maxConcurrentTasks: 1)
+
+        #expect(
+            ContentViewTestHooks.selectedAssigneeFilter(selectedKey: "all", agents: [agent]) == .all
+        )
+        #expect(
+            ContentViewTestHooks.selectedAssigneeFilter(selectedKey: "unassigned", agents: [agent]) == .unassigned
+        )
+        #expect(
+            ContentViewTestHooks.selectedAssigneeFilter(selectedKey: agent.id.uuidString, agents: [agent])
+                == .assigned(agent.id)
+        )
+        #expect(
+            ContentViewTestHooks.selectedAssigneeFilter(selectedKey: UUID().uuidString, agents: [agent]) == .all
+        )
+        #expect(
+            ContentViewTestHooks.selectedAssigneeFilter(selectedKey: "not-a-uuid", agents: [agent]) == .all
+        )
+    }
+
+    @Test("toolbar auto-assign availability depends on unassigned todo tasks and agents")
+    func canAutoAssignFromToolbarRequiresTasksAndAgents() {
+        let agent = AgentProfile(name: "A", skills: ["swift"], maxConcurrentTasks: 1)
+        let unassignedTodo = WorkTask(
+            title: "Task",
+            details: "Details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let assignedTodo = WorkTask(
+            title: "Assigned",
+            details: "Details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+
+        #expect(ContentViewTestHooks.canAutoAssignFromToolbar(tasks: [unassignedTodo], agents: [agent]))
+        #expect(!ContentViewTestHooks.canAutoAssignFromToolbar(tasks: [unassignedTodo], agents: []))
+        #expect(!ContentViewTestHooks.canAutoAssignFromToolbar(tasks: [assignedTodo], agents: [agent]))
+    }
+
+    @Test("batch run availability respects running-state and runnable-task rules")
+    func canBatchRunAssignedTasksRules() {
+        let agent = AgentProfile(name: "A", skills: ["swift"], maxConcurrentTasks: 1)
+
+        let runnable = WorkTask(
+            title: "Runnable",
+            details: "Implement feature",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let emptyDetails = WorkTask(
+            title: "Empty",
+            details: "   ",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let unassigned = WorkTask(
+            title: "Unassigned",
+            details: "Has details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let doneTask = WorkTask(
+            title: "Done",
+            details: "Has details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: agent.id
+        )
+
+        #expect(
+            ContentViewTestHooks.canBatchRunAssignedTasks(
+                tasks: [runnable],
+                isBatchRunning: false
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canBatchRunAssignedTasks(
+                tasks: [runnable],
+                isBatchRunning: true
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canBatchRunAssignedTasks(
+                tasks: [emptyDetails, unassigned, doneTask],
+                isBatchRunning: false
+            )
+        )
+    }
+
+    @Test("content subviews can render representative body states")
+    func renderSubviewBodiesForCoverage() {
+        let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
+        #expect(renderedCount >= 20)
+    }
+}
+
+@Suite(.serialized)
+@MainActor
 struct KanbanPersistenceTests {
 
     @Test("clears localized transient board message")
