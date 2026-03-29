@@ -3089,6 +3089,237 @@ struct ContentViewLogicTests {
         )
     }
 
+    @Test("boolean and count mutation helpers invoke callbacks only on successful outcomes")
+    func mutationResultHelpersCoverage() {
+        var changedCount = 0
+        #expect(
+            !ContentViewTestHooks.handleBoolResult(false) {
+                changedCount += 1
+            }
+        )
+        #expect(changedCount == 0)
+        #expect(
+            ContentViewTestHooks.handleBoolResult(true) {
+                changedCount += 1
+            }
+        )
+        #expect(changedCount == 1)
+
+        var positiveCountCallback = 0
+        #expect(
+            ContentViewTestHooks.handlePositiveCountResult(0) {
+                positiveCountCallback += 1
+            } == 0
+        )
+        #expect(positiveCountCallback == 0)
+        #expect(
+            ContentViewTestHooks.handlePositiveCountResult(3) {
+                positiveCountCallback += 1
+            } == 3
+        )
+        #expect(positiveCountCallback == 1)
+    }
+
+    @Test("editable change helper handles missing identifier failed apply and successful apply")
+    func applyEditableChangeHelperCoverage() {
+        var callbackCount = 0
+
+        let missingID = ContentViewTestHooks.applyEditableChange(
+            editingID: UUID?.none,
+            apply: { _ in true },
+            onApplied: {
+                callbackCount += 1
+            }
+        )
+        #expect(!missingID)
+
+        let failedApply = ContentViewTestHooks.applyEditableChange(
+            editingID: UUID(),
+            apply: { _ in false },
+            onApplied: {
+                callbackCount += 1
+            }
+        )
+        #expect(!failedApply)
+        #expect(callbackCount == 0)
+
+        let successfulApply = ContentViewTestHooks.applyEditableChange(
+            editingID: UUID(),
+            apply: { _ in true },
+            onApplied: {
+                callbackCount += 1
+            }
+        )
+        #expect(successfulApply)
+        #expect(callbackCount == 1)
+    }
+
+    @Test("manual assignment helper requires selected agent and returns assigner result")
+    func manualAssignTaskHelperCoverage() {
+        let taskID = UUID()
+        let agentID = UUID()
+        var assignAttempts = 0
+
+        let missingSelection = ContentViewTestHooks.manualAssignTask(
+            taskID: taskID,
+            selectedAgentID: nil,
+            assigner: { _, _ in
+                assignAttempts += 1
+                return true
+            }
+        )
+        #expect(!missingSelection)
+        #expect(assignAttempts == 0)
+
+        let failed = ContentViewTestHooks.manualAssignTask(
+            taskID: taskID,
+            selectedAgentID: agentID,
+            assigner: { _, _ in
+                assignAttempts += 1
+                return false
+            }
+        )
+        #expect(!failed)
+
+        let succeeded = ContentViewTestHooks.manualAssignTask(
+            taskID: taskID,
+            selectedAgentID: agentID,
+            assigner: { _, _ in
+                assignAttempts += 1
+                return true
+            }
+        )
+        #expect(succeeded)
+        #expect(assignAttempts == 2)
+    }
+
+    @Test("post auto-assign helper always refreshes and opens triage when required")
+    func postAutoAssignHelperCoverage() {
+        var refreshCount = 0
+        var manualTriageCount = 0
+
+        ContentViewTestHooks.postAutoAssign(
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 }
+        )
+        #expect(refreshCount == 1)
+        #expect(manualTriageCount == 0)
+
+        ContentViewTestHooks.postAutoAssign(
+            hasPendingManualTriage: true,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 }
+        )
+        #expect(refreshCount == 2)
+        #expect(manualTriageCount == 1)
+    }
+
+    @Test("health recommendation post-handler covers all action branches")
+    func postHealthRecommendationHelperCoverage() {
+        var refreshCount = 0
+        var manualTriageCount = 0
+        var newAgentSheetCount = 0
+
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .archiveDone,
+            applied: false,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        #expect(refreshCount == 0)
+        #expect(manualTriageCount == 0)
+        #expect(newAgentSheetCount == 0)
+
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .autoAssignUnassignedTodo,
+            applied: true,
+            hasPendingManualTriage: true,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .rebalanceTodoLoad,
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .archiveDone,
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .openManualTriage,
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .openNewAgent,
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
+            action: .increaseWIPLimit(.review),
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+
+        #expect(refreshCount == 4)
+        #expect(manualTriageCount == 2)
+        #expect(newAgentSheetCount == 1)
+    }
+
+    @Test("apply-all health post-handler refreshes only for positive counts")
+    func postApplyAllHealthRecommendationsHelperCoverage() {
+        var refreshCount = 0
+        var manualTriageCount = 0
+
+        ContentViewTestHooks.postApplyAllHealthRecommendations(
+            appliedCount: 0,
+            hasPendingManualTriage: true,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 }
+        )
+        #expect(refreshCount == 0)
+        #expect(manualTriageCount == 0)
+
+        ContentViewTestHooks.postApplyAllHealthRecommendations(
+            appliedCount: 2,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 }
+        )
+        #expect(refreshCount == 1)
+        #expect(manualTriageCount == 0)
+
+        ContentViewTestHooks.postApplyAllHealthRecommendations(
+            appliedCount: 1,
+            hasPendingManualTriage: true,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 }
+        )
+        #expect(refreshCount == 2)
+        #expect(manualTriageCount == 1)
+    }
+
     @Test("task edit helper applies valid updates and rejects invalid title")
     func applyTaskEditsHelperCoverage() {
         let task = WorkTask(
