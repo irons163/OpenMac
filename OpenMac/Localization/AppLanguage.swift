@@ -151,6 +151,20 @@ enum L10n {
     private static var runtimeLocaleIdentifier: String?
     private static let tableName = "Localizable"
 
+    private static var isRunningTests: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if NSClassFromString("XCTestCase") != nil {
+            return true
+        }
+        return Bundle.allBundles.contains { $0.bundlePath.hasSuffix(".xctest") }
+        #else
+        return false
+        #endif
+    }
+
     static func setRuntimeLocale(_ locale: Locale?) {
         runtimeLocaleLock.lock()
         runtimeLocaleIdentifier = locale?.identifier
@@ -165,7 +179,8 @@ enum L10n {
     }
 
     static func string(_ key: String, locale: Locale? = nil) -> String {
-        let resolvedLocale = locale ?? activeRuntimeLocale ?? AppLanguageResolver.resolvedLocale()
+        ensureRuntimeLocaleInitialized()
+        let resolvedLocale = locale ?? resolvedDefaultLocale()
         let languageCode = AppLanguageResolver
             .resolvedLanguage(preferredLanguages: [resolvedLocale.identifier])
             .rawValue
@@ -187,9 +202,56 @@ enum L10n {
     }
 
     static func format(_ formatKey: String, locale: Locale? = nil, arguments: [CVarArg]) -> String {
-        let resolvedLocale = locale ?? activeRuntimeLocale ?? AppLanguageResolver.resolvedLocale()
+        ensureRuntimeLocaleInitialized()
+        let resolvedLocale = locale ?? resolvedDefaultLocale()
         let format = string(formatKey, locale: resolvedLocale)
         return String(format: format, locale: resolvedLocale, arguments: arguments)
+    }
+
+    static func resolvedDefaultLocale(overrideRawValue: String?, runtimeLocale: Locale?) -> Locale {
+        let configuredLocale = AppLanguageResolver.resolvedLocale(overrideRawValue: overrideRawValue)
+        guard let runtimeLocale else {
+            return configuredLocale
+        }
+
+        let configuredLanguage = AppLanguageResolver
+            .resolvedLanguage(preferredLanguages: [configuredLocale.identifier])
+            .rawValue
+        let runtimeLanguage = AppLanguageResolver
+            .resolvedLanguage(preferredLanguages: [runtimeLocale.identifier])
+            .rawValue
+
+        // Keep runtime region/calendar nuances only when language matches current settings.
+        guard configuredLanguage == runtimeLanguage else {
+            return configuredLocale
+        }
+        return runtimeLocale
+    }
+
+    private static func resolvedDefaultLocale() -> Locale {
+        if isRunningTests {
+            return resolvedDefaultLocale(
+                overrideRawValue: AppLanguage.english.rawValue,
+                runtimeLocale: activeRuntimeLocale
+            )
+        }
+
+        let storedOverride = UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
+        let normalizedOverride = storedOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolverOverride: String?
+        if let normalizedOverride,
+           !normalizedOverride.isEmpty,
+           normalizedOverride != AppLanguageSettings.systemValue {
+            resolverOverride = normalizedOverride
+        } else {
+            resolverOverride = nil
+        }
+
+        return resolvedDefaultLocale(
+            overrideRawValue: resolverOverride,
+            runtimeLocale: activeRuntimeLocale
+        )
     }
 
     private static func localizedValue(for key: String, languageCode: String) -> String? {
@@ -205,5 +267,15 @@ enum L10n {
             }
         }
         return nil
+    }
+
+    private static func ensureRuntimeLocaleInitialized() {
+        runtimeLocaleLock.lock()
+        let needsInitialization = runtimeLocaleIdentifier == nil
+        runtimeLocaleLock.unlock()
+        guard needsInitialization else {
+            return
+        }
+        setRuntimeLocale(Locale(identifier: AppLanguage.english.rawValue))
     }
 }

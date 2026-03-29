@@ -690,8 +690,16 @@ struct ContentView: View {
             )
         }
         .onAppear {
+            L10n.setRuntimeLocale(
+                AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
+            )
             syncSelectedAgentConsoleSelection()
             ensureCodexProjectsDirectoryExists()
+        }
+        .onChange(of: appLanguageOverrideRawValue) { _, newValue in
+            L10n.setRuntimeLocale(
+                AppLanguageResolver.resolvedLocale(overrideRawValue: newValue)
+            )
         }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
