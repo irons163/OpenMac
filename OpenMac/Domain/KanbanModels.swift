@@ -50,9 +50,9 @@ enum AgentRuntimeProvider: String, CaseIterable, Codable, Identifiable {
     var displayName: String {
         switch self {
         case .localMock:
-            return "Local Mock"
+            return L10n.string("Local Mock")
         case .openAICompatible:
-            return "OpenAI Compatible"
+            return L10n.string("OpenAI Compatible")
         }
     }
 
@@ -75,9 +75,9 @@ enum OpenAICompatibleAuthMode: String, CaseIterable, Codable, Identifiable {
     var displayName: String {
         switch self {
         case .apiKey:
-            return "API Key"
+            return L10n.string("API Key")
         case .codexBridge:
-            return "Codex Bridge"
+            return L10n.string("Codex Bridge")
         }
     }
 }

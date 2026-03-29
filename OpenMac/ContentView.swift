@@ -126,13 +126,13 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("AI Agent Kanban Dispatch")
                             .font(.title2.weight(.semibold))
-                        Text("Board: \(viewModel.selectedBoardName)")
+                        Text(L10n.format("Board: %@", viewModel.selectedBoardName))
                             .font(.caption)
                             .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
                     }
                     Spacer()
                     if !viewModel.triageCandidates().isEmpty {
-                        Text("\(viewModel.triageCandidates().count) task(s) need manual triage")
+                        Text(L10n.format("%d task(s) need manual triage", viewModel.triageCandidates().count))
                             .font(.callout)
                             .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
                     }
@@ -168,7 +168,7 @@ struct ContentView: View {
                     }
                     .pickerStyle(.menu)
 
-                    Text("Showing \(filteredTaskCount) / \(viewModel.tasks.count)")
+                    Text(L10n.format("Showing %d / %d", filteredTaskCount, viewModel.tasks.count))
                         .font(.caption)
                         .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
 
@@ -374,7 +374,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("f", modifiers: [.command])
                 .help("Search tasks across boards (Command-F)")
-                Menu("Board: \(viewModel.selectedBoardName)") {
+                Menu(L10n.format("Board: %@", viewModel.selectedBoardName)) {
                     Button("New Board") {
                         openNewBoardSheet()
                     }
@@ -413,7 +413,7 @@ struct ContentView: View {
                 Menu("Board Actions") {
                     Section("Health") {
                         if viewModel.hasAutoFixableHealthRecommendations {
-                            Button("Apply Health Fixes (\(viewModel.autoFixableHealthRecommendationCount))") {
+                            Button(L10n.format("Apply Health Fixes (%d)", viewModel.autoFixableHealthRecommendationCount)) {
                                 applyAllHealthRecommendations()
                             }
                             .keyboardShortcut("h", modifiers: [.command, .shift])
@@ -489,7 +489,7 @@ struct ContentView: View {
                     }
                 }
                 .help("Archive, rebalance, WIP settings, and manual triage actions")
-                Menu("Appearance: \(selectedAppearanceMode.title)") {
+                Menu(L10n.format("Appearance: %@", selectedAppearanceMode.title)) {
                     Button("Cycle Appearance") {
                         cycleAppearanceMode()
                     }
@@ -694,7 +694,7 @@ struct ContentView: View {
                 removeSelectedBoard()
             }
         } message: {
-            Text("Delete \"\(viewModel.selectedBoardName)\" and all tasks/agents in it? This cannot be undone.")
+            Text(L10n.format("Delete \"%@\" and all tasks/agents in it? This cannot be undone.", viewModel.selectedBoardName))
         }
         .environment(\.colorScheme, effectiveColorScheme)
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
@@ -964,8 +964,8 @@ struct ContentView: View {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = "openmac-workspace.json"
-        panel.title = "Export Workspace"
-        panel.message = "Save boards, tasks, and agents as workspace JSON."
+        panel.title = L10n.string("Export Workspace")
+        panel.message = L10n.string("Save boards, tasks, and agents as workspace JSON.")
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         _ = viewModel.exportWorkspace(to: url)
@@ -977,8 +977,8 @@ struct ContentView: View {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = selectedBoardExportFileName()
-        panel.title = "Export Current Board"
-        panel.message = "Save only the current board as JSON."
+        panel.title = L10n.string("Export Current Board")
+        panel.message = L10n.string("Save only the current board as JSON.")
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         _ = viewModel.exportSelectedBoard(to: url)
@@ -990,8 +990,8 @@ struct ContentView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.title = "Import Workspace"
-        panel.message = "Select workspace JSON to import."
+        panel.title = L10n.string("Import Workspace")
+        panel.message = L10n.string("Select workspace JSON to import.")
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let preview = viewModel.workspaceImportPreview(from: url) else { return }
@@ -1004,18 +1004,23 @@ struct ContentView: View {
 
     private func chooseWorkspaceImportStrategy(preview: WorkspaceImportPreview) -> WorkspaceImportStrategy? {
         let alert = NSAlert()
-        alert.messageText = "Import Workspace"
-        alert.informativeText = """
-        Boards: \(preview.boardCount)
-        Tasks: \(preview.taskCount)
-        Agents: \(preview.agentCount)
+        alert.messageText = L10n.string("Import Workspace")
+        alert.informativeText = L10n.format(
+            """
+            Boards: %d
+            Tasks: %d
+            Agents: %d
 
-        Merge keeps current boards and appends imported boards.
-        Replace overwrites current workspace with imported boards.
-        """
-        alert.addButton(withTitle: "Merge")
-        alert.addButton(withTitle: "Replace")
-        alert.addButton(withTitle: "Cancel")
+            Merge keeps current boards and appends imported boards.
+            Replace overwrites current workspace with imported boards.
+            """,
+            preview.boardCount,
+            preview.taskCount,
+            preview.agentCount
+        )
+        alert.addButton(withTitle: L10n.string("Merge"))
+        alert.addButton(withTitle: L10n.string("Replace"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
@@ -1213,8 +1218,8 @@ struct ContentView: View {
 
     private var assigneeFilterOptions: [(key: String, label: String)] {
         let base = [
-            (key: "all", label: "All Assignees"),
-            (key: "unassigned", label: "Unassigned")
+            (key: "all", label: L10n.string("All Assignees")),
+            (key: "unassigned", label: L10n.string("Unassigned"))
         ]
         let agentOptions = viewModel.agents
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -1286,9 +1291,9 @@ struct ContentView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.title = "Choose Projects Folder"
-        panel.message = "Select a default working folder for agent project execution."
-        panel.prompt = "Use Folder"
+        panel.title = L10n.string("Choose Projects Folder")
+        panel.message = L10n.string("Select a default working folder for agent project execution.")
+        panel.prompt = L10n.string("Use Folder")
         panel.directoryURL = URL(fileURLWithPath: resolvedCodexProjectsDirectoryPath, isDirectory: true)
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -1324,10 +1329,14 @@ struct ContentView: View {
 
     private func presentCodexProjectsDirectoryError(_ error: Error, attemptedPath: String) {
         let alert = NSAlert()
-        alert.messageText = "Projects Folder Error"
-        alert.informativeText = "Could not use folder:\n\(attemptedPath)\n\n\(error.localizedDescription)"
+        alert.messageText = L10n.string("Projects Folder Error")
+        alert.informativeText = L10n.format(
+            "Could not use folder:\n%@\n\n%@",
+            attemptedPath,
+            error.localizedDescription
+        )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         alert.runModal()
     }
 
@@ -1369,12 +1378,21 @@ struct ContentView: View {
 
     private func runtimeSummary(for agent: AgentProfile) -> String {
         guard let runtimeProfile = agent.runtimeProfile else {
-            return "Runtime: Disabled"
+            return L10n.string("Runtime: Disabled")
         }
         if runtimeProfile.provider == .openAICompatible {
-            return "Runtime: \(runtimeProfile.provider.displayName) / \(runtimeProfile.model) / \(runtimeProfile.openAIAuthMode.displayName)"
+            return L10n.format(
+                "Runtime: %@ / %@ / %@",
+                runtimeProfile.provider.displayName,
+                runtimeProfile.model,
+                runtimeProfile.openAIAuthMode.displayName
+            )
         }
-        return "Runtime: \(runtimeProfile.provider.displayName) / \(runtimeProfile.model)"
+        return L10n.format(
+            "Runtime: %@ / %@",
+            runtimeProfile.provider.displayName,
+            runtimeProfile.model
+        )
     }
 
     private func buildRuntimeProfile(
@@ -1467,7 +1485,7 @@ private struct AgentRowView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(name)
                 .font(.headline)
-            Text("Skills: \(skillsText)")
+            Text(L10n.format("Skills: %@", skillsText))
                 .font(.caption)
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             Text(runtimeText)
@@ -1476,11 +1494,11 @@ private struct AgentRowView: View {
             HStack(spacing: 8) {
                 ProgressView(value: loadProgress, total: 1.0)
                     .progressViewStyle(.linear)
-                Text("\(loadPercent)%")
+                Text(L10n.format("%d%%", loadPercent))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
-            Text("Load: \(loadCount)/\(maxLoad)")
+            Text(L10n.format("Load: %d/%d", loadCount, maxLoad))
                 .font(.caption2)
                 .foregroundStyle(
                     isOverloaded
@@ -1497,7 +1515,7 @@ private struct AgentRowView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
             } else if let recentEventMessage, !recentEventMessage.isEmpty {
-                Text("Last: \(recentEventMessage)")
+                Text(L10n.format("Last: %@", recentEventMessage))
                     .font(.caption2)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .lineLimit(1)
@@ -1531,7 +1549,7 @@ private struct BoardHealthSummaryView: View {
                 SummaryBadge(title: "Overloaded", value: "\(overloadedAgents)", accent: overloadedAgents > 0 ? .red : .green)
                 SummaryBadge(
                     title: "Health",
-                    value: "\(healthScore) \(healthLabel)",
+                    value: L10n.format("%d %@", healthScore, L10n.string(healthLabel)),
                     accent: healthScoreAccent,
                     helpText: healthBreakdownText
                 )
@@ -1572,7 +1590,7 @@ private struct BoardHealthRecommendationsView: View {
                         .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     Spacer()
                     if autoFixRecommendationCount > 0 {
-                        Button("Apply All (\(autoFixRecommendationCount))") {
+                        Button(L10n.format("Apply All (%d)", autoFixRecommendationCount)) {
                             onApplyAll()
                         }
                         .buttonStyle(.borderedProminent)
@@ -1695,18 +1713,18 @@ private struct KanbanColumnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(status.title)
+                Text(L10n.string(status.title))
                     .font(.headline)
                 Spacer()
                 if let wipLimit {
-                    Text("\(tasks.count)/\(wipLimit)")
+                    Text(L10n.format("%d/%d", tasks.count, wipLimit))
                         .font(.caption)
                         .foregroundStyle(tasks.count >= wipLimit ? BoardSemanticTextPalette.color(for: .error, scheme: colorScheme) : .primary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                         .background(counterBackground, in: Capsule())
                 } else {
-                    Text("\(tasks.count)")
+                    Text(String(tasks.count))
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
@@ -1844,13 +1862,13 @@ private struct TaskCardView: View {
             }
 
             if !task.requiredSkills.isEmpty {
-                Text("Skills: \(task.requiredSkills.sorted().joined(separator: ", "))")
+                Text(L10n.format("Skills: %@", task.requiredSkills.sorted().joined(separator: ", ")))
                     .font(.caption)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
 
             HStack {
-                Text("SP: \(task.storyPoints)")
+                Text(L10n.format("SP: %d", task.storyPoints))
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -1864,7 +1882,7 @@ private struct TaskCardView: View {
             }
 
             if let assignmentReason, task.assignedAgentID != nil {
-                Text("Dispatch: \(assignmentReason)")
+                Text(L10n.format("Dispatch: %@", assignmentReason))
                     .font(.caption2)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .lineLimit(3)
@@ -1872,7 +1890,7 @@ private struct TaskCardView: View {
 
             if let executionRecord {
                 HStack(spacing: 8) {
-                    Text("Runs: \(executionRecord.runCount)")
+                    Text(L10n.format("Runs: %d", executionRecord.runCount))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     Text(executionStatusLabel(for: executionRecord.status))
@@ -1889,13 +1907,13 @@ private struct TaskCardView: View {
                 }
 
                 if let output = executionRecord.lastOutputSummary, executionRecord.status == .succeeded {
-                    Text("Output: \(output)")
+                    Text(L10n.format("Output: %@", output))
                         .font(.caption2)
                         .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
                         .lineLimit(3)
                         .textSelection(.enabled)
                 } else if let lastError = executionRecord.lastError, executionRecord.status == .failed {
-                    Text("Error: \(lastError)")
+                    Text(L10n.format("Error: %@", lastError))
                         .font(.caption2)
                         .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
                         .lineLimit(3)
@@ -2003,11 +2021,11 @@ private struct TaskCardView: View {
     private func executionStatusLabel(for status: TaskExecutionStatus) -> String {
         switch status {
         case .running:
-            return "Running"
+            return L10n.string("Running")
         case .succeeded:
-            return "Succeeded"
+            return L10n.string("Succeeded")
         case .failed:
-            return "Failed"
+            return L10n.string("Failed")
         }
     }
 
@@ -2042,15 +2060,15 @@ private struct ExecutionDetailsSheet: View {
                 .font(.title3.weight(.semibold))
 
             Group {
-                Text("Task: \(details.taskTitle)")
-                Text("Assignee: \(details.assigneeName)")
-                Text("Status: \(statusLabel)")
-                Text("Runs: \(details.executionRecord.runCount)")
+                Text(L10n.format("Task: %@", details.taskTitle))
+                Text(L10n.format("Assignee: %@", details.assigneeName))
+                Text(L10n.format("Status: %@", statusLabel))
+                Text(L10n.format("Runs: %d", details.executionRecord.runCount))
                 if let startedAt = details.executionRecord.lastStartedAt {
-                    Text("Started: \(Self.dateFormatter.string(from: startedAt))")
+                    Text(L10n.format("Started: %@", Self.dateFormatter.string(from: startedAt)))
                 }
                 if let finishedAt = details.executionRecord.lastFinishedAt {
-                    Text("Finished: \(Self.dateFormatter.string(from: finishedAt))")
+                    Text(L10n.format("Finished: %@", Self.dateFormatter.string(from: finishedAt)))
                 }
             }
             .font(.caption)
@@ -2128,11 +2146,11 @@ private struct ExecutionDetailsSheet: View {
     private var statusLabel: String {
         switch details.executionRecord.status {
         case .running:
-            return "Running"
+            return L10n.string("Running")
         case .succeeded:
-            return "Succeeded"
+            return L10n.string("Succeeded")
         case .failed:
-            return "Failed"
+            return L10n.string("Failed")
         }
     }
 
@@ -2155,10 +2173,10 @@ private struct AgentLiveConsoleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Agent Live Console · \(agentName)")
+                Text(L10n.format("Agent Live Console · %@", agentName))
                     .font(.headline)
                 Spacer()
-                Text(isRunning ? "Running" : "Idle")
+                Text(isRunning ? L10n.string("Running") : L10n.string("Idle"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(
                         isRunning
@@ -2252,11 +2270,11 @@ private struct AgentExecutionEventRow: View {
     private var statusLabel: String {
         switch event.status {
         case .running:
-            return "Running"
+            return L10n.string("Running")
         case .succeeded:
-            return "Succeeded"
+            return L10n.string("Succeeded")
         case .failed:
-            return "Failed"
+            return L10n.string("Failed")
         }
     }
 
@@ -2383,7 +2401,6 @@ private struct NewBoardSheet: View {
         .frame(width: 360)
     }
 }
-
 private struct RenameBoardSheet: View {
     @Binding var name: String
     let boardMessage: String?
@@ -2440,7 +2457,7 @@ private struct NewTaskSheet: View {
             TextField("Details", text: $details)
             TextField("Skills (comma separated)", text: $skills)
 
-            Stepper("Story Points: \(storyPoints)", value: $storyPoints, in: 1 ... 13)
+            Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
             HStack {
                 Spacer()
@@ -2478,7 +2495,7 @@ private struct EditTaskSheet: View {
             TextField("Title", text: $title)
             TextField("Details", text: $details)
             TextField("Skills (comma separated)", text: $skills)
-            Stepper("Story Points: \(storyPoints)", value: $storyPoints, in: 1 ... 13)
+            Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
             HStack {
                 Spacer()
@@ -2504,8 +2521,8 @@ private struct WIPSettingsSheet: View {
             Text("Edit WIP Limits")
                 .font(.title3.weight(.semibold))
 
-            Stepper("In Progress: \(inProgressLimit)", value: $inProgressLimit, in: 1 ... 20)
-            Stepper("Review: \(reviewLimit)", value: $reviewLimit, in: 1 ... 20)
+            Stepper(L10n.format("In Progress: %d", inProgressLimit), value: $inProgressLimit, in: 1 ... 20)
+            Stepper(L10n.format("Review: %d", reviewLimit), value: $reviewLimit, in: 1 ... 20)
 
             Text("Tip: limit cannot be smaller than the number of tasks currently in that column.")
                 .font(.caption)
@@ -2551,7 +2568,7 @@ private struct NewAgentSheet: View {
 
             TextField("Name", text: $name)
             TextField("Skills (comma separated)", text: $skills)
-            Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+            Stepper(L10n.format("Max Concurrent Tasks: %d", maxConcurrentTasks), value: $maxConcurrentTasks, in: 1 ... 20)
             Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
             if runtimeEnabled {
                 Picker("Runtime Provider", selection: $runtimeProvider) {
@@ -2623,7 +2640,7 @@ private struct EditAgentSheet: View {
 
             TextField("Name", text: $name)
             TextField("Skills (comma separated)", text: $skills)
-            Stepper("Max Concurrent Tasks: \(maxConcurrentTasks)", value: $maxConcurrentTasks, in: 1 ... 20)
+            Stepper(L10n.format("Max Concurrent Tasks: %d", maxConcurrentTasks), value: $maxConcurrentTasks, in: 1 ... 20)
             Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
             if runtimeEnabled {
                 Picker("Runtime Provider", selection: $runtimeProvider) {
@@ -2692,13 +2709,13 @@ private struct ManualTriageSheet: View {
 
             HStack {
                 Spacer()
-                Button("Assign All Eligible (\(assignAllEligibleCount))", action: onAssignAll)
+                Button(L10n.format("Assign All Eligible (%d)", assignAllEligibleCount), action: onAssignAll)
                     .buttonStyle(.bordered)
                     .disabled(assignAllEligibleCount == 0)
             }
 
             if unassignableTaskCount > 0 {
-                Text("\(unassignableTaskCount) task(s) currently have no eligible agent and will be skipped.")
+                Text(L10n.format("%d task(s) currently have no eligible agent and will be skipped.", unassignableTaskCount))
                     .font(.caption)
                     .foregroundStyle(BoardMessageColorPalette.color(for: .warning, scheme: colorScheme))
             }
@@ -2714,7 +2731,7 @@ private struct ManualTriageSheet: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(task.title)
                                     .font(.headline)
-                                Text("Skills: \(task.requiredSkills.sorted().joined(separator: ", "))")
+                                Text(L10n.format("Skills: %@", task.requiredSkills.sorted().joined(separator: ", ")))
                                     .font(.caption)
                                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
 
@@ -2727,7 +2744,7 @@ private struct ManualTriageSheet: View {
                                 } else {
                                     Picker("Assign To", selection: selectionBinding(for: task.id, fallback: eligibleAgents[0].id)) {
                                         ForEach(eligibleAgents) { agent in
-                                            Text("\(agent.name) (\(loadText(agent)))")
+                                            Text(L10n.format("%@ (%@)", agent.name, loadText(agent)))
                                                 .tag(agent.id)
                                         }
                                     }

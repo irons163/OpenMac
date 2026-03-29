@@ -222,7 +222,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let provider = runtimeProfile.provider
         switch provider {
         case .localMock:
-            let summary = "Mock run completed by \(agent.name) for \"\(task.title)\""
+            let summary = L10n.format("Mock run completed by %@ for \"%@\"", agent.name, task.title)
             return .success(summary: summary)
         case .openAICompatible:
             return runOpenAICompatible(
@@ -264,11 +264,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         runtimeProfile: AgentRuntimeProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
-        onProgress("OpenAI request started for \"\(task.title)\"")
+        onProgress(L10n.format("OpenAI request started for \"%@\"", task.title))
         let environment = environmentProvider()
         let apiKey = resolvedAPIKey(from: environment)
         guard let apiKey else {
-            return .failure(message: "Missing OPENAI_API_KEY for OpenAI-compatible runtime")
+            return .failure(message: L10n.string("Missing OPENAI_API_KEY for OpenAI-compatible runtime"))
         }
 
         let endpoint = resolvedEndpoint(
@@ -276,7 +276,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             environment: environment
         )
         guard let url = URL(string: endpoint) else {
-            return .failure(message: "Invalid OpenAI-compatible endpoint")
+            return .failure(message: L10n.string("Invalid OpenAI-compatible endpoint"))
         }
 
         var request = URLRequest(url: url)
@@ -295,12 +295,12 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             let response = try send(request: request)
             let summary = response.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let summary, !summary.isEmpty else {
-                return .failure(message: "OpenAI-compatible runtime returned empty output")
+                return .failure(message: L10n.string("OpenAI-compatible runtime returned empty output"))
             }
-            onProgress("OpenAI response received")
+            onProgress(L10n.string("OpenAI response received"))
             return .success(summary: summary)
         } catch {
-            return .failure(message: "OpenAI-compatible run failed: \(error.localizedDescription)")
+            return .failure(message: L10n.format("OpenAI-compatible run failed: %@", error.localizedDescription))
         }
     }
 
@@ -310,7 +310,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         runtimeProfile: AgentRuntimeProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
-        onProgress("Codex Bridge started for \"\(task.title)\"")
+        onProgress(L10n.format("Codex Bridge started for \"%@\"", task.title))
         let prompt = buildCodexBridgePrompt(task: task, agent: agent)
         let workingDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
             environment: environmentProvider()
@@ -326,7 +326,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             try codexBridgePreflight()
             let summary = try codexBridgeRunner(request, onProgress).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !summary.isEmpty else {
-                return .failure(message: "Codex Bridge returned empty output")
+                return .failure(message: L10n.string("Codex Bridge returned empty output"))
             }
             return .success(summary: summary)
         } catch {
@@ -335,11 +335,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             if Self.isCodexUsageLimitError(initialRawFailure) {
                 do {
                     try codexBridgeRecovery(initialRawFailure, onProgress)
-                    onProgress("Codex app restarted. Retrying interrupted run...")
+                    onProgress(L10n.string("Codex app restarted. Retrying interrupted run..."))
                     let recoveredSummary = try codexBridgeRunner(request, onProgress)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !recoveredSummary.isEmpty else {
-                        return .failure(message: "Codex Bridge returned empty output")
+                        return .failure(message: L10n.string("Codex Bridge returned empty output"))
                     }
                     return .success(summary: recoveredSummary)
                 } catch {
@@ -366,11 +366,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                     workingDirectoryPath: workingDirectoryPath
                 )
                 do {
-                    onProgress("Configured model rejected by Codex account. Retrying without explicit model.")
+                    onProgress(L10n.string("Configured model rejected by Codex account. Retrying without explicit model."))
                     let fallbackSummary = try codexBridgeRunner(fallbackRequest, onProgress)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !fallbackSummary.isEmpty else {
-                        return .failure(message: "Codex Bridge returned empty output")
+                        return .failure(message: L10n.string("Codex Bridge returned empty output"))
                     }
                     return .success(summary: fallbackSummary)
                 } catch {
@@ -393,10 +393,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     private func codexBridgeFailureOutcome(from rawFailure: String) -> AgentTaskExecutionOutcome {
         let summary = Self.summarizeCodexBridgeFailure(rawFailure)
         if rawFailure.isEmpty || summary == rawFailure {
-            return .failure(message: "Codex Bridge run failed: \(summary)")
+            return .failure(message: L10n.format("Codex Bridge run failed: %@", summary))
         }
         return .failure(
-            message: "Codex Bridge run failed: \(summary)\(Self.debugLogDelimiter)\(rawFailure)"
+            message: L10n.format("Codex Bridge run failed: %@", summary) + "\(Self.debugLogDelimiter)\(rawFailure)"
         )
     }
 
@@ -420,37 +420,37 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     private static func summarizeCodexBridgeFailure(_ rawFailure: String) -> String {
         let trimmed = rawFailure.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return "Unknown Codex Bridge error"
+            return L10n.string("Unknown Codex Bridge error")
         }
 
         let normalized = trimmed.lowercased()
         if isCodexChatGPTModelUnsupported(trimmed) {
-            return "Configured model is not supported for Codex Bridge with ChatGPT login. Leave model blank to use Codex default, or switch to a Codex-supported model."
+            return L10n.string("Configured model is not supported for Codex Bridge with ChatGPT login. Leave model blank to use Codex default, or switch to a Codex-supported model.")
         }
         if isCodexUsageLimitError(trimmed) {
-            return "Codex usage limit/quota appears exhausted. OpenMac attempted a Codex app restart and retry once. Please wait for quota reset or top up usage, then retry."
+            return L10n.string("Codex usage limit/quota appears exhausted. OpenMac attempted a Codex app restart and retry once. Please wait for quota reset or top up usage, then retry.")
         }
         if normalized.contains("401 unauthorized") || normalized.contains("missing bearer or basic authentication") {
             let loginCommand = codexLoginCommandForCurrentProfile()
-            return "Codex Bridge authentication missing. Run this once in Terminal: \(loginCommand)"
+            return L10n.format("Codex Bridge authentication missing. Run this once in Terminal: %@", loginCommand)
         }
         if normalized.contains("operation not permitted") {
             let loginCommand = codexLoginCommandForCurrentProfile()
-            return "Permission denied while accessing Codex profile. Run this once in Terminal with the app container profile: \(loginCommand)"
+            return L10n.format("Permission denied while accessing Codex profile. Run this once in Terminal with the app container profile: %@", loginCommand)
         }
         if normalized.contains("failed to connect to websocket"),
            normalized.contains("lookup address information") || normalized.contains("nodename nor servname provided") {
-            return "Network/DNS lookup failed while Codex Bridge contacted OpenAI. Check internet, DNS/proxy settings, and outgoing network permission."
+            return L10n.string("Network/DNS lookup failed while Codex Bridge contacted OpenAI. Check internet, DNS/proxy settings, and outgoing network permission.")
         }
         if normalized.contains("failed to connect to websocket") {
-            return "Codex Bridge could not connect to OpenAI. Check internet/proxy settings and retry."
+            return L10n.string("Codex Bridge could not connect to OpenAI. Check internet/proxy settings and retry.")
         }
         if normalized.contains("codex login") || normalized.contains("not logged in") {
             let loginCommand = codexLoginCommandForCurrentProfile()
-            return "Codex Bridge requires login. Run this once in Terminal: \(loginCommand)"
+            return L10n.format("Codex Bridge requires login. Run this once in Terminal: %@", loginCommand)
         }
         if normalized.contains("no such file or directory"), normalized.contains("codex") {
-            return "Codex CLI not found. Install Codex CLI or set CODEX_CLI_PATH."
+            return L10n.string("Codex CLI not found. Install Codex CLI or set CODEX_CLI_PATH.")
         }
 
         let candidateLine = trimmed
@@ -606,11 +606,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         var errorDescription: String? {
             switch self {
             case .timeout:
-                return "Request timed out"
+                return L10n.string("Request timed out")
             case .invalidResponse:
-                return "Invalid response"
+                return L10n.string("Invalid response")
             case .emptyResponse:
-                return "Empty response"
+                return L10n.string("Empty response")
             case let .serverError(message):
                 return message
             case let .codexBridgeFailed(message):
@@ -643,7 +643,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     ) throws -> String {
         guard let codexExecutable = resolvedCodexExecutableURL() else {
             throw ExecutorError.codexBridgeFailed(
-                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+                L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
         }
 
@@ -683,11 +683,11 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             )
         } catch {
             throw ExecutorError.codexBridgeFailed(
-                "Unable to prepare projects folder at \(configuredWorkdirPath): \(error.localizedDescription)"
+                L10n.format("Unable to prepare projects folder at %@: %@", configuredWorkdirPath, error.localizedDescription)
             )
         }
         process.currentDirectoryURL = workingDirectoryURL
-        onProgress("Codex workdir: \(workingDirectoryURL.path)")
+        onProgress(L10n.format("Codex workdir: %@", workingDirectoryURL.path))
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -720,7 +720,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard process.terminationStatus == 0 else {
-            let message = rawOutput.isEmpty ? "codex exited with code \(process.terminationStatus)" : rawOutput
+            let message = rawOutput.isEmpty ? L10n.format("codex exited with code %d", process.terminationStatus) : rawOutput
             throw ExecutorError.codexBridgeFailed(message)
         }
 
@@ -739,7 +739,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     private static func defaultCodexBridgePreflight() throws {
         guard resolvedCodexExecutableURL() != nil else {
             throw ExecutorError.codexBridgeFailed(
-                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+                L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
         }
 
@@ -748,7 +748,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         guard loginStatus.code == 0, normalized.contains("logged in") else {
             let loginCommand = codexLoginCommandForCurrentProfile()
             throw ExecutorError.codexBridgeFailed(
-                "Codex Bridge profile is not logged in. Run this once in Terminal: \(loginCommand)"
+                L10n.format("Codex Bridge profile is not logged in. Run this once in Terminal: %@", loginCommand)
             )
         }
     }
@@ -757,7 +757,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         reason: String,
         onProgress: @escaping (_ update: String) -> Void
     ) throws {
-        onProgress("Codex usage limit detected. Restarting Codex app...")
+        onProgress(L10n.string("Codex usage limit detected. Restarting Codex app..."))
 
         _ = try? runSystemCommand(
             executablePath: "/usr/bin/osascript",
@@ -771,18 +771,18 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             arguments: ["-a", "Codex"]
         )
         guard launch.code == 0 else {
-            let output = launch.output.isEmpty ? "open exited with code \(launch.code)" : launch.output
-            throw ExecutorError.codexBridgeFailed("Codex app restart failed: \(output)")
+            let output = launch.output.isEmpty ? L10n.format("open exited with code %d", launch.code) : launch.output
+            throw ExecutorError.codexBridgeFailed(L10n.format("Codex app restart failed: %@", output))
         }
 
         Thread.sleep(forTimeInterval: 1.5)
-        onProgress("Codex app restart complete. Resuming task...")
+        onProgress(L10n.string("Codex app restart complete. Resuming task..."))
     }
 
     private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
         guard let executableURL = resolvedCodexExecutableURL() else {
             throw ExecutorError.codexBridgeFailed(
-                "Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key."
+                L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
         }
 
@@ -955,6 +955,14 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
 
+    private func message(_ key: String) -> String {
+        L10n.string(key)
+    }
+
+    private func message(_ key: String, _ arguments: CVarArg...) -> String {
+        L10n.format(key, locale: nil, arguments: arguments)
+    }
+
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
     var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
@@ -971,21 +979,21 @@ final class KanbanBoardViewModel: ObservableObject {
         return max(0, 100 - penalty)
     }
     var boardHealthLabel: String {
-        if boardHealthScore >= 85 { return "Excellent" }
-        if boardHealthScore >= 60 { return "Watch" }
-        return "Critical"
+        if boardHealthScore >= 85 { return message("Excellent") }
+        if boardHealthScore >= 60 { return message("Watch") }
+        return message("Critical")
     }
     var boardHealthBreakdownText: String {
         let penalties = boardHealthPenaltyItems()
-        guard !penalties.isEmpty else { return "No active penalties" }
+        guard !penalties.isEmpty else { return message("No active penalties") }
         let totalPenalty = penalties.reduce(0) { partialResult, item in
             partialResult + item.points
         }
         let lines = penalties
-            .map { "\($0.label): -\($0.points)" }
+            .map { message("%@: -%d", $0.label, $0.points) }
         return (lines + [
-            "Total Penalty: -\(totalPenalty)",
-            "Health Score: \(boardHealthScore)"
+            message("Total Penalty: -%d", totalPenalty),
+            message("Health Score: %d", boardHealthScore)
         ])
         .joined(separator: "\n")
     }
@@ -1056,12 +1064,12 @@ final class KanbanBoardViewModel: ObservableObject {
     func createBoard(name: String) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Board name is required"
+            lastBoardMessage = message("Board name is required")
             return false
         }
 
         if boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(trimmedName) == .orderedSame }) {
-            lastBoardMessage = "Board name already exists"
+            lastBoardMessage = message("Board name already exists")
             return false
         }
 
@@ -1090,19 +1098,19 @@ final class KanbanBoardViewModel: ObservableObject {
     func renameBoard(_ boardID: UUID, to name: String) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Board name is required"
+            lastBoardMessage = message("Board name is required")
             return false
         }
 
         guard let index = boards.firstIndex(where: { $0.id == boardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
 
         if boards.contains(where: {
             $0.id != boardID && $0.name.localizedCaseInsensitiveCompare(trimmedName) == .orderedSame
         }) {
-            lastBoardMessage = "Board name already exists"
+            lastBoardMessage = message("Board name already exists")
             return false
         }
 
@@ -1116,12 +1124,12 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func removeBoard(_ boardID: UUID) -> Bool {
         guard boards.count > 1 else {
-            lastBoardMessage = "At least one board is required"
+            lastBoardMessage = message("At least one board is required")
             return false
         }
 
         guard let removeIndex = boards.firstIndex(where: { $0.id == boardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
 
@@ -1142,7 +1150,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func duplicateBoard(_ boardID: UUID, name: String? = nil) -> Bool {
         guard let sourceIndex = boards.firstIndex(where: { $0.id == boardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
 
@@ -1153,7 +1161,7 @@ final class KanbanBoardViewModel: ObservableObject {
         if let name {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedName.isEmpty else {
-                lastBoardMessage = "Board name is required"
+                lastBoardMessage = message("Board name is required")
                 return false
             }
             resolvedName = trimmedName
@@ -1162,7 +1170,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         if boards.contains(where: { $0.name.localizedCaseInsensitiveCompare(resolvedName) == .orderedSame }) {
-            lastBoardMessage = "Board name already exists"
+            lastBoardMessage = message("Board name already exists")
             return false
         }
 
@@ -1245,7 +1253,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 if let assignedAgentID = task.assignedAgentID, let resolvedName = agentsByID[assignedAgentID] {
                     assigneeName = resolvedName
                 } else {
-                    assigneeName = "Unassigned"
+                    assigneeName = message("Unassigned")
                 }
                 let searchableValues = [
                     board.name.lowercased(),
@@ -1284,12 +1292,12 @@ final class KanbanBoardViewModel: ObservableObject {
     func openTask(_ taskID: UUID, in boardID: UUID) -> Bool {
         syncCurrentBoardRecord()
         guard let boardIndex = boards.firstIndex(where: { $0.id == boardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
 
         guard boards[boardIndex].tasks.contains(where: { $0.id == taskID }) else {
-            lastBoardMessage = "Task not found"
+            lastBoardMessage = message("Task not found")
             return false
         }
 
@@ -1317,7 +1325,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 )
             )
         } catch {
-            lastBoardMessage = "Failed to export workspace"
+            lastBoardMessage = message("Failed to export workspace")
             return nil
         }
     }
@@ -1325,7 +1333,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func selectedBoardExportData() -> Data? {
         syncCurrentBoardRecord()
         guard let selectedBoard = boards.first(where: { $0.id == selectedBoardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return nil
         }
 
@@ -1343,14 +1351,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 )
             )
         } catch {
-            lastBoardMessage = "Failed to export board"
+            lastBoardMessage = message("Failed to export board")
             return nil
         }
     }
 
     func workspaceImportPreview(from data: Data) -> WorkspaceImportPreview? {
         guard let snapshot = decodeWorkspaceSnapshot(from: data) else {
-            lastBoardMessage = "Invalid workspace JSON"
+            lastBoardMessage = message("Invalid workspace JSON")
             return nil
         }
 
@@ -1382,7 +1390,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func workspaceImportPreview(from url: URL) -> WorkspaceImportPreview? {
         guard let data = try? Data(contentsOf: url) else {
-            lastBoardMessage = "Failed to read workspace file"
+            lastBoardMessage = message("Failed to read workspace file")
             return nil
         }
         return workspaceImportPreview(from: data)
@@ -1394,11 +1402,11 @@ final class KanbanBoardViewModel: ObservableObject {
         do {
             try data.write(to: url, options: .atomic)
             let fileName = url.lastPathComponent.isEmpty ? "workspace.json" : url.lastPathComponent
-            lastBoardMessage = "Exported workspace to \(fileName)"
+            lastBoardMessage = message("Exported workspace to %@", fileName)
             lastBoardMessageSeverity = .info
             return true
         } catch {
-            lastBoardMessage = "Failed to write workspace file"
+            lastBoardMessage = message("Failed to write workspace file")
             return false
         }
     }
@@ -1409,11 +1417,11 @@ final class KanbanBoardViewModel: ObservableObject {
         do {
             try data.write(to: url, options: .atomic)
             let fileName = url.lastPathComponent.isEmpty ? "board.json" : url.lastPathComponent
-            lastBoardMessage = "Exported board to \(fileName)"
+            lastBoardMessage = message("Exported board to %@", fileName)
             lastBoardMessageSeverity = .info
             return true
         } catch {
-            lastBoardMessage = "Failed to write board file"
+            lastBoardMessage = message("Failed to write board file")
             return false
         }
     }
@@ -1421,7 +1429,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func importWorkspaceData(_ data: Data, strategy: WorkspaceImportStrategy = .replace) -> Bool {
         guard let snapshot = decodeWorkspaceSnapshot(from: data) else {
-            lastBoardMessage = "Invalid workspace JSON"
+            lastBoardMessage = message("Invalid workspace JSON")
             return false
         }
 
@@ -1442,7 +1450,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         guard !importedBoards.isEmpty else {
-            lastBoardMessage = "Workspace has no boards"
+            lastBoardMessage = message("Workspace has no boards")
             return false
         }
 
@@ -1455,8 +1463,8 @@ final class KanbanBoardViewModel: ObservableObject {
             } ?? importedBoards[0].id
             loadBoard(resolvedSelectedBoardID)
             persistBoardState()
-            let boardLabel = boards.count == 1 ? "board" : "boards"
-            lastBoardMessage = "Imported workspace (\(boards.count) \(boardLabel))"
+            let boardLabel = boards.count == 1 ? message("board") : message("boards")
+            lastBoardMessage = message("Imported workspace (%d %@)", boards.count, boardLabel)
         case .merge:
             syncCurrentBoardRecord()
             let currentSelectedBoardID = selectedBoardID
@@ -1466,8 +1474,8 @@ final class KanbanBoardViewModel: ObservableObject {
             } ?? currentSelectedBoardID
             loadBoard(resolvedSelectedBoardID)
             persistBoardState()
-            let boardLabel = importedBoards.count == 1 ? "board" : "boards"
-            lastBoardMessage = "Merged workspace (+\(importedBoards.count) \(boardLabel))"
+            let boardLabel = importedBoards.count == 1 ? message("board") : message("boards")
+            lastBoardMessage = message("Merged workspace (+%d %@)", importedBoards.count, boardLabel)
         }
         lastBoardMessageSeverity = .info
         return true
@@ -1476,7 +1484,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func importWorkspace(from url: URL, strategy: WorkspaceImportStrategy = .replace) -> Bool {
         guard let data = try? Data(contentsOf: url) else {
-            lastBoardMessage = "Failed to read workspace file"
+            lastBoardMessage = message("Failed to read workspace file")
             return false
         }
 
@@ -1490,12 +1498,12 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard sourceStatus != status else { return false }
         guard sourceStatus.canMove(to: status) else {
-            lastBoardMessage = "Invalid move: \(sourceStatus.title) -> \(status.title)"
+            lastBoardMessage = message("Invalid move: %@ -> %@", message(sourceStatus.title), message(status.title))
             return false
         }
         guard !isWIPLimitReached(for: status, excluding: taskID) else {
             let limit = wipLimits[status] ?? 0
-            lastBoardMessage = "WIP limit reached for \(status.title) (\(limit))"
+            lastBoardMessage = message("WIP limit reached for %@ (%d)", message(status.title), limit)
             return false
         }
 
@@ -1515,17 +1523,17 @@ final class KanbanBoardViewModel: ObservableObject {
     func moveTask(_ taskID: UUID, toBoard targetBoardID: UUID) -> Bool {
         guard let sourceBoardIndex = selectedBoardIndex else { return false }
         guard let targetBoardIndex = boards.firstIndex(where: { $0.id == targetBoardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
         guard sourceBoardIndex != targetBoardIndex else {
-            lastBoardMessage = "Select a different board"
+            lastBoardMessage = message("Select a different board")
             return false
         }
 
         syncCurrentBoardRecord()
         guard let taskIndex = boards[sourceBoardIndex].tasks.firstIndex(where: { $0.id == taskID }) else {
-            lastBoardMessage = "Task not found"
+            lastBoardMessage = message("Task not found")
             return false
         }
 
@@ -1546,17 +1554,17 @@ final class KanbanBoardViewModel: ObservableObject {
     func copyTask(_ taskID: UUID, toBoard targetBoardID: UUID) -> Bool {
         guard let sourceBoardIndex = selectedBoardIndex else { return false }
         guard let targetBoardIndex = boards.firstIndex(where: { $0.id == targetBoardID }) else {
-            lastBoardMessage = "Board not found"
+            lastBoardMessage = message("Board not found")
             return false
         }
         guard sourceBoardIndex != targetBoardIndex else {
-            lastBoardMessage = "Select a different board"
+            lastBoardMessage = message("Select a different board")
             return false
         }
 
         syncCurrentBoardRecord()
         guard let sourceTask = boards[sourceBoardIndex].tasks.first(where: { $0.id == taskID }) else {
-            lastBoardMessage = "Task not found"
+            lastBoardMessage = message("Task not found")
             return false
         }
 
@@ -1600,12 +1608,12 @@ final class KanbanBoardViewModel: ObservableObject {
     func autoAssignTask(_ taskID: UUID) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
         guard tasks[taskIndex].status == .todo else {
-            lastBoardMessage = "Only To Do tasks can be auto-assigned"
+            lastBoardMessage = message("Only To Do tasks can be auto-assigned")
             lastBoardMessageSeverity = .warning
             return false
         }
         guard tasks[taskIndex].assignedAgentID == nil else {
-            lastBoardMessage = "Task already assigned"
+            lastBoardMessage = message("Task already assigned")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -1616,7 +1624,7 @@ final class KanbanBoardViewModel: ObservableObject {
             agents: agents
         ) else {
             lastUnassignedTaskIDs.insert(taskID)
-            lastBoardMessage = "No eligible agent for task"
+            lastBoardMessage = message("No eligible agent for task")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -1644,7 +1652,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
-            lastBoardMessage = "Task title is required"
+            lastBoardMessage = message("Task title is required")
             return false
         }
 
@@ -1690,7 +1698,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
-            lastBoardMessage = "Task title is required"
+            lastBoardMessage = message("Task title is required")
             return false
         }
 
@@ -1765,7 +1773,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func unassignTask(_ taskID: UUID) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
         guard tasks[taskIndex].assignedAgentID != nil else {
-            lastBoardMessage = "Task is already unassigned"
+            lastBoardMessage = message("Task is already unassigned")
             return false
         }
 
@@ -1792,7 +1800,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         guard count > 0 else {
-            lastBoardMessage = "No todo tasks assigned to selected agent"
+            lastBoardMessage = message("No todo tasks assigned to selected agent")
             lastBoardMessageSeverity = .warning
             return 0
         }
@@ -1806,7 +1814,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func clearDoneTasks() -> Int {
         let doneTaskIDs = Set(tasks.filter { $0.status == .done }.map { $0.id })
         guard !doneTaskIDs.isEmpty else {
-            lastBoardMessage = "No done tasks to archive"
+            lastBoardMessage = message("No done tasks to archive")
             lastBoardMessageSeverity = .warning
             return 0
         }
@@ -1876,7 +1884,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         guard movedCount > 0 else {
-            lastBoardMessage = "No todo rebalancing needed"
+            lastBoardMessage = message("No todo rebalancing needed")
             lastBoardMessageSeverity = .warning
             return 0
         }
@@ -1937,7 +1945,7 @@ final class KanbanBoardViewModel: ObservableObject {
     ) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Agent name is required"
+            lastBoardMessage = message("Agent name is required")
             return false
         }
 
@@ -2008,14 +2016,14 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Agent name is required"
+            lastBoardMessage = message("Agent name is required")
             return false
         }
 
         let normalizedCapacity = max(1, maxConcurrentTasks)
         let currentLoad = activeTaskCount(for: agentID)
         guard normalizedCapacity >= currentLoad else {
-            lastBoardMessage = "Cannot set capacity below current load (\(currentLoad))"
+            lastBoardMessage = message("Cannot set capacity below current load (%d)", currentLoad)
             return false
         }
 
@@ -2077,24 +2085,24 @@ final class KanbanBoardViewModel: ObservableObject {
                 recommendations.append(
                     BoardHealthRecommendation(
                         action: .autoAssignUnassignedTodo,
-                        title: "Auto-Assign Unowned To Do",
-                        detail: "\(unassignedTodoTaskCount) unassigned task(s) can be dispatched automatically"
+                        title: message("Auto-Assign Unowned To Do"),
+                        detail: message("%d unassigned task(s) can be dispatched automatically", unassignedTodoTaskCount)
                     )
                 )
 
                 recommendations.append(
                     BoardHealthRecommendation(
                         action: .openManualTriage,
-                        title: "Run Manual Triage",
-                        detail: "Open triage sheet to manually assign pending To Do tasks"
+                        title: message("Run Manual Triage"),
+                        detail: message("Open triage sheet to manually assign pending To Do tasks")
                     )
                 )
             } else {
                 recommendations.append(
                     BoardHealthRecommendation(
                         action: .openNewAgent,
-                        title: "Create First Agent",
-                        detail: "Add an agent profile so pending To Do tasks can be assigned"
+                        title: message("Create First Agent"),
+                        detail: message("Add an agent profile so pending To Do tasks can be assigned")
                     )
                 )
             }
@@ -2104,8 +2112,8 @@ final class KanbanBoardViewModel: ObservableObject {
             recommendations.append(
                 BoardHealthRecommendation(
                     action: .rebalanceTodoLoad,
-                    title: "Rebalance Overloaded Agents",
-                    detail: "Move eligible To Do tasks away from overloaded agents"
+                    title: message("Rebalance Overloaded Agents"),
+                    detail: message("Move eligible To Do tasks away from overloaded agents")
                 )
             )
         }
@@ -2114,8 +2122,8 @@ final class KanbanBoardViewModel: ObservableObject {
             recommendations.append(
                 BoardHealthRecommendation(
                     action: .increaseWIPLimit(.inProgress),
-                    title: "Increase In Progress WIP",
-                    detail: "In Progress is at or above its WIP limit"
+                    title: message("Increase In Progress WIP"),
+                    detail: message("In Progress is at or above its WIP limit")
                 )
             )
         }
@@ -2124,8 +2132,8 @@ final class KanbanBoardViewModel: ObservableObject {
             recommendations.append(
                 BoardHealthRecommendation(
                     action: .increaseWIPLimit(.review),
-                    title: "Increase Review WIP",
-                    detail: "Review is at or above its WIP limit"
+                    title: message("Increase Review WIP"),
+                    detail: message("Review is at or above its WIP limit")
                 )
             )
         }
@@ -2134,8 +2142,8 @@ final class KanbanBoardViewModel: ObservableObject {
             recommendations.append(
                 BoardHealthRecommendation(
                     action: .archiveDone,
-                    title: "Archive Done Tasks",
-                    detail: "\(doneTaskCount) completed task(s) can be archived"
+                    title: message("Archive Done Tasks"),
+                    detail: message("%d completed task(s) can be archived", doneTaskCount)
                 )
             )
         }
@@ -2162,7 +2170,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         case let .increaseWIPLimit(status):
             guard let currentLimit = wipLimit(for: status) else {
-                lastBoardMessage = "\(status.title) has no configured WIP limit"
+                lastBoardMessage = message("%@ has no configured WIP limit", message(status.title))
                 return false
             }
             return updateWIPLimit(for: status, limit: currentLimit + 1)
@@ -2184,13 +2192,13 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         if appliedCount > 0 {
-            lastBoardMessage = "Applied \(appliedCount) health recommendation(s)"
+            lastBoardMessage = message("Applied %d health recommendation(s)", appliedCount)
             lastBoardMessageSeverity = .info
         } else if !actions.isEmpty {
-            lastBoardMessage = "No automatic fixes available for current recommendations"
+            lastBoardMessage = message("No automatic fixes available for current recommendations")
             lastBoardMessageSeverity = .warning
         } else {
-            lastBoardMessage = "Board health already stable"
+            lastBoardMessage = message("Board health already stable")
             lastBoardMessageSeverity = .info
         }
 
@@ -2198,8 +2206,8 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func agentName(for id: UUID?) -> String {
-        guard let id else { return "Unassigned" }
-        return agents.first(where: { $0.id == id })?.name ?? "Unknown"
+        guard let id else { return message("Unassigned") }
+        return agents.first(where: { $0.id == id })?.name ?? message("Unknown")
     }
 
     func wipLimit(for status: KanbanStatus) -> Int? {
@@ -2226,7 +2234,11 @@ final class KanbanBoardViewModel: ObservableObject {
         for (status, limit) in candidateLimits {
             let currentCount = tasks.filter { $0.status == status }.count
             guard limit >= currentCount else {
-                lastBoardMessage = "Cannot set \(status.title) WIP below current count (\(currentCount))"
+                lastBoardMessage = message(
+                    "Cannot set %@ WIP below current count (%d)",
+                    message(status.title),
+                    currentCount
+                )
                 return false
             }
         }
@@ -2308,7 +2320,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func retryTaskExecution(_ taskID: UUID) -> Bool {
         guard let record = executionRecord(for: taskID), record.status == .failed else {
-            lastBoardMessage = "Only failed executions can be retried"
+            lastBoardMessage = message("Only failed executions can be retried")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2324,7 +2336,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func retryTaskExecutionInBackground(_ taskID: UUID, completion: @escaping (Bool) -> Void) {
         guard let record = executionRecord(for: taskID), record.status == .failed else {
-            lastBoardMessage = "Only failed executions can be retried"
+            lastBoardMessage = message("Only failed executions can be retried")
             lastBoardMessageSeverity = .warning
             completion(false)
             return
@@ -2373,10 +2385,14 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? "task has" : "tasks have"
-                lastBoardMessage = "\(detailsMissingCount) assigned \(label) empty details. Fill details before batch run."
+                let label = detailsMissingCount == 1 ? message("task has") : message("tasks have")
+                lastBoardMessage = message(
+                    "%d assigned %@ empty details. Fill details before batch run.",
+                    detailsMissingCount,
+                    label
+                )
             } else {
-                lastBoardMessage = "No assigned tasks are ready to run"
+                lastBoardMessage = message("No assigned tasks are ready to run")
             }
             lastBoardMessageSeverity = .warning
             return 0
@@ -2408,16 +2424,16 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         var summaryParts = [
-            "Batch run finished",
-            "\(startedCount) started",
-            "\(succeededCount) succeeded",
-            "\(failedCount) failed"
+            message("Batch run finished"),
+            message("%d started", startedCount),
+            message("%d succeeded", succeededCount),
+            message("%d failed", failedCount)
         ]
         if skippedCount > 0 {
-            summaryParts.append("\(skippedCount) skipped")
+            summaryParts.append(message("%d skipped", skippedCount))
         }
         if detailsMissingCount > 0 {
-            summaryParts.append("\(detailsMissingCount) missing details")
+            summaryParts.append(message("%d missing details", detailsMissingCount))
         }
 
         lastBoardMessage = summaryParts.joined(separator: " · ")
@@ -2446,10 +2462,14 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? "task has" : "tasks have"
-                lastBoardMessage = "\(detailsMissingCount) assigned \(label) empty details. Fill details before batch run."
+                let label = detailsMissingCount == 1 ? message("task has") : message("tasks have")
+                lastBoardMessage = message(
+                    "%d assigned %@ empty details. Fill details before batch run.",
+                    detailsMissingCount,
+                    label
+                )
             } else {
-                lastBoardMessage = "No assigned tasks are ready to run"
+                lastBoardMessage = message("No assigned tasks are ready to run")
             }
             lastBoardMessageSeverity = .warning
             completion(0)
@@ -2463,16 +2483,16 @@ final class KanbanBoardViewModel: ObservableObject {
 
         func finish() {
             var summaryParts = [
-                "Batch run finished",
-                "\(startedCount) started",
-                "\(succeededCount) succeeded",
-                "\(failedCount) failed"
+                message("Batch run finished"),
+                message("%d started", startedCount),
+                message("%d succeeded", succeededCount),
+                message("%d failed", failedCount)
             ]
             if skippedCount > 0 {
-                summaryParts.append("\(skippedCount) skipped")
+                summaryParts.append(message("%d skipped", skippedCount))
             }
             if detailsMissingCount > 0 {
-                summaryParts.append("\(detailsMissingCount) missing details")
+                summaryParts.append(message("%d missing details", detailsMissingCount))
             }
             lastBoardMessage = summaryParts.joined(separator: " · ")
             lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
@@ -2603,22 +2623,22 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let agent = agents.first(where: { $0.id == agentID }) else { return false }
 
         guard tasks[taskIndex].status == .todo else {
-            lastBoardMessage = "Only To Do tasks can be manually triaged"
+            lastBoardMessage = message("Only To Do tasks can be manually triaged")
             return false
         }
         guard tasks[taskIndex].assignedAgentID == nil else {
-            lastBoardMessage = "Task is already assigned"
+            lastBoardMessage = message("Task is already assigned")
             return false
         }
 
         guard agent.hasSkills(for: tasks[taskIndex]) else {
-            lastBoardMessage = "Agent \(agent.name) does not match required skills"
+            lastBoardMessage = message("Agent %@ does not match required skills", agent.name)
             return false
         }
 
         let currentLoad = activeTaskCount(for: agentID)
         guard currentLoad < agent.maxConcurrentTasks else {
-            lastBoardMessage = "Agent \(agent.name) is at max load (\(agent.maxConcurrentTasks))"
+            lastBoardMessage = message("Agent %@ is at max load (%d)", agent.name, agent.maxConcurrentTasks)
             return false
         }
 
@@ -2636,26 +2656,26 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let agent = agents.first(where: { $0.id == agentID }) else { return false }
 
         guard tasks[taskIndex].status == .todo else {
-            lastBoardMessage = "Only To Do tasks can be reassigned"
+            lastBoardMessage = message("Only To Do tasks can be reassigned")
             return false
         }
         guard let currentAgentID = tasks[taskIndex].assignedAgentID else {
-            lastBoardMessage = "Task is unassigned"
+            lastBoardMessage = message("Task is unassigned")
             return false
         }
         guard currentAgentID != agentID else {
-            lastBoardMessage = "Task already assigned to \(agent.name)"
+            lastBoardMessage = message("Task already assigned to %@", agent.name)
             return false
         }
 
         guard agent.hasSkills(for: tasks[taskIndex]) else {
-            lastBoardMessage = "Agent \(agent.name) does not match required skills"
+            lastBoardMessage = message("Agent %@ does not match required skills", agent.name)
             return false
         }
 
         let currentLoad = activeTaskCount(for: agentID)
         guard currentLoad < agent.maxConcurrentTasks else {
-            lastBoardMessage = "Agent \(agent.name) is at max load (\(agent.maxConcurrentTasks))"
+            lastBoardMessage = message("Agent %@ is at max load (%d)", agent.name, agent.maxConcurrentTasks)
             return false
         }
 
@@ -2689,7 +2709,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard assignedCount > 0 else {
             if !candidates.isEmpty {
-                lastBoardMessage = "No eligible agents available for pending triage tasks"
+                lastBoardMessage = message("No eligible agents available for pending triage tasks")
                 lastBoardMessageSeverity = .warning
             }
             return 0
@@ -2745,9 +2765,15 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func bulkTriageAssignmentSummary(assignedCount: Int, remainingCount: Int) -> String {
-        let assignedLabel = assignedCount == 1 ? "task" : "tasks"
-        let remainingLabel = remainingCount == 1 ? "task still needs" : "tasks still need"
-        return "Assigned \(assignedCount) triage \(assignedLabel). \(remainingCount) \(remainingLabel) manual attention"
+        let assignedLabel = assignedCount == 1 ? message("task") : message("tasks")
+        let remainingLabel = remainingCount == 1 ? message("task still needs") : message("tasks still need")
+        return message(
+            "Assigned %d triage %@. %d %@ manual attention",
+            assignedCount,
+            assignedLabel,
+            remainingCount,
+            remainingLabel
+        )
     }
 
     private func normalizeExecutionText(_ value: String?) -> String? {
@@ -2817,18 +2843,18 @@ final class KanbanBoardViewModel: ObservableObject {
         lastExecutionDebugLog = nil
         lastCodexLoginCommand = nil
         guard tasks[taskIndex].status != .done else {
-            lastBoardMessage = "Done tasks cannot be executed"
+            lastBoardMessage = message("Done tasks cannot be executed")
             lastBoardMessageSeverity = .warning
             return nil
         }
         guard let agentID = tasks[taskIndex].assignedAgentID,
               let agent = agents.first(where: { $0.id == agentID }) else {
-            lastBoardMessage = "Assign an agent before running this task"
+            lastBoardMessage = message("Assign an agent before running this task")
             lastBoardMessageSeverity = .warning
             return nil
         }
         guard !requiresTaskDetails || !tasks[taskIndex].details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            lastBoardMessage = "Task details are required before running this task"
+            lastBoardMessage = message("Task details are required before running this task")
             lastBoardMessageSeverity = .warning
             return nil
         }
@@ -2836,7 +2862,7 @@ final class KanbanBoardViewModel: ObservableObject {
         if tasks[taskIndex].status == .todo {
             guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
                 let limit = wipLimits[.inProgress] ?? 0
-                lastBoardMessage = "WIP limit reached for In Progress (\(limit))"
+                lastBoardMessage = message("WIP limit reached for In Progress (%d)", limit)
                 lastBoardMessageSeverity = .warning
                 return nil
             }
@@ -2858,8 +2884,8 @@ final class KanbanBoardViewModel: ObservableObject {
             taskID: taskID,
             taskTitle: tasks[taskIndex].title,
             status: .running,
-            message: "Started execution · \(tasks[taskIndex].title)",
-            details: "Story points: \(tasks[taskIndex].storyPoints)"
+            message: message("Started execution · %@", tasks[taskIndex].title),
+            details: message("Story points: %d", tasks[taskIndex].storyPoints)
         )
 
         return PreparedTaskExecution(
@@ -2913,15 +2939,15 @@ final class KanbanBoardViewModel: ObservableObject {
                 if tasks[taskIndex].status == .inProgress {
                     if isWIPLimitReached(for: .review, excluding: prepared.taskID) {
                         let limit = wipLimits[.review] ?? 0
-                        lastBoardMessage = "Execution completed, but Review WIP limit reached (\(limit))"
+                        lastBoardMessage = message("Execution completed, but Review WIP limit reached (%d)", limit)
                         lastBoardMessageSeverity = .warning
                     } else {
                         tasks[taskIndex].status = .review
-                        lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                        lastBoardMessage = message("Execution succeeded: %@", tasks[taskIndex].title)
                         lastBoardMessageSeverity = .info
                     }
                 } else {
-                    lastBoardMessage = "Execution succeeded: \(tasks[taskIndex].title)"
+                    lastBoardMessage = message("Execution succeeded: %@", tasks[taskIndex].title)
                     lastBoardMessageSeverity = .info
                 }
                 appendAgentExecutionEvent(
@@ -2929,7 +2955,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     taskID: prepared.taskID,
                     taskTitle: tasks[taskIndex].title,
                     status: .succeeded,
-                    message: "Execution succeeded · \(tasks[taskIndex].title)",
+                    message: message("Execution succeeded · %@", tasks[taskIndex].title),
                     details: normalizedSummary
                 )
             }
@@ -2940,7 +2966,7 @@ final class KanbanBoardViewModel: ObservableObject {
             failedRecord.status = .failed
             failedRecord.lastFinishedAt = finishedAt
             failedRecord.lastOutputSummary = nil
-            failedRecord.lastError = normalizeExecutionText(parsedFailure.userMessage) ?? "Unknown execution error"
+            failedRecord.lastError = normalizeExecutionText(parsedFailure.userMessage) ?? self.message("Unknown execution error")
             failedRecord.lastDebugOutput = normalizeExecutionText(parsedFailure.debugLog)
             failedRecord.lastAgentID = prepared.agent.id
             tasks[taskIndex].executionRecord = failedRecord
@@ -2949,11 +2975,11 @@ final class KanbanBoardViewModel: ObservableObject {
                 from: failedRecord.lastError,
                 debugLog: failedRecord.lastDebugOutput
             )
-            lastBoardMessage = "Execution failed: \(failedRecord.lastError ?? "Unknown execution error")"
+            lastBoardMessage = self.message("Execution failed: %@", failedRecord.lastError ?? self.message("Unknown execution error"))
             lastBoardMessageSeverity = .warning
             let eventDetails: String?
             if let debug = failedRecord.lastDebugOutput, !debug.isEmpty {
-                eventDetails = "Debug:\n\(debug)"
+                eventDetails = self.message("Debug:\n%@", debug)
             } else {
                 eventDetails = nil
             }
@@ -2962,7 +2988,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 taskID: prepared.taskID,
                 taskTitle: tasks[taskIndex].title,
                 status: .failed,
-                message: failedRecord.lastError ?? "Unknown execution error",
+                message: failedRecord.lastError ?? self.message("Unknown execution error"),
                 details: eventDetails
             )
         }
@@ -2994,7 +3020,7 @@ final class KanbanBoardViewModel: ObservableObject {
         guard missingDetailsSignals.contains(where: { normalized.contains($0) }) else {
             return nil
         }
-        return "Execution blocked: missing task details or acceptance criteria"
+        return self.message("Execution blocked: missing task details or acceptance criteria")
     }
 
     private func extractCodexLoginCommand(from userMessage: String?, debugLog: String?) -> String? {
@@ -3173,24 +3199,24 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let unassignedPenalty = min(30, unassignedTodoTaskCount * 10)
         if unassignedPenalty > 0 {
-            items.append(("Unassigned To Do", unassignedPenalty))
+            items.append((message("Unassigned To Do"), unassignedPenalty))
         }
 
         let overloadedPenalty = min(30, overloadedAgentCount * 10)
         if overloadedPenalty > 0 {
-            items.append(("Overloaded Agents", overloadedPenalty))
+            items.append((message("Overloaded Agents"), overloadedPenalty))
         }
 
         if wipPressurePercent(for: .inProgress) >= 100 {
-            items.append(("In Progress WIP Pressure", 10))
+            items.append((message("In Progress WIP Pressure"), 10))
         }
 
         if wipPressurePercent(for: .review) >= 100 {
-            items.append(("Review WIP Pressure", 10))
+            items.append((message("Review WIP Pressure"), 10))
         }
 
         if doneTaskCount > 0 {
-            items.append(("Done Backlog", 5))
+            items.append((message("Done Backlog"), 5))
         }
 
         return items

@@ -4695,6 +4695,150 @@ struct KanbanPersistenceTests {
     }
 }
 
+struct AppLanguageResolverTests {
+    @Test("maps traditional Chinese locales to zh-Hant")
+    func mapsTraditionalChineseLocales() {
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-TW"]).rawValue == "zh-Hant")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-HK"]).rawValue == "zh-Hant")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-Hant"]).rawValue == "zh-Hant")
+    }
+
+    @Test("maps simplified Chinese locales to zh-Hans")
+    func mapsSimplifiedChineseLocales() {
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-CN"]).rawValue == "zh-Hans")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-SG"]).rawValue == "zh-Hans")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-Hans"]).rawValue == "zh-Hans")
+    }
+
+    @Test("maps supported non-Chinese locales")
+    func mapsSupportedLocales() {
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["en-US"]).rawValue == "en")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["fr-FR"]).rawValue == "fr")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["es-ES"]).rawValue == "es")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["ja-JP"]).rawValue == "ja")
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["ko-KR"]).rawValue == "ko")
+    }
+
+    @Test("falls back to English when no preferred language is supported")
+    func fallsBackToEnglishForUnsupportedLocales() {
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["de-DE", "it-IT"]).rawValue == "en")
+    }
+
+    @Test("uses first supported preferred language in order")
+    func picksFirstSupportedPreferredLanguage() {
+        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["de-DE", "ja-JP", "fr-FR"]).rawValue == "ja")
+    }
+}
+
+struct LocalizationCatalogTests {
+    private static let supportedLocaleCodes = ["en", "zh-Hant", "zh-Hans", "fr", "es", "ja", "ko"]
+
+    @Test("supported localization files share the same key set as English")
+    func localizationKeysMatchEnglishBaseline() {
+        let englishTable = localizationTable(for: "en")
+        #expect(!englishTable.isEmpty)
+        let englishKeys = Set(englishTable.keys)
+
+        for locale in Self.supportedLocaleCodes where locale != "en" {
+            let localizedTable = localizationTable(for: locale)
+            let localizedKeys = Set(localizedTable.keys)
+            let missingKeys = englishKeys.subtracting(localizedKeys)
+            let extraKeys = localizedKeys.subtracting(englishKeys)
+
+            #expect(missingKeys.isEmpty, "\(locale) is missing \(missingKeys.count) localization keys")
+            #expect(extraKeys.isEmpty, "\(locale) has \(extraKeys.count) extra localization keys")
+        }
+    }
+
+    @Test("supported localization files do not contain empty values")
+    func localizationValuesAreNonEmpty() {
+        for locale in Self.supportedLocaleCodes {
+            let localizedTable = localizationTable(for: locale)
+            let emptyValueKeys = localizedTable.keys.filter { key in
+                let value = localizedTable[key] ?? ""
+                return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            #expect(emptyValueKeys.isEmpty, "\(locale) contains \(emptyValueKeys.count) empty localization values")
+        }
+    }
+
+    @Test("localized format placeholders match English baseline")
+    func localizationFormatPlaceholdersMatchEnglishBaseline() {
+        let englishTable = localizationTable(for: "en")
+        #expect(!englishTable.isEmpty)
+
+        let formattedEnglishKeys = englishTable.keys.filter { key in
+            let value = englishTable[key] ?? ""
+            return value.contains("%")
+        }
+
+        for locale in Self.supportedLocaleCodes where locale != "en" {
+            let localizedTable = localizationTable(for: locale)
+
+            for key in formattedEnglishKeys {
+                guard let englishValue = englishTable[key],
+                      let localizedValue = localizedTable[key] else {
+                    continue
+                }
+
+                let englishTokens = formatTokens(in: englishValue)
+                let localizedTokens = formatTokens(in: localizedValue)
+                #expect(
+                    englishTokens == localizedTokens,
+                    "\(locale) placeholder mismatch for key '\(key)'"
+                )
+            }
+        }
+    }
+
+    private func localizationTable(for localeCode: String) -> [String: String] {
+        let fileURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("OpenMac/\(localeCode).lproj/Localizable.strings")
+
+        guard let dictionary = NSDictionary(contentsOf: fileURL) as? [String: String] else {
+            Issue.record("Failed to load localization file: \(fileURL.path)")
+            return [:]
+        }
+        return dictionary
+    }
+
+    private func formatTokens(in value: String) -> [String] {
+        let characters = Array(value)
+        var tokens: [String] = []
+        var index = 0
+
+        while index < characters.count {
+            guard characters[index] == "%" else {
+                index += 1
+                continue
+            }
+
+            let start = index
+            index += 1
+
+            if index < characters.count, characters[index] == "%" {
+                tokens.append("%%")
+                index += 1
+                continue
+            }
+
+            while index < characters.count {
+                let character = characters[index]
+                if character == "@" || character.isLetter {
+                    index += 1
+                    tokens.append(String(characters[start..<index]))
+                    break
+                }
+                index += 1
+            }
+        }
+
+        return tokens
+    }
+}
+
 private struct StubTaskExecutor: AgentTaskExecuting {
     let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
     let progressUpdatesByTaskID: [UUID: [String]]

@@ -10,10 +10,12 @@ import SwiftUI
 @main
 struct OpenMacApp: App {
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
+    private let appLocale = AppLanguageResolver.resolvedLocale()
 
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: .persistentBoard())
+                .environment(\.locale, appLocale)
         }
         .commands {
             CommandMenu("Appearance") {
