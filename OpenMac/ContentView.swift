@@ -3672,6 +3672,21 @@ private extension ContentView {
         )
     }
 
+    private static func openFirstGlobalSearchResultIfAny(_ view: ContentView) {
+        if let result = view.globalTaskSearchResults.first {
+            view.openGlobalTaskSearchResult(result)
+        }
+    }
+
+    private static func assignFirstManualCandidateIfAny(view: ContentView, viewModel: KanbanBoardViewModel) {
+        let candidates = viewModel.triageCandidates()
+        if let candidate = candidates.first,
+           let targetAgent = viewModel.assignableAgents(for: candidate.id).first {
+            view.triageSelectionByTaskID[candidate.id] = targetAgent.id
+            view.assignManually(taskID: candidate.id)
+        }
+    }
+
     @MainActor
     static func testExerciseActionHandlersForCoverage() -> Int {
         let now = Date(timeIntervalSince1970: 1_735_000_000)
@@ -3881,13 +3896,11 @@ private extension ContentView {
         }
         hit {
             view.globalTaskSearchQuery = "Assigned"
-            if let result = view.globalTaskSearchResults.first {
-                view.openGlobalTaskSearchResult(result)
-            }
+            Self.openFirstGlobalSearchResultIfAny(view)
         }
         hit {
             view.globalTaskSearchQuery = "NoMatchCoverageQuery"
-            _ = view.globalTaskSearchResults.count
+            Self.openFirstGlobalSearchResultIfAny(view)
         }
         hit { view.closeGlobalTaskFinder() }
 
@@ -3952,20 +3965,14 @@ private extension ContentView {
         hit { _ = view.hasManualTriageCandidates() }
         hit { view.closeManualTriageSheet() }
         hit { view.assignManually(taskID: UUID()) }
-        hit {
-            let candidates = viewModel.triageCandidates()
-            if let candidate = candidates.first,
-               let targetAgent = viewModel.assignableAgents(for: candidate.id).first {
-                view.triageSelectionByTaskID[candidate.id] = targetAgent.id
-                view.assignManually(taskID: candidate.id)
-            }
-        }
+        hit { Self.assignFirstManualCandidateIfAny(view: view, viewModel: viewModel) }
         hit {
             if let assignedTaskID = viewModel.tasks.first(where: { $0.assignedAgentID != nil })?.id {
                 view.assignManually(taskID: assignedTaskID)
             }
         }
         hit { view.assignAllManually() }
+        hit { Self.assignFirstManualCandidateIfAny(view: view, viewModel: viewModel) }
         hit { view.refreshTriageSelections() }
 
         hit {
