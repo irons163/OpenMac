@@ -1970,7 +1970,7 @@ private struct TaskCardView: View {
                 }
 
                 if let output = executionRecord.lastOutputSummary, executionRecord.status == .succeeded {
-                    Text(L10n.format("Output: %@", output))
+                    Text(L10n.format("Output: %@", normalizedExecutionSummaryForDisplay(output)))
                         .font(.caption2)
                         .foregroundStyle(BoardSemanticTextPalette.color(for: .success, scheme: colorScheme))
                         .lineLimit(3)
@@ -2140,7 +2140,7 @@ private struct ExecutionDetailsSheet: View {
             if let output = details.executionRecord.lastOutputSummary, !output.isEmpty {
                 executionTextSection(
                     title: L10n.string("Output"),
-                    value: output,
+                    value: normalizedExecutionSummaryForDisplay(output),
                     tint: BoardSemanticTextPalette.color(for: .success, scheme: colorScheme),
                     copyButtonTitle: L10n.string("Copy Output")
                 )
@@ -2223,6 +2223,38 @@ private struct ExecutionDetailsSheet: View {
         formatter.timeStyle = .medium
         return formatter
     }()
+}
+
+private func normalizedExecutionSummaryForDisplay(_ summary: String) -> String {
+    let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return summary }
+
+    let headingTokens = ["summary", "摘要", "resumen", "resume", "要約", "요약"]
+    let firstLine = trimmed
+        .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        .first
+        .map(String.init)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+    let normalizedFirstLine = firstLine
+        .replacingOccurrences(of: "：", with: ":")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let lowercaseFirstLine = normalizedFirstLine.lowercased()
+
+    if let token = headingTokens.first(where: { lowercaseFirstLine.hasPrefix("\($0):") }) {
+        let index = normalizedFirstLine.index(normalizedFirstLine.startIndex, offsetBy: token.count + 1)
+        let inlineContent = String(normalizedFirstLine[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !inlineContent.isEmpty {
+            return inlineContent
+        }
+
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 1 else { return trimmed }
+        let remainder = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? trimmed : remainder
+    }
+
+    return trimmed
 }
 
 private struct AgentLiveConsoleView: View {
