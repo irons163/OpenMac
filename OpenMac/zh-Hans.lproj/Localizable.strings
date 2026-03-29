@@ -1,5 +1,5 @@
 /* Auto-generated localization table. */
-"AI Agent Kanban Dispatch" = "AI Agent 看板派工";
+"AI Agent Kanban Dispatch" = "AI 代理看板派工";
 "AI Agents" = "AI 代理";
 "Auto Assign AI" = "自动分配 AI";
 "Run Assigned" = "运行已分配";
@@ -7,7 +7,7 @@
 "Running..." = "运行中...";
 "Running Assigned Tasks..." = "正在运行已分配任务...";
 "New Task" = "新建任务";
-"New Agent" = "新建 Agent";
+"New Agent" = "新建代理";
 "Find Task" = "查找任务";
 "Board" = "看板";
 "Board Actions" = "看板操作";
@@ -46,14 +46,14 @@
 "Close" = "关闭";
 "Copy" = "复制";
 "Details" = "详情";
-"Run Agent" = "运行 Agent";
+"Run Agent" = "运行代理";
 "Retry Last Run" = "重试上次运行";
 "View Execution Details" = "查看执行详情";
 "Unassign Task" = "取消任务分配";
 "Edit Task" = "编辑任务";
-"Edit Agent" = "编辑 Agent";
+"Edit Agent" = "编辑代理";
 "Create Task" = "创建任务";
-"Create Agent" = "创建 Agent";
+"Create Agent" = "创建代理";
 "New Board" = "新建看板";
 "Rename Board" = "重命名看板";
 "Delete Board" = "删除看板";
@@ -116,7 +116,7 @@
 "%d task(s) need manual triage" = "有 %d 个任务需要手动分流";
 "%d%%" = "%d%%";
 "%d/%d" = "%d/%d";
-"Agent Live Console · %@" = "Agent 实时控制台 · %@";
+"Agent Live Console · %@" = "代理实时控制台 · %@";
 "Appearance: %@" = "外观：%@";
 "Apply All (%d)" = "全部应用（%d）";
 "Apply Health Fixes (%d)" = "应用健康修复（%d）";
@@ -157,7 +157,7 @@
 "%d unassigned task(s) can be dispatched automatically" = "%d 未分配的任务可以自动分派";
 "Add an agent profile so pending To Do tasks can be assigned" = "请先新增代理配置，才能分配待办任务";
 "Agent %@ does not match required skills" = "代理 %@ 不符合所需技能";
-"Agent %@ is at max load (%d)" = "Agent %@ 处于最大负载 (%d)";
+"Agent %@ is at max load (%d)" = "代理 %@ 处于最大负载 (%d)";
 "Agent name is required" = "代理名称为必填项";
 "Applied %d health recommendation(s)" = "已应用 %d 健康建议";
 "Apply" = "应用";

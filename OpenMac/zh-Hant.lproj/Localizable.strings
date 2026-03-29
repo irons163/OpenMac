@@ -1,5 +1,5 @@
 /* Auto-generated localization table. */
-"AI Agent Kanban Dispatch" = "AI Agent 看板派工";
+"AI Agent Kanban Dispatch" = "AI 代理看板派工";
 "AI Agents" = "AI 代理";
 "Auto Assign AI" = "自動指派 AI";
 "Run Assigned" = "執行已指派";
@@ -7,7 +7,7 @@
 "Running..." = "執行中...";
 "Running Assigned Tasks..." = "正在執行已指派任務...";
 "New Task" = "新增任務";
-"New Agent" = "新增 Agent";
+"New Agent" = "新增代理";
 "Find Task" = "搜尋任務";
 "Board" = "看板";
 "Board Actions" = "看板操作";
@@ -46,14 +46,14 @@
 "Close" = "關閉";
 "Copy" = "複製";
 "Details" = "詳情";
-"Run Agent" = "執行 Agent";
+"Run Agent" = "執行代理";
 "Retry Last Run" = "重試上次執行";
 "View Execution Details" = "查看執行詳情";
 "Unassign Task" = "取消任務指派";
 "Edit Task" = "編輯任務";
-"Edit Agent" = "編輯 Agent";
+"Edit Agent" = "編輯代理";
 "Create Task" = "建立任務";
-"Create Agent" = "建立 Agent";
+"Create Agent" = "建立代理";
 "New Board" = "新增看板";
 "Rename Board" = "重新命名看板";
 "Delete Board" = "刪除看板";
@@ -116,7 +116,7 @@
 "%d task(s) need manual triage" = "有 %d 個任務需要手動分流";
 "%d%%" = "%d%%";
 "%d/%d" = "%d/%d";
-"Agent Live Console · %@" = "Agent 即時主控台 · %@";
+"Agent Live Console · %@" = "代理即時主控台 · %@";
 "Appearance: %@" = "外觀：%@";
 "Apply All (%d)" = "全部套用（%d）";
 "Apply Health Fixes (%d)" = "套用健康修復（%d）";
