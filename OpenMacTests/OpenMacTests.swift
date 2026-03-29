@@ -4820,37 +4820,44 @@ struct KanbanPersistenceTests {
 }
 
 struct AppLanguageResolverTests {
+    private func resolve(_ preferredLanguages: [String]) -> AppLanguage {
+        AppLanguageResolver.resolvedLanguage(
+            preferredLanguages: preferredLanguages,
+            overrideRawValue: AppLanguageSettings.systemValue
+        )
+    }
+
     @Test("maps traditional Chinese locales to zh-Hant")
     func mapsTraditionalChineseLocales() {
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-TW"]).rawValue == "zh-Hant")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-HK"]).rawValue == "zh-Hant")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-Hant"]).rawValue == "zh-Hant")
+        #expect(resolve(["zh-TW"]).rawValue == "zh-Hant")
+        #expect(resolve(["zh-HK"]).rawValue == "zh-Hant")
+        #expect(resolve(["zh-Hant"]).rawValue == "zh-Hant")
     }
 
     @Test("maps simplified Chinese locales to zh-Hans")
     func mapsSimplifiedChineseLocales() {
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-CN"]).rawValue == "zh-Hans")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-SG"]).rawValue == "zh-Hans")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["zh-Hans"]).rawValue == "zh-Hans")
+        #expect(resolve(["zh-CN"]).rawValue == "zh-Hans")
+        #expect(resolve(["zh-SG"]).rawValue == "zh-Hans")
+        #expect(resolve(["zh-Hans"]).rawValue == "zh-Hans")
     }
 
     @Test("maps supported non-Chinese locales")
     func mapsSupportedLocales() {
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["en-US"]).rawValue == "en")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["fr-FR"]).rawValue == "fr")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["es-ES"]).rawValue == "es")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["ja-JP"]).rawValue == "ja")
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["ko-KR"]).rawValue == "ko")
+        #expect(resolve(["en-US"]).rawValue == "en")
+        #expect(resolve(["fr-FR"]).rawValue == "fr")
+        #expect(resolve(["es-ES"]).rawValue == "es")
+        #expect(resolve(["ja-JP"]).rawValue == "ja")
+        #expect(resolve(["ko-KR"]).rawValue == "ko")
     }
 
     @Test("falls back to English when no preferred language is supported")
     func fallsBackToEnglishForUnsupportedLocales() {
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["de-DE", "it-IT"]).rawValue == "en")
+        #expect(resolve(["de-DE", "it-IT"]).rawValue == "en")
     }
 
     @Test("uses first supported preferred language in order")
     func picksFirstSupportedPreferredLanguage() {
-        #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["de-DE", "ja-JP", "fr-FR"]).rawValue == "ja")
+        #expect(resolve(["de-DE", "ja-JP", "fr-FR"]).rawValue == "ja")
     }
 
     @Test("uses explicit language override when provided")
