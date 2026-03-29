@@ -2741,6 +2741,7 @@ struct KanbanFlowTests {
     }
 }
 
+@MainActor
 struct KanbanSupportTypeTests {
     @Test("board health recommendation id is stable for each action")
     func boardHealthRecommendationIDMapping() {
@@ -2785,6 +2786,58 @@ struct KanbanSupportTypeTests {
         )
 
         #expect(result.id == "\(boardID.uuidString)-\(taskID.uuidString)")
+    }
+
+    @Test("runtime provider and auth mode ids map to raw values")
+    func runtimeProviderAndAuthModeIDs() {
+        for provider in AgentRuntimeProvider.allCases {
+            #expect(provider.id == provider.rawValue)
+        }
+        for authMode in OpenAICompatibleAuthMode.allCases {
+            #expect(authMode.id == authMode.rawValue)
+        }
+    }
+
+    @Test("agent runtime profile encodes and decodes all persisted fields")
+    func agentRuntimeProfileCodableRoundTrip() throws {
+        let profile = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5-mini",
+            endpoint: "https://api.openai.com/v1",
+            tools: ["shell", "git"],
+            openAIAuthMode: .codexBridge,
+            codexProfile: "team-default"
+        )
+
+        let encoded = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(AgentRuntimeProfile.self, from: encoded)
+
+        #expect(decoded.provider == .openAICompatible)
+        #expect(decoded.model == "gpt-5-mini")
+        #expect(decoded.endpoint == "https://api.openai.com/v1")
+        #expect(decoded.tools == Set(["shell", "git"]))
+        #expect(decoded.openAIAuthMode == .codexBridge)
+        #expect(decoded.codexProfile == "team-default")
+    }
+
+    @Test("agent runtime profile decode defaults optional coding keys")
+    func agentRuntimeProfileDecodeDefaultsMissingKeys() throws {
+        let json = """
+        {
+          "provider": "openAICompatible",
+          "model": "gpt-4.1-mini",
+          "endpoint": "https://api.openai.com/v1"
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AgentRuntimeProfile.self, from: json)
+
+        #expect(decoded.provider == .openAICompatible)
+        #expect(decoded.model == "gpt-4.1-mini")
+        #expect(decoded.endpoint == "https://api.openai.com/v1")
+        #expect(decoded.tools.isEmpty)
+        #expect(decoded.openAIAuthMode == .apiKey)
+        #expect(decoded.codexProfile == nil)
     }
 }
 
