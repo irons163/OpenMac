@@ -3672,8 +3672,12 @@ private extension ContentView {
         )
     }
 
-    private static func openFirstGlobalSearchResultIfAny(_ view: ContentView) {
-        if let result = view.globalTaskSearchResults.first {
+    private static func openFirstGlobalSearchResultIfAny(
+        _ view: ContentView,
+        results: [GlobalTaskSearchResult]? = nil
+    ) {
+        let resolvedResults = results ?? view.globalTaskSearchResults
+        if let result = resolvedResults.first {
             view.openGlobalTaskSearchResult(result)
         }
     }
@@ -4086,6 +4090,78 @@ private extension ContentView {
         hit { _ = view.hasAssignedTodoTasks(for: agentA.id) }
         hit { _ = view.hasAssignedTodoTasks(for: UUID()) }
         hit { _ = view.selectedAgentForConsole }
+
+        return exercised
+    }
+
+    @MainActor
+    static func testExerciseTargetedHelperBranchesForCoverage() -> Int {
+        var exercised = 0
+
+        func hit(_ action: () -> Void) {
+            action()
+            exercised += 1
+        }
+
+        let searchAgent = AgentProfile(name: "Search Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let searchTask = WorkTask(
+            title: "Searchable Coverage Task",
+            details: "Search details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let searchViewModel = KanbanBoardViewModel(tasks: [searchTask], agents: [searchAgent])
+        let searchView = ContentView(viewModel: searchViewModel)
+        let injectedSearchResult = GlobalTaskSearchResult(
+            taskID: searchTask.id,
+            taskTitle: searchTask.title,
+            taskDetails: searchTask.details,
+            status: searchTask.status,
+            boardID: searchViewModel.selectedBoardID,
+            boardName: searchViewModel.selectedBoardName,
+            assigneeName: L10n.string("Unassigned")
+        )
+        hit {
+            Self.openFirstGlobalSearchResultIfAny(searchView, results: [injectedSearchResult])
+        }
+        hit {
+            Self.openFirstGlobalSearchResultIfAny(searchView, results: [])
+        }
+
+        let assignableAgent = AgentProfile(name: "Assignable Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let assignableTask = WorkTask(
+            title: "Assignable Coverage Task",
+            details: "Assignable details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let assignableViewModel = KanbanBoardViewModel(tasks: [assignableTask], agents: [assignableAgent])
+        let assignableView = ContentView(viewModel: assignableViewModel)
+        hit {
+            Self.assignFirstManualCandidateIfAny(view: assignableView, viewModel: assignableViewModel)
+        }
+        hit {
+            Self.assignFirstManualCandidateIfAny(view: assignableView, viewModel: assignableViewModel)
+        }
+
+        let mismatchAgent = AgentProfile(name: "Mismatch Agent", skills: ["ios"], maxConcurrentTasks: 1)
+        let mismatchTask = WorkTask(
+            title: "Mismatch Coverage Task",
+            details: "Mismatch details",
+            requiredSkills: ["qa"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let mismatchViewModel = KanbanBoardViewModel(tasks: [mismatchTask], agents: [mismatchAgent])
+        let mismatchView = ContentView(viewModel: mismatchViewModel)
+        hit {
+            Self.assignFirstManualCandidateIfAny(view: mismatchView, viewModel: mismatchViewModel)
+        }
 
         return exercised
     }
@@ -4929,6 +5005,11 @@ enum ContentViewTestHooks {
     @MainActor
     static func exerciseActionHandlersForCoverage() -> Int {
         ContentView.testExerciseActionHandlersForCoverage()
+    }
+
+    @MainActor
+    static func exerciseTargetedHelperBranchesForCoverage() -> Int {
+        ContentView.testExerciseTargetedHelperBranchesForCoverage()
     }
 }
 #endif

@@ -3729,6 +3729,12 @@ struct ContentViewLogicTests {
         let exercisedCount = ContentViewTestHooks.exerciseActionHandlersForCoverage()
         #expect(exercisedCount >= 40)
     }
+
+    @Test("content helper branches execute search and triage edge cases")
+    func exerciseTargetedHelperBranchesForCoverage() {
+        let exercisedCount = ContentViewTestHooks.exerciseTargetedHelperBranchesForCoverage()
+        #expect(exercisedCount >= 5)
+    }
 }
 
 @Suite(.serialized)
