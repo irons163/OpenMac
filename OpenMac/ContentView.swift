@@ -11,7 +11,8 @@ private struct TaskDragPayload: Codable, Transferable {
 }
 
 private extension UTType {
-    static let openMACTaskDragPayload = UTType(exportedAs: "com.irons.openmac.task-drag-payload")
+    // Internal drag payload for in-app transfers; no exported UTI registration needed.
+    static let openMACTaskDragPayload = UTType(importedAs: "com.irons.openmac.task-drag-payload")
 }
 
 struct ContentView: View {

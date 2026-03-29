@@ -1906,6 +1906,7 @@ struct KanbanFlowTests {
     }
 }
 
+@MainActor
 struct KanbanPersistenceTests {
 
     @Test("persists board snapshot after successful state mutation")
