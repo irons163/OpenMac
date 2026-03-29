@@ -44,7 +44,9 @@ struct OpenMacApp: App {
     }
 
     private var appLocale: Locale {
-        AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
+        let locale = AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
+        L10n.setRuntimeLocale(locale)
+        return locale
     }
 
     private func appearanceCommandButton(for mode: AppAppearanceMode, shortcut: Character) -> some View {

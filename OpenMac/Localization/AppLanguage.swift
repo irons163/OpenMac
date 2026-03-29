@@ -146,14 +146,40 @@ enum AppLanguageResolver {
 }
 
 enum L10n {
+    private final class BundleLocator {}
+    private static let runtimeLocaleLock = NSLock()
+    private static var runtimeLocaleIdentifier: String?
+    private static let tableName = "Localizable"
+
+    static func setRuntimeLocale(_ locale: Locale?) {
+        runtimeLocaleLock.lock()
+        runtimeLocaleIdentifier = locale?.identifier
+        runtimeLocaleLock.unlock()
+    }
+
+    private static var activeRuntimeLocale: Locale? {
+        runtimeLocaleLock.lock()
+        defer { runtimeLocaleLock.unlock() }
+        guard let runtimeLocaleIdentifier else { return nil }
+        return Locale(identifier: runtimeLocaleIdentifier)
+    }
+
     static func string(_ key: String, locale: Locale? = nil) -> String {
-        let resolvedLocale = locale ?? AppLanguageResolver.resolvedLocale()
-        return String(
-            localized: String.LocalizationValue(key),
-            table: "Localizable",
-            bundle: .main,
-            locale: resolvedLocale
-        )
+        let resolvedLocale = locale ?? activeRuntimeLocale ?? AppLanguageResolver.resolvedLocale()
+        let languageCode = AppLanguageResolver
+            .resolvedLanguage(preferredLanguages: [resolvedLocale.identifier])
+            .rawValue
+
+        if let localized = localizedValue(for: key, languageCode: languageCode) {
+            return localized
+        }
+
+        if languageCode != AppLanguage.english.rawValue,
+           let fallbackEnglish = localizedValue(for: key, languageCode: AppLanguage.english.rawValue) {
+            return fallbackEnglish
+        }
+
+        return key
     }
 
     static func format(_ formatKey: String, _ arguments: CVarArg...) -> String {
@@ -161,8 +187,23 @@ enum L10n {
     }
 
     static func format(_ formatKey: String, locale: Locale? = nil, arguments: [CVarArg]) -> String {
-        let resolvedLocale = locale ?? AppLanguageResolver.resolvedLocale()
+        let resolvedLocale = locale ?? activeRuntimeLocale ?? AppLanguageResolver.resolvedLocale()
         let format = string(formatKey, locale: resolvedLocale)
         return String(format: format, locale: resolvedLocale, arguments: arguments)
+    }
+
+    private static func localizedValue(for key: String, languageCode: String) -> String? {
+        let searchBundles = [Bundle.main, Bundle(for: BundleLocator.self)] + Bundle.allBundles + Bundle.allFrameworks
+        for candidate in searchBundles {
+            guard let localizationPath = candidate.path(forResource: languageCode, ofType: "lproj"),
+                  let localizationBundle = Bundle(path: localizationPath) else {
+                continue
+            }
+            let value = localizationBundle.localizedString(forKey: key, value: nil, table: tableName)
+            if value != key {
+                return value
+            }
+        }
+        return nil
     }
 }
