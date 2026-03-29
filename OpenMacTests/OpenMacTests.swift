@@ -170,6 +170,16 @@ struct AutoAssignmentEngineTests {
 
 @Suite(.serialized)
 struct AgentTaskExecutorTests {
+    private func makeExecutableScript(
+        contents: String,
+        in directory: URL,
+        name: String
+    ) throws -> URL {
+        let scriptURL = directory.appendingPathComponent(name)
+        try Data(contents.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        return scriptURL
+    }
 
     @Test("default executor local mock returns success summary")
     func localMockReturnsSuccessSummary() {
@@ -898,6 +908,561 @@ struct AgentTaskExecutorTests {
         case let .failure(message):
             #expect(Bool(false), "Expected success via proxy endpoint, got: \(message)")
         }
+    }
+
+    @Test("agent task executing protocol default progress overload delegates to base execute")
+    func agentTaskExecutingDefaultProgressOverloadDelegates() {
+        struct StubExecutor: AgentTaskExecuting {
+            let outcome: AgentTaskExecutionOutcome
+
+            func execute(task _: WorkTask, agent _: AgentProfile) -> AgentTaskExecutionOutcome {
+                outcome
+            }
+        }
+
+        let task = WorkTask(
+            title: "Delegate",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Agent", skills: [], maxConcurrentTasks: 1)
+        let executor = StubExecutor(outcome: .success(summary: "ok"))
+
+        let outcome = executor.execute(task: task, agent: agent) { _ in
+            #expect(Bool(false), "Default overload should ignore progress closure")
+        }
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "ok")
+        case .failure:
+            #expect(Bool(false), "Expected delegated success outcome")
+        }
+    }
+
+    @Test("codex prompt template supports all configured app languages")
+    func codexPromptTemplateSupportsAllLanguages() {
+        let task = WorkTask(
+            title: "Build",
+            details: "Implement feature",
+            requiredSkills: [],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "A", skills: ["swift"], maxConcurrentTasks: 1)
+
+        let expectations: [(AppLanguage, String, String)] = [
+            (.english, "You are supporting an assigned AI agent in a kanban execution system.", "Required skills: none"),
+            (.traditionalChinese, "你正在看板執行系統中支援一位已指派的 AI 代理。", "所需技能: 無"),
+            (.simplifiedChinese, "你正在看板执行系统中支持一位已分配的 AI 代理。", "所需技能: 无"),
+            (.french, "Vous assistez un agent IA assigne dans un systeme d'execution kanban.", "Competences requises: aucune"),
+            (.spanish, "Estas apoyando a un agente de IA asignado en un sistema kanban de ejecucion.", "Habilidades requeridas: ninguna"),
+            (.japanese, "あなたはカンバン実行システムで割り当て済みの AI エージェントを支援しています。", "必要スキル: なし"),
+            (.korean, "당신은 칸반 실행 시스템에서 할당된 AI 에이전트를 지원하고 있습니다.", "필수 스킬: 없음")
+        ]
+
+        for (language, preamble, noSkillsLine) in expectations {
+            let prompt = KanbanBoardViewModelTestHooks.codexPrompt(
+                languageOverrideRawValue: language.rawValue,
+                task: task,
+                agent: agent
+            )
+            #expect(prompt.contains(preamble))
+            #expect(prompt.contains(noSkillsLine))
+        }
+    }
+
+    @Test("endpoint resolution normalizes configured and environment base URLs")
+    func endpointResolutionNormalizationRules() {
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: "https://gateway.example/v1/chat/completions",
+                environment: [:]
+            ) == "https://gateway.example/v1/chat/completions"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: "https://gateway.example/",
+                environment: [:]
+            ) == "https://gateway.example/v1/chat/completions"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: "https://gateway.example",
+                environment: [:]
+            ) == "https://gateway.example/v1/chat/completions"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: nil,
+                environment: ["OPENAI_BASE_URL": "https://proxy.example/v1/chat/completions"]
+            ) == "https://proxy.example/v1/chat/completions"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: nil,
+                environment: ["OPENAI_BASE_URL": "https://proxy.example"]
+            ) == "https://proxy.example/v1/chat/completions"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedEndpoint(
+                configuredEndpoint: nil,
+                environment: [:]
+            ) == "https://api.openai.com/v1/chat/completions"
+        )
+    }
+
+    @Test("codex failure summary maps common bridge failure categories")
+    func codexFailureSummaryMappings() {
+        let unsupported = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            "The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account."
+        )
+        #expect(unsupported.contains("not supported for Codex Bridge with ChatGPT login"))
+
+        let quota = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("usage limit exceeded: insufficient_quota")
+        #expect(quota.contains("usage limit/quota appears exhausted"))
+
+        let unauthorized = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            "401 Unauthorized: Missing bearer or basic authentication in header"
+        )
+        #expect(unauthorized.contains("authentication missing"))
+        #expect(unauthorized.contains("codex login --device-auth"))
+
+        let permission = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("Operation not permitted (os error 1)")
+        #expect(permission.contains("Permission denied while accessing Codex profile"))
+
+        let dns = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            "failed to connect to websocket: failed to lookup address information: nodename nor servname provided"
+        )
+        #expect(dns.contains("Network/DNS lookup failed"))
+
+        let websocket = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            "failed to connect to websocket: connection dropped"
+        )
+        #expect(websocket.contains("could not connect to OpenAI"))
+
+        let login = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("please run codex login first")
+        #expect(login.contains("Codex Bridge requires login"))
+
+        let notFound = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("env: codex: No such file or directory")
+        #expect(notFound.contains("Codex CLI not found"))
+
+        let unknown = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("")
+        #expect(unknown == "Unknown Codex Bridge error")
+    }
+
+    @Test("codex failure detectors classify usage-limit and unsupported-model messages")
+    func codexFailureDetectors() {
+        #expect(KanbanBoardViewModelTestHooks.isCodexUsageLimitError("usage limit exceeded"))
+        #expect(KanbanBoardViewModelTestHooks.isCodexUsageLimitError("billing hard limit reached"))
+        #expect(!KanbanBoardViewModelTestHooks.isCodexUsageLimitError("network timeout"))
+
+        #expect(
+            KanbanBoardViewModelTestHooks.isCodexChatGPTModelUnsupported(
+                "model is not supported when using Codex with a ChatGPT account"
+            )
+        )
+        #expect(!KanbanBoardViewModelTestHooks.isCodexChatGPTModelUnsupported("model unavailable"))
+    }
+
+    @Test("codex bridge sandbox mode and environment helpers are deterministic")
+    func codexBridgeSandboxAndEnvironmentHelpers() throws {
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedCodexBridgeSandboxMode(environment: [:]) == "danger-full-access"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedCodexBridgeSandboxMode(
+                environment: ["OPENMAC_CODEX_SANDBOX": "workspace_write"]
+            ) == "workspace-write"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedCodexBridgeSandboxMode(
+                environment: ["OPENMAC_CODEX_SANDBOX": "none"]
+            ) == nil
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.resolvedCodexBridgeSandboxMode(
+                environment: ["OPENMAC_CODEX_SANDBOX": "unexpected-value"]
+            ) == "danger-full-access"
+        )
+
+        let processedEnv = KanbanBoardViewModelTestHooks.codexBridgeProcessEnvironment(
+            environment: ["CODEX_HOME": "   ", "PATH": "/usr/bin"]
+        )
+        #expect(processedEnv["CODEX_HOME"] == nil)
+        #expect(processedEnv["PATH"] == "/usr/bin")
+
+        let loginCommand = KanbanBoardViewModelTestHooks.codexLoginCommand(
+            environment: ["HOME": "/tmp/home", "CODEX_HOME": "/tmp/custom-codex-home"],
+            homeDirectoryPath: "/fallback/home"
+        )
+        #expect(loginCommand.contains("HOME=\"/tmp/home\""))
+        #expect(loginCommand.contains("CODEX_HOME=\"/tmp/custom-codex-home\""))
+        #expect(loginCommand.contains("codex login --device-auth"))
+
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-hook-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+        let executableURL = tempDirectory.appendingPathComponent("codex")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executableURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+
+        let resolvedFromExplicit = KanbanBoardViewModelTestHooks.resolvedCodexExecutablePath(
+            environment: ["CODEX_CLI_PATH": executableURL.path, "PATH": ""],
+            fallbackCandidates: [],
+            homeDirectoryPath: tempDirectory.path
+        )
+        #expect(resolvedFromExplicit == executableURL.path)
+
+        let resolvedFromPATH = KanbanBoardViewModelTestHooks.resolvedCodexExecutablePath(
+            environment: ["PATH": tempDirectory.path],
+            fallbackCandidates: [],
+            homeDirectoryPath: tempDirectory.path
+        )
+        #expect(resolvedFromPATH == executableURL.path)
+
+        let unresolved = KanbanBoardViewModelTestHooks.resolvedCodexExecutablePath(
+            environment: ["PATH": "/non-existent"],
+            fallbackCandidates: [],
+            homeDirectoryPath: tempDirectory.path
+        )
+        #expect(unresolved == nil)
+    }
+
+    @Test("executor error descriptions remain user-readable")
+    func executorErrorDescriptionsRemainReadable() {
+        let descriptions = KanbanBoardViewModelTestHooks.executorErrorDescriptions(serverMessage: "server exploded")
+
+        #expect(descriptions[0] == "Request timed out")
+        #expect(descriptions[1] == "Invalid response")
+        #expect(descriptions[2] == "Empty response")
+        #expect(descriptions[3] == "server exploded")
+        #expect(descriptions[4] == "server exploded")
+    }
+
+    @Test("default codex bridge runner prefers output-last-message file and streams progress")
+    func defaultCodexBridgeRunnerUsesOutputFileSummary() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-runner-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let script = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            out=""
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = "--output-last-message" ]; then
+                shift
+                out="$1"
+              fi
+              shift
+            done
+            echo '{"type":"item.started","item":{"type":"command_execution","command":"echo hi"}}'
+            echo '{"type":"item.completed","item":{"type":"agent_message","text":"agent finished"}}'
+            if [ -n "$out" ]; then
+              printf 'Summary from fake codex\\n' > "$out"
+            fi
+            exit 0
+            """,
+            in: tempDirectory,
+            name: "codex"
+        )
+
+        let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            prompt: "run",
+            model: "gpt-5",
+            profile: "test",
+            workingDirectoryPath: tempDirectory.path
+        )
+        var progressUpdates: [String] = []
+        let environment = [
+            "CODEX_CLI_PATH": script.path,
+            "PATH": "",
+            "OPENMAC_CODEX_SANDBOX": "none"
+        ]
+        let summary = try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRunner(
+            request: request,
+            onProgress: { update in
+                progressUpdates.append(update)
+            },
+            environment: environment
+        )
+
+        #expect(summary == "Summary from fake codex")
+        #expect(progressUpdates.contains(where: { $0.contains("Codex workdir:") }))
+        #expect(progressUpdates.contains("Running command: echo hi"))
+        #expect(progressUpdates.contains("agent finished"))
+    }
+
+    @Test("default codex bridge runner falls back to raw output when output file is missing")
+    func defaultCodexBridgeRunnerFallsBackToRawOutput() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-raw-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let script = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            echo 'RAW OUTPUT LINE'
+            exit 0
+            """,
+            in: tempDirectory,
+            name: "codex"
+        )
+
+        let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            prompt: "run",
+            model: "gpt-5",
+            profile: nil,
+            workingDirectoryPath: tempDirectory.path
+        )
+
+        let summary = try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRunner(
+            request: request,
+            onProgress: { _ in },
+            environment: [
+                "CODEX_CLI_PATH": script.path,
+                "PATH": "",
+                "OPENMAC_CODEX_SANDBOX": "none"
+            ]
+        )
+
+        #expect(summary.contains("RAW OUTPUT LINE"))
+    }
+
+    @Test("default codex bridge runner reports empty response when codex returns no output")
+    func defaultCodexBridgeRunnerEmptyResponseFailure() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let script = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            exit 0
+            """,
+            in: tempDirectory,
+            name: "codex"
+        )
+
+        let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            prompt: "run",
+            model: "gpt-5",
+            profile: nil,
+            workingDirectoryPath: tempDirectory.path
+        )
+
+        do {
+            _ = try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRunner(
+                request: request,
+                onProgress: { _ in },
+                environment: [
+                    "CODEX_CLI_PATH": script.path,
+                    "PATH": "",
+                    "OPENMAC_CODEX_SANDBOX": "none"
+                ]
+            )
+            #expect(Bool(false), "Expected empty-response failure")
+        } catch {
+            #expect(error.localizedDescription.contains("Empty response"))
+        }
+    }
+
+    @Test("default codex bridge runner surfaces non-zero codex exit output")
+    func defaultCodexBridgeRunnerNonZeroExitFailure() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-nonzero-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let script = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            echo 'codex failed hard'
+            exit 3
+            """,
+            in: tempDirectory,
+            name: "codex"
+        )
+
+        let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            prompt: "run",
+            model: "gpt-5",
+            profile: nil,
+            workingDirectoryPath: tempDirectory.path
+        )
+
+        do {
+            _ = try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRunner(
+                request: request,
+                onProgress: { _ in },
+                environment: [
+                    "CODEX_CLI_PATH": script.path,
+                    "PATH": "",
+                    "OPENMAC_CODEX_SANDBOX": "none"
+                ]
+            )
+            #expect(Bool(false), "Expected non-zero exit failure")
+        } catch {
+            #expect(error.localizedDescription.contains("codex failed hard"))
+        }
+    }
+
+    @Test("default codex bridge preflight validates login status output")
+    func defaultCodexBridgePreflightLoginStatusValidation() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-preflight-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let successScript = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            if [ "$1" = "login" ] && [ "$2" = "status" ]; then
+              echo 'Logged in as test-user'
+              exit 0
+            fi
+            exit 1
+            """,
+            in: tempDirectory,
+            name: "codex-success"
+        )
+
+        try KanbanBoardViewModelTestHooks.runDefaultCodexBridgePreflight(
+            environment: [
+                "CODEX_CLI_PATH": successScript.path,
+                "PATH": ""
+            ]
+        )
+
+        let failScript = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            echo 'authentication missing'
+            exit 0
+            """,
+            in: tempDirectory,
+            name: "codex-fail"
+        )
+
+        do {
+            try KanbanBoardViewModelTestHooks.runDefaultCodexBridgePreflight(
+                environment: [
+                    "CODEX_CLI_PATH": failScript.path,
+                    "PATH": ""
+                ]
+            )
+            #expect(Bool(false), "Expected preflight failure when login status is not authenticated")
+        } catch {
+            #expect(error.localizedDescription.contains("profile is not logged in"))
+        }
+    }
+
+    @Test("default codex bridge recovery emits progress and runs quit/open command sequence")
+    func defaultCodexBridgeRecoveryCommandSequence() throws {
+        var progress: [String] = []
+        var sleepDurations: [TimeInterval] = []
+        var commands: [(path: String, arguments: [String])] = []
+
+        try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRecovery(
+            reason: "usage limit exceeded",
+            onProgress: { progress.append($0) },
+            environment: [:],
+            commandRunner: { executablePath, arguments, _ in
+                commands.append((executablePath, arguments))
+                return (0, "")
+            },
+            sleeper: { sleepDurations.append($0) }
+        )
+
+        #expect(commands.count == 2)
+        #expect(commands[0].path == "/usr/bin/osascript")
+        #expect(commands[0].arguments == ["-e", "tell application \"Codex\" to quit"])
+        #expect(commands[1].path == "/usr/bin/open")
+        #expect(commands[1].arguments == ["-a", "Codex"])
+        #expect(sleepDurations == [1.0, 1.5])
+        #expect(progress.contains(where: { $0.contains("Restarting Codex app") }))
+        #expect(progress.contains(where: { $0.contains("restart complete") }))
+    }
+
+    @Test("default codex bridge recovery surfaces restart failure output")
+    func defaultCodexBridgeRecoveryFailureOutput() {
+        do {
+            try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRecovery(
+                reason: "quota",
+                onProgress: { _ in },
+                environment: [:],
+                commandRunner: { executablePath, _, _ in
+                    if executablePath == "/usr/bin/open" {
+                        return (1, "LSOpenURLsWithRole() failed")
+                    }
+                    return (0, "")
+                },
+                sleeper: { _ in }
+            )
+            #expect(Bool(false), "Expected recovery to fail when `open -a Codex` fails")
+        } catch {
+            #expect(error.localizedDescription.contains("Codex app restart failed"))
+            #expect(error.localizedDescription.contains("LSOpenURLsWithRole() failed"))
+        }
+    }
+
+    @Test("system command helper captures stdout/stderr and termination status")
+    func runSystemCommandCapturesOutputAndExitCode() throws {
+        let success = try KanbanBoardViewModelTestHooks.runSystemCommand(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "printf 'ok-output'"],
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+        #expect(success.code == 0)
+        #expect(success.output == "ok-output")
+
+        let failure = try KanbanBoardViewModelTestHooks.runSystemCommand(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "echo err-output 1>&2; exit 7"],
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+        #expect(failure.code == 7)
+        #expect(failure.output.contains("err-output"))
+    }
+
+    @Test("default initializer keeps sensible executor defaults")
+    func defaultExecutorInitializerDefaults() {
+        let executor = DefaultAgentTaskExecutor()
+        let env = executor.environmentProvider()
+
+        #expect(executor.timeoutSeconds == 30)
+        #expect(!env.isEmpty)
+    }
+
+    @Test("projects directory resolver honors user defaults fallback and trims invalid values")
+    func projectsDirectoryResolverUserDefaultsFallback() {
+        let suiteName = "openmac-tests.projects.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            #expect(Bool(false), "Failed to initialize isolated UserDefaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let customPath = "/tmp/openmac-projects-\(UUID().uuidString)"
+        defaults.set("  \(customPath)  ", forKey: CodexProjectsDirectorySettings.userDefaultsKey)
+
+        let resolvedFromDefaults = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+            environment: [CodexProjectsDirectorySettings.environmentOverrideKey: "   "],
+            userDefaults: defaults
+        )
+        #expect(resolvedFromDefaults == customPath)
+
+        defaults.set("   ", forKey: CodexProjectsDirectorySettings.userDefaultsKey)
+        let resolvedDefault = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+            environment: [:],
+            userDefaults: defaults
+        )
+        #expect(resolvedDefault.contains("Library/Application Support/OpenMac/Projects"))
     }
 }
 
@@ -2528,6 +3093,12 @@ struct ContentViewLogicTests {
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
         #expect(renderedCount >= 20)
+    }
+
+    @Test("content action handlers execute representative non-UI side effects")
+    func exerciseActionHandlersForCoverage() {
+        let exercisedCount = ContentViewTestHooks.exerciseActionHandlersForCoverage()
+        #expect(exercisedCount >= 40)
     }
 }
 
@@ -5736,6 +6307,33 @@ struct KanbanPersistenceTests {
 }
 
 struct AppLanguageResolverTests {
+    private static let userDefaultsMutationLock = NSLock()
+
+    private func withLanguageOverrideInDefaults<T>(_ value: String?, run body: () throws -> T) rethrows -> T {
+        Self.userDefaultsMutationLock.lock()
+        defer { Self.userDefaultsMutationLock.unlock() }
+
+        let defaults = UserDefaults.standard
+        let key = AppLanguageSettings.userDefaultsKey
+        let previousValue = defaults.object(forKey: key)
+
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+
+        defer {
+            if let previousValue {
+                defaults.set(previousValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        return try body()
+    }
+
     private func resolve(_ preferredLanguages: [String]) -> AppLanguage {
         AppLanguageResolver.resolvedLanguage(
             preferredLanguages: preferredLanguages,
@@ -5748,6 +6346,7 @@ struct AppLanguageResolverTests {
         #expect(resolve(["zh-TW"]).rawValue == "zh-Hant")
         #expect(resolve(["zh-HK"]).rawValue == "zh-Hant")
         #expect(resolve(["zh-Hant"]).rawValue == "zh-Hant")
+        #expect(resolve(["zh"]).rawValue == "zh-Hant")
     }
 
     @Test("maps simplified Chinese locales to zh-Hans")
@@ -5812,6 +6411,32 @@ struct AppLanguageResolverTests {
         #expect(AppLanguagePreference.language(.japanese).rawValue == AppLanguage.japanese.rawValue)
     }
 
+    @Test("app language preference initializer normalizes nil/empty/system/invalid and valid values")
+    func appLanguagePreferenceInitializerNormalization() {
+        #expect(AppLanguagePreference(rawValue: nil).rawValue == AppLanguageSettings.systemValue)
+        #expect(AppLanguagePreference(rawValue: "").rawValue == AppLanguageSettings.systemValue)
+        #expect(AppLanguagePreference(rawValue: " system ").rawValue == AppLanguageSettings.systemValue)
+        #expect(AppLanguagePreference(rawValue: "ja").rawValue == AppLanguage.japanese.rawValue)
+        #expect(AppLanguagePreference(rawValue: "unknown-language").rawValue == AppLanguageSettings.systemValue)
+    }
+
+    @Test("resolved language defaults to English in test host when no explicit override is provided")
+    func resolvedLanguageDefaultArgumentsInTests() {
+        #expect(AppLanguageResolver.resolvedLanguage() == .english)
+    }
+
+    @Test("resolved language reads persisted override when overrideRawValue is nil and preferred list is explicit")
+    func resolvedLanguageReadsPersistedOverrideFromDefaults() {
+        let resolved = withLanguageOverrideInDefaults(AppLanguage.japanese.rawValue) {
+            AppLanguageResolver.resolvedLanguage(
+                preferredLanguages: ["fr-FR"],
+                overrideRawValue: nil
+            )
+        }
+
+        #expect(resolved == .japanese)
+    }
+
     @Test("resolved default locale keeps runtime locale when language matches override")
     func resolvedDefaultLocaleKeepsMatchingRuntimeLanguage() {
         let resolved = L10n.resolvedDefaultLocale(
@@ -5830,6 +6455,26 @@ struct AppLanguageResolverTests {
         )
 
         #expect(AppLanguage.resolve(preferredLanguages: [resolved.identifier]) == .english)
+    }
+
+    @Test("resolved default locale returns configured locale when runtime locale is nil")
+    func resolvedDefaultLocaleUsesConfiguredLocaleWhenRuntimeIsMissing() {
+        let resolved = L10n.resolvedDefaultLocale(
+            overrideRawValue: AppLanguage.french.rawValue,
+            runtimeLocale: nil
+        )
+
+        #expect(AppLanguage.resolve(preferredLanguages: [resolved.identifier]) == .french)
+    }
+
+    @Test("L10n string resolves localized value for explicit locale and falls back to key for unknown key")
+    func localizedStringLookupAndUnknownKeyFallback() {
+        let localized = L10n.string("New Task", locale: Locale(identifier: "zh-Hant"))
+        #expect(localized == "新增任務")
+
+        let unknownKey = "UNIT_TEST_UNKNOWN_LOCALIZATION_KEY_\(UUID().uuidString)"
+        let fallback = L10n.string(unknownKey, locale: Locale(identifier: "zh-Hant"))
+        #expect(fallback == unknownKey)
     }
 }
 

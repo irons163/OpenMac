@@ -783,9 +783,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
     private static func defaultCodexBridgeRunner(
         request: CodexBridgeRequest,
-        onProgress: @escaping (_ update: String) -> Void
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
-        guard let codexExecutable = resolvedCodexExecutableURL() else {
+        guard let codexExecutable = resolvedCodexExecutableURL(environment: environment) else {
             throw ExecutorError.codexBridgeFailed(
                 L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
@@ -797,7 +798,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             try? FileManager.default.removeItem(at: outputURL)
         }
 
-        let sandboxMode = resolvedCodexBridgeSandboxMode()
+        let sandboxMode = resolvedCodexBridgeSandboxMode(environment: environment)
         var arguments = [
             "exec",
             "--skip-git-repo-check",
@@ -818,7 +819,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let process = Process()
         process.executableURL = codexExecutable
         process.arguments = arguments
-        process.environment = codexBridgeProcessEnvironment()
+        process.environment = codexBridgeProcessEnvironment(environment: environment)
         let configuredWorkdirPath = request.workingDirectoryPath
             ?? CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         let workingDirectoryURL: URL
@@ -1057,17 +1058,19 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         return summarized
     }
 
-    private static func defaultCodexBridgePreflight() throws {
-        guard resolvedCodexExecutableURL() != nil else {
+    private static func defaultCodexBridgePreflight(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws {
+        guard resolvedCodexExecutableURL(environment: environment) != nil else {
             throw ExecutorError.codexBridgeFailed(
                 L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
         }
 
-        let loginStatus = try runCodex(arguments: ["login", "status"])
+        let loginStatus = try runCodex(arguments: ["login", "status"], environment: environment)
         let normalized = loginStatus.output.lowercased()
         guard loginStatus.code == 0, normalized.contains("logged in") else {
-            let loginCommand = codexLoginCommandForCurrentProfile()
+            let loginCommand = codexLoginCommandForCurrentProfile(environment: environment)
             throw ExecutorError.codexBridgeFailed(
                 L10n.format("Codex Bridge profile is not logged in. Run this once in Terminal: %@", loginCommand)
             )
@@ -1076,32 +1079,50 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
     private static func defaultCodexBridgeRecovery(
         reason: String,
-        onProgress: @escaping (_ update: String) -> Void
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        commandRunner: (
+            _ executablePath: String,
+            _ arguments: [String],
+            _ environment: [String: String]
+        ) throws -> (code: Int32, output: String) = { executablePath, arguments, environment in
+            try runSystemCommand(
+                executablePath: executablePath,
+                arguments: arguments,
+                environment: environment
+            )
+        },
+        sleeper: (_ seconds: TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
     ) throws {
         onProgress(L10n.string("Codex usage limit detected. Restarting Codex app..."))
 
-        _ = try? runSystemCommand(
-            executablePath: "/usr/bin/osascript",
-            arguments: ["-e", "tell application \"Codex\" to quit"]
+        _ = try? commandRunner(
+            "/usr/bin/osascript",
+            ["-e", "tell application \"Codex\" to quit"],
+            environment
         )
 
-        Thread.sleep(forTimeInterval: 1.0)
+        sleeper(1.0)
 
-        let launch = try runSystemCommand(
-            executablePath: "/usr/bin/open",
-            arguments: ["-a", "Codex"]
+        let launch = try commandRunner(
+            "/usr/bin/open",
+            ["-a", "Codex"],
+            environment
         )
         guard launch.code == 0 else {
             let output = launch.output.isEmpty ? L10n.format("open exited with code %d", launch.code) : launch.output
             throw ExecutorError.codexBridgeFailed(L10n.format("Codex app restart failed: %@", output))
         }
 
-        Thread.sleep(forTimeInterval: 1.5)
+        sleeper(1.5)
         onProgress(L10n.string("Codex app restart complete. Resuming task..."))
     }
 
-    private static func runCodex(arguments: [String]) throws -> (code: Int32, output: String) {
-        guard let executableURL = resolvedCodexExecutableURL() else {
+    private static func runCodex(
+        arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> (code: Int32, output: String) {
+        guard let executableURL = resolvedCodexExecutableURL(environment: environment) else {
             throw ExecutorError.codexBridgeFailed(
                 L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
             )
@@ -1110,7 +1131,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
-        process.environment = codexBridgeProcessEnvironment()
+        process.environment = codexBridgeProcessEnvironment(environment: environment)
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -1127,12 +1148,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
     private static func runSystemCommand(
         executablePath: String,
-        arguments: [String]
+        arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> (code: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
-        process.environment = codexBridgeProcessEnvironment()
+        process.environment = codexBridgeProcessEnvironment(environment: environment)
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
@@ -1147,17 +1169,20 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         return (process.terminationStatus, output)
     }
 
-    private static func resolvedCodexExecutableURL() -> URL? {
-        let fileManager = FileManager.default
-
-        if let explicitPath = ProcessInfo.processInfo.environment["CODEX_CLI_PATH"]?
+    private static func resolvedCodexExecutableURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fallbackCandidates: [String]? = nil,
+        fileManager: FileManager = .default,
+        homeDirectoryPath: String = NSHomeDirectory()
+    ) -> URL? {
+        if let explicitPath = environment["CODEX_CLI_PATH"]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !explicitPath.isEmpty,
            fileManager.isExecutableFile(atPath: explicitPath) {
             return URL(fileURLWithPath: explicitPath)
         }
 
-        let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let pathValue = environment["PATH"] ?? ""
         let pathCandidates = pathValue
             .split(separator: ":")
             .map { String($0) }
@@ -1166,22 +1191,24 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 (directory as NSString).appendingPathComponent("codex")
             }
 
-        let fallbackCandidates = [
+        let resolvedFallbackCandidates = fallbackCandidates ?? [
             "/Applications/Codex.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
-            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/codex")
+            (homeDirectoryPath as NSString).appendingPathComponent(".local/bin/codex")
         ]
 
-        for candidate in pathCandidates + fallbackCandidates where fileManager.isExecutableFile(atPath: candidate) {
+        for candidate in pathCandidates + resolvedFallbackCandidates where fileManager.isExecutableFile(atPath: candidate) {
             return URL(fileURLWithPath: candidate)
         }
 
         return nil
     }
 
-    private static func resolvedCodexBridgeSandboxMode() -> String? {
-        let rawOverride = ProcessInfo.processInfo.environment["OPENMAC_CODEX_SANDBOX"]?
+    private static func resolvedCodexBridgeSandboxMode(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        let rawOverride = environment["OPENMAC_CODEX_SANDBOX"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
 
@@ -1201,8 +1228,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
 
-    private static func codexBridgeProcessEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+    private static func codexBridgeProcessEnvironment(
+        environment sourceEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = sourceEnvironment
         if let codexHome = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            codexHome.isEmpty {
             environment["CODEX_HOME"] = nil
@@ -1210,9 +1239,12 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         return environment
     }
 
-    private static func codexLoginCommandForCurrentProfile() -> String {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-        let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"] ?? "\(home)/.codex"
+    private static func codexLoginCommandForCurrentProfile(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectoryPath: String = NSHomeDirectory()
+    ) -> String {
+        let home = environment["HOME"] ?? homeDirectoryPath
+        let codexHome = environment["CODEX_HOME"] ?? "\(home)/.codex"
         return "HOME=\"\(home)\" CODEX_HOME=\"\(codexHome)\" codex login --device-auth"
     }
 }
@@ -3701,3 +3733,227 @@ extension KanbanBoardViewModel {
         return (demoTasks, [designAgent, frontendAgent, qualityAgent])
     }
 }
+
+#if DEBUG
+private extension DefaultAgentTaskExecutor {
+    func testCodexBridgePrompt(task: WorkTask, agent: AgentProfile) -> String {
+        buildCodexBridgePrompt(task: task, agent: agent)
+    }
+
+    func testResolvedEndpoint(configuredEndpoint: String?, environment: [String: String]) -> String {
+        resolvedEndpoint(configuredEndpoint: configuredEndpoint, environment: environment)
+    }
+
+    static func testExecutorErrorDescriptions(serverMessage: String) -> [String] {
+        [
+            ExecutorError.timeout.errorDescription ?? "",
+            ExecutorError.invalidResponse.errorDescription ?? "",
+            ExecutorError.emptyResponse.errorDescription ?? "",
+            ExecutorError.serverError(serverMessage).errorDescription ?? "",
+            ExecutorError.codexBridgeFailed(serverMessage).errorDescription ?? ""
+        ]
+    }
+
+    static func testSummarizeCodexBridgeFailure(_ rawFailure: String) -> String {
+        summarizeCodexBridgeFailure(rawFailure)
+    }
+
+    static func testIsCodexChatGPTModelUnsupported(_ rawFailure: String) -> Bool {
+        isCodexChatGPTModelUnsupported(rawFailure)
+    }
+
+    static func testIsCodexUsageLimitError(_ rawFailure: String) -> Bool {
+        isCodexUsageLimitError(rawFailure)
+    }
+
+    static func testResolvedCodexBridgeSandboxMode(environment: [String: String]) -> String? {
+        resolvedCodexBridgeSandboxMode(environment: environment)
+    }
+
+    static func testCodexBridgeProcessEnvironment(environment: [String: String]) -> [String: String] {
+        codexBridgeProcessEnvironment(environment: environment)
+    }
+
+    static func testCodexLoginCommandForCurrentProfile(
+        environment: [String: String],
+        homeDirectoryPath: String
+    ) -> String {
+        codexLoginCommandForCurrentProfile(environment: environment, homeDirectoryPath: homeDirectoryPath)
+    }
+
+    static func testResolvedCodexExecutableURL(
+        environment: [String: String],
+        fallbackCandidates: [String],
+        homeDirectoryPath: String
+    ) -> URL? {
+        resolvedCodexExecutableURL(
+            environment: environment,
+            fallbackCandidates: fallbackCandidates,
+            homeDirectoryPath: homeDirectoryPath
+        )
+    }
+
+    static func testDefaultCodexBridgeRunner(
+        request: CodexBridgeRequest,
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String]
+    ) throws -> String {
+        try defaultCodexBridgeRunner(
+            request: request,
+            onProgress: onProgress,
+            environment: environment
+        )
+    }
+
+    static func testDefaultCodexBridgePreflight(environment: [String: String]) throws {
+        try defaultCodexBridgePreflight(environment: environment)
+    }
+
+    static func testDefaultCodexBridgeRecovery(
+        reason: String,
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String],
+        commandRunner: @escaping (
+            _ executablePath: String,
+            _ arguments: [String],
+            _ environment: [String: String]
+        ) throws -> (code: Int32, output: String),
+        sleeper: @escaping (_ seconds: TimeInterval) -> Void
+    ) throws {
+        try defaultCodexBridgeRecovery(
+            reason: reason,
+            onProgress: onProgress,
+            environment: environment,
+            commandRunner: commandRunner,
+            sleeper: sleeper
+        )
+    }
+
+    static func testRunSystemCommand(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String]
+    ) throws -> (code: Int32, output: String) {
+        try runSystemCommand(executablePath: executablePath, arguments: arguments, environment: environment)
+    }
+}
+
+enum KanbanBoardViewModelTestHooks {
+    static func codexPrompt(
+        languageOverrideRawValue: String?,
+        task: WorkTask,
+        agent: AgentProfile
+    ) -> String {
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            appLanguageOverrideProvider: { languageOverrideRawValue },
+            codexBridgePreflight: {},
+            codexBridgeRunner: { _, _ in "" },
+            codexBridgeRecovery: { _, _ in }
+        )
+        return executor.testCodexBridgePrompt(task: task, agent: agent)
+    }
+
+    static func resolvedEndpoint(configuredEndpoint: String?, environment: [String: String]) -> String {
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { environment },
+            urlSession: .shared,
+            timeoutSeconds: 1
+        )
+        return executor.testResolvedEndpoint(configuredEndpoint: configuredEndpoint, environment: environment)
+    }
+
+    static func summarizeCodexBridgeFailure(_ rawFailure: String) -> String {
+        DefaultAgentTaskExecutor.testSummarizeCodexBridgeFailure(rawFailure)
+    }
+
+    static func isCodexChatGPTModelUnsupported(_ rawFailure: String) -> Bool {
+        DefaultAgentTaskExecutor.testIsCodexChatGPTModelUnsupported(rawFailure)
+    }
+
+    static func isCodexUsageLimitError(_ rawFailure: String) -> Bool {
+        DefaultAgentTaskExecutor.testIsCodexUsageLimitError(rawFailure)
+    }
+
+    static func resolvedCodexBridgeSandboxMode(environment: [String: String]) -> String? {
+        DefaultAgentTaskExecutor.testResolvedCodexBridgeSandboxMode(environment: environment)
+    }
+
+    static func codexBridgeProcessEnvironment(environment: [String: String]) -> [String: String] {
+        DefaultAgentTaskExecutor.testCodexBridgeProcessEnvironment(environment: environment)
+    }
+
+    static func codexLoginCommand(environment: [String: String], homeDirectoryPath: String) -> String {
+        DefaultAgentTaskExecutor.testCodexLoginCommandForCurrentProfile(
+            environment: environment,
+            homeDirectoryPath: homeDirectoryPath
+        )
+    }
+
+    static func resolvedCodexExecutablePath(
+        environment: [String: String],
+        fallbackCandidates: [String],
+        homeDirectoryPath: String
+    ) -> String? {
+        DefaultAgentTaskExecutor.testResolvedCodexExecutableURL(
+            environment: environment,
+            fallbackCandidates: fallbackCandidates,
+            homeDirectoryPath: homeDirectoryPath
+        )?.path
+    }
+
+    static func executorErrorDescriptions(serverMessage: String) -> [String] {
+        DefaultAgentTaskExecutor.testExecutorErrorDescriptions(serverMessage: serverMessage)
+    }
+
+    static func runDefaultCodexBridgeRunner(
+        request: DefaultAgentTaskExecutor.CodexBridgeRequest,
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String]
+    ) throws -> String {
+        try DefaultAgentTaskExecutor.testDefaultCodexBridgeRunner(
+            request: request,
+            onProgress: onProgress,
+            environment: environment
+        )
+    }
+
+    static func runDefaultCodexBridgePreflight(environment: [String: String]) throws {
+        try DefaultAgentTaskExecutor.testDefaultCodexBridgePreflight(environment: environment)
+    }
+
+    static func runDefaultCodexBridgeRecovery(
+        reason: String,
+        onProgress: @escaping (_ update: String) -> Void,
+        environment: [String: String],
+        commandRunner: @escaping (
+            _ executablePath: String,
+            _ arguments: [String],
+            _ environment: [String: String]
+        ) throws -> (code: Int32, output: String),
+        sleeper: @escaping (_ seconds: TimeInterval) -> Void
+    ) throws {
+        try DefaultAgentTaskExecutor.testDefaultCodexBridgeRecovery(
+            reason: reason,
+            onProgress: onProgress,
+            environment: environment,
+            commandRunner: commandRunner,
+            sleeper: sleeper
+        )
+    }
+
+    static func runSystemCommand(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String]
+    ) throws -> (code: Int32, output: String) {
+        try DefaultAgentTaskExecutor.testRunSystemCommand(
+            executablePath: executablePath,
+            arguments: arguments,
+            environment: environment
+        )
+    }
+}
+#endif

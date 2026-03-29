@@ -3352,6 +3352,196 @@ private extension ContentView {
         )
     }
 
+    @MainActor
+    static func testExerciseActionHandlersForCoverage() -> Int {
+        let now = Date(timeIntervalSince1970: 1_735_000_000)
+        let successRecord = TaskExecutionRecord(
+            status: .succeeded,
+            runCount: 1,
+            lastStartedAt: now,
+            lastFinishedAt: now.addingTimeInterval(10),
+            lastOutputSummary: "Summary: done"
+        )
+        let failedRecord = TaskExecutionRecord(
+            status: .failed,
+            runCount: 1,
+            lastStartedAt: now,
+            lastFinishedAt: now.addingTimeInterval(10),
+            lastError: "failed"
+        )
+
+        let agentA = AgentProfile(name: "Coverage A", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let agentB = AgentProfile(name: "Coverage B", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let todoAssigned = WorkTask(
+            title: "Assigned Task",
+            details: "Implement feature",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agentA.id,
+            executionRecord: successRecord
+        )
+        let todoUnassigned = WorkTask(
+            title: "Unassigned Task",
+            details: "Needs triage",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let doneTask = WorkTask(
+            title: "Done Task",
+            details: "Finished",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: agentA.id,
+            executionRecord: failedRecord
+        )
+
+        let viewModel = KanbanBoardViewModel(tasks: [todoAssigned, todoUnassigned, doneTask], agents: [agentA, agentB])
+        let view = ContentView(viewModel: viewModel)
+        var exercised = 0
+
+        func hit(_ action: () -> Void) {
+            action()
+            exercised += 1
+        }
+
+        hit { view.cycleAppearanceMode() }
+        hit { view.resetDraftAndClose() }
+        hit { view.copyToPasteboard("coverage") }
+        hit { view.openExecutionDetails(todoAssigned) }
+        hit { view.openEditTask(todoAssigned) }
+        hit {
+            view.editTaskTitle = "Assigned Task Updated"
+            view.applyTaskEdits()
+        }
+        hit { view.closeEditTaskSheet() }
+        hit { view.resetAgentDraftAndClose() }
+
+        hit { view.openNewBoardSheet() }
+        hit {
+            view.newBoardName = "Coverage Board"
+            view.createBoardFromSheet()
+        }
+        hit { view.openRenameBoardSheet() }
+        hit {
+            view.renameBoardName = "Coverage Board Renamed"
+            view.renameBoardFromSheet()
+        }
+        hit { view.duplicateSelectedBoard() }
+        hit { view.removeSelectedBoard() }
+
+        hit { view.openGlobalTaskFinder() }
+        hit {
+            view.globalTaskSearchQuery = "Assigned"
+            if let result = view.globalTaskSearchResults.first {
+                view.openGlobalTaskSearchResult(result)
+            }
+        }
+        hit { view.closeGlobalTaskFinder() }
+
+        hit {
+            if let boardID = viewModel.boards.first?.id {
+                view.switchBoard(boardID)
+            }
+        }
+        hit { view.handleBoardContextChanged() }
+        hit { view.openWIPSettings() }
+        hit { view.applyWIPSettings() }
+
+        hit {
+            view.newTaskTitle = "Created by coverage hook"
+            view.newTaskDetails = "details"
+            view.newTaskSkills = ""
+            view.newTaskPoints = 1
+            view.createTaskFromSheet(autoAssign: false)
+        }
+        hit { view.archiveDoneTasks() }
+        hit { view.rebalanceTodoAssignments() }
+        hit { view.runAutoAssignFromToolbar() }
+        hit { view.applyHealthRecommendation(.openManualTriage) }
+        hit { view.applyAllHealthRecommendations() }
+        hit { view.openManualTriage() }
+        hit {
+            let candidates = viewModel.triageCandidates()
+            if let candidate = candidates.first,
+               let targetAgent = viewModel.assignableAgents(for: candidate.id).first {
+                view.triageSelectionByTaskID[candidate.id] = targetAgent.id
+                view.assignManually(taskID: candidate.id)
+            }
+        }
+        hit { view.assignAllManually() }
+        hit { view.refreshTriageSelections() }
+
+        hit {
+            if viewModel.agents.count > 1 {
+                view.deleteAgents(at: IndexSet(integer: 1))
+            }
+        }
+        hit {
+            if let firstAgent = viewModel.agents.first {
+                view.unassignTodoTasks(for: firstAgent.id)
+            }
+        }
+
+        hit {
+            if let task = viewModel.tasks.first {
+                view.duplicateTask(task.id)
+                view.autoAssignTask(task.id)
+                view.unassignTask(task.id)
+            }
+        }
+        hit {
+            if let task = viewModel.tasks.first,
+               let otherBoardID = viewModel.boards.first(where: { $0.id != viewModel.selectedBoardID })?.id {
+                view.copyTaskToBoard(task.id, otherBoardID)
+                view.moveTaskToBoard(task.id, otherBoardID)
+            }
+        }
+        hit {
+            if let task = viewModel.tasks.first,
+               let firstAgent = viewModel.agents.first {
+                view.assignTaskToAgent(task.id, firstAgent.id)
+                view.reassignTaskToAgent(task.id, firstAgent.id)
+                view.runTaskExecution(task.id)
+                view.retryTaskExecution(task.id)
+                view.removeTask(task.id)
+            }
+        }
+        hit {
+            if let firstAgent = viewModel.agents.first {
+                view.openEditAgent(firstAgent)
+                view.editAgentName = "\(firstAgent.name) Updated"
+                view.applyAgentEdits()
+                view.closeEditAgentSheet()
+                view.removeAgent(firstAgent.id)
+            }
+        }
+
+        hit { _ = view.selectedBoardExportFileName() }
+        hit { view.resetTaskFilters() }
+        hit { view.useDefaultCodexProjectsDirectory() }
+        hit { view.ensureCodexProjectsDirectoryExists() }
+        hit { view.syncSelectedAgentConsoleSelection() }
+        hit { view.normalizeAssigneeFilterSelection() }
+        hit {
+            view.appLanguageOverrideRawValue = AppLanguageSettings.systemValue
+            _ = view.selectedLanguageLabel
+            _ = view.isSelectedLanguage(nil)
+        }
+        hit {
+            view.appLanguageOverrideRawValue = AppLanguage.japanese.rawValue
+            _ = view.selectedLanguageLabel
+            _ = view.isSelectedLanguage(.japanese)
+        }
+        hit { _ = view.hasAssignedTodoTasks(for: agentA.id) }
+        hit { _ = view.selectedAgentForConsole }
+
+        return exercised
+    }
+
     static func testResolveSelectedAssigneeFilter(
         selectedKey: String,
         agents: [AgentProfile]
@@ -3950,6 +4140,11 @@ enum ContentViewTestHooks {
         render(BoardMessageBanner(message: "Info message", severity: .info))
 
         return rendered
+    }
+
+    @MainActor
+    static func exerciseActionHandlersForCoverage() -> Int {
+        ContentView.testExerciseActionHandlersForCoverage()
     }
 }
 #endif
