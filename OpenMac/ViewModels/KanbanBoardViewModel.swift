@@ -1249,6 +1249,8 @@ struct AgentExecutionEvent: Identifiable, Equatable {
 }
 
 final class KanbanBoardViewModel: ObservableObject {
+    typealias ExecutionDispatcher = (@escaping () -> Void) -> Void
+
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
     @Published private(set) var tasks: [WorkTask]
@@ -1273,6 +1275,8 @@ final class KanbanBoardViewModel: ObservableObject {
     private let assignmentEngine: AutoAssignmentEngine
     private let taskExecutor: any AgentTaskExecuting
     private let boardStore: KanbanBoardStore?
+    private let runOnBackground: ExecutionDispatcher
+    private let runOnMain: ExecutionDispatcher
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
 
@@ -1334,7 +1338,13 @@ final class KanbanBoardViewModel: ObservableObject {
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
-        boardStore: KanbanBoardStore? = nil
+        boardStore: KanbanBoardStore? = nil,
+        runOnBackground: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        runOnMain: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.main.async(execute: work)
+        }
     ) {
         let normalizedLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
             partialResult[pair.key] = max(1, pair.value)
@@ -1353,6 +1363,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.assignmentEngine = assignmentEngine
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
+        self.runOnBackground = runOnBackground
+        self.runOnMain = runOnMain
     }
 
     private init(
@@ -1360,7 +1372,13 @@ final class KanbanBoardViewModel: ObservableObject {
         selectedBoardID: UUID,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
-        boardStore: KanbanBoardStore? = nil
+        boardStore: KanbanBoardStore? = nil,
+        runOnBackground: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        runOnMain: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.main.async(execute: work)
+        }
     ) {
         let resolvedBoard: KanbanBoardRecord
         if let selected = boards.first(where: { $0.id == selectedBoardID }) {
@@ -1379,6 +1397,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.assignmentEngine = assignmentEngine
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
+        self.runOnBackground = runOnBackground
+        self.runOnMain = runOnMain
     }
 
     @discardableResult
@@ -2626,13 +2646,13 @@ final class KanbanBoardViewModel: ObservableObject {
             return
         }
         let executor = taskExecutor
-        DispatchQueue.global(qos: .userInitiated).async {
+        runOnBackground {
             let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-                DispatchQueue.main.async { [weak self] in
+                self.runOnMain { [weak self] in
                     self?.captureExecutionProgress(update, for: prepared)
                 }
             }
-            DispatchQueue.main.async { [weak self] in
+            self.runOnMain { [weak self] in
                 guard let self else {
                     completion(false)
                     return
@@ -2672,13 +2692,13 @@ final class KanbanBoardViewModel: ObservableObject {
             return
         }
         let executor = taskExecutor
-        DispatchQueue.global(qos: .userInitiated).async {
+        runOnBackground {
             let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-                DispatchQueue.main.async { [weak self] in
+                self.runOnMain { [weak self] in
                     self?.captureExecutionProgress(update, for: prepared)
                 }
             }
-            DispatchQueue.main.async { [weak self] in
+            self.runOnMain { [weak self] in
                 guard let self else {
                     completion(false)
                     return

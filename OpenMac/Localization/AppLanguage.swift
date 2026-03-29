@@ -109,6 +109,15 @@ enum AppLanguageResolver {
         preferredLanguages: [String] = Locale.preferredLanguages,
         overrideRawValue: String? = nil
     ) -> AppLanguage {
+        #if DEBUG
+        // Keep unit tests deterministic even if the host app persisted a non-English override.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
+           overrideRawValue == nil,
+           preferredLanguages == Locale.preferredLanguages {
+            return .english
+        }
+        #endif
+
         let resolvedPreference: AppLanguagePreference
         if let overrideRawValue {
             resolvedPreference = AppLanguagePreference(rawValue: overrideRawValue)
@@ -121,15 +130,6 @@ enum AppLanguageResolver {
         if case let .language(language) = resolvedPreference {
             return language
         }
-
-        #if DEBUG
-        // Keep deterministic message assertions in unit tests when using host locale defaults.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
-           overrideRawValue == nil,
-           preferredLanguages == Locale.preferredLanguages {
-            return .english
-        }
-        #endif
 
         return AppLanguage.resolve(preferredLanguages: preferredLanguages)
     }
@@ -181,8 +181,8 @@ enum L10n {
     static func string(_ key: String, locale: Locale? = nil) -> String {
         ensureRuntimeLocaleInitialized()
         let resolvedLocale = locale ?? resolvedDefaultLocale()
-        let languageCode = AppLanguageResolver
-            .resolvedLanguage(preferredLanguages: [resolvedLocale.identifier])
+        let languageCode = AppLanguage
+            .resolve(preferredLanguages: [resolvedLocale.identifier])
             .rawValue
 
         if let localized = localizedValue(for: key, languageCode: languageCode) {
@@ -214,11 +214,11 @@ enum L10n {
             return configuredLocale
         }
 
-        let configuredLanguage = AppLanguageResolver
-            .resolvedLanguage(preferredLanguages: [configuredLocale.identifier])
+        let configuredLanguage = AppLanguage
+            .resolve(preferredLanguages: [configuredLocale.identifier])
             .rawValue
-        let runtimeLanguage = AppLanguageResolver
-            .resolvedLanguage(preferredLanguages: [runtimeLocale.identifier])
+        let runtimeLanguage = AppLanguage
+            .resolve(preferredLanguages: [runtimeLocale.identifier])
             .rawValue
 
         // Keep runtime region/calendar nuances only when language matches current settings.
@@ -230,10 +230,7 @@ enum L10n {
 
     private static func resolvedDefaultLocale() -> Locale {
         if isRunningTests {
-            return resolvedDefaultLocale(
-                overrideRawValue: AppLanguage.english.rawValue,
-                runtimeLocale: activeRuntimeLocale
-            )
+            return Locale(identifier: AppLanguage.english.rawValue)
         }
 
         let storedOverride = UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)

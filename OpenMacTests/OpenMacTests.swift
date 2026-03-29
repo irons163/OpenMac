@@ -3,6 +3,63 @@ import SwiftUI
 import Testing
 @testable import OpenMac
 
+private final class MockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private func makeMockedURLSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+@discardableResult
+private func waitForMainQueue(
+    timeout: TimeInterval = 2.0,
+    condition: @escaping () -> Bool
+) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() {
+            return true
+        }
+        let spinUntil = Date().addingTimeInterval(0.01)
+        if Thread.isMainThread {
+            _ = RunLoop.main.run(mode: .default, before: spinUntil)
+            _ = RunLoop.main.run(mode: .common, before: spinUntil)
+        } else {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+    }
+    return condition()
+}
+
 struct AutoAssignmentEngineTests {
 
     @Test("assigns task to an agent with all required skills")
@@ -111,6 +168,7 @@ struct AutoAssignmentEngineTests {
     }
 }
 
+@Suite(.serialized)
 struct AgentTaskExecutorTests {
 
     @Test("default executor local mock returns success summary")
@@ -658,6 +716,198 @@ struct AgentTaskExecutorTests {
         )
 
         #expect(summary == "12345...")
+    }
+
+    @Test("openai compatible api key mode succeeds with mocked chat completion response")
+    func openAICompatibleAPIKeySuccess() {
+        let task = WorkTask(
+            title: "Draft release notes",
+            details: "Summarize key changes",
+            requiredSkills: ["automation"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .apiKey
+            )
+        )
+
+        let mockedSession = makeMockedURLSession()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.url?.absoluteString == "https://api.openai.com/v1/chat/completions")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
+            #expect(request.httpMethod == "POST")
+
+            let payload = """
+            {
+              "choices": [
+                {
+                  "message": {
+                    "role": "assistant",
+                    "content": "Summary: Completed release notes draft."
+                  }
+                }
+              ]
+            }
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(payload.utf8))
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var progressEvents: [String] = []
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "sk-test"] },
+            urlSession: mockedSession,
+            timeoutSeconds: 2
+        )
+        let outcome = executor.execute(task: task, agent: agent) { update in
+            progressEvents.append(update)
+        }
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary.contains("Completed release notes draft"))
+        case let .failure(message):
+            #expect(Bool(false), "Expected success, got failure: \(message)")
+        }
+        #expect(progressEvents.contains(where: { $0.contains("OpenAI request started") }))
+        #expect(progressEvents.contains(where: { $0.contains("OpenAI response received") }))
+    }
+
+    @Test("openai compatible api key mode uses custom endpoint and returns failure on server errors")
+    func openAICompatibleAPIKeyServerError() {
+        let task = WorkTask(
+            title: "Analyze incidents",
+            details: "Summarize outage impact",
+            requiredSkills: ["automation"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                endpoint: "https://gateway.example.internal/",
+                openAIAuthMode: .apiKey
+            )
+        )
+
+        let mockedSession = makeMockedURLSession()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.url?.absoluteString == "https://gateway.example.internal/v1/chat/completions")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data("backend unavailable".utf8))
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "sk-test"] },
+            urlSession: mockedSession,
+            timeoutSeconds: 2
+        )
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected failure for 500 server response")
+        case let .failure(message):
+            #expect(message.contains("backend unavailable"))
+        }
+    }
+
+    @Test("openai compatible api key mode derives endpoint from OPENAI_BASE_URL")
+    func openAICompatibleAPIKeyUsesBaseURLFromEnvironment() {
+        let task = WorkTask(
+            title: "Refine changelog",
+            details: "Use proxy endpoint",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .apiKey
+            )
+        )
+
+        let mockedSession = makeMockedURLSession()
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.url?.absoluteString == "https://proxy.example.internal/v1/chat/completions")
+            let payload = """
+            {
+              "choices": [
+                {
+                  "message": {
+                    "role": "assistant",
+                    "content": "Summary: Routed through proxy."
+                  }
+                }
+              ]
+            }
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(payload.utf8))
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: {
+                [
+                    "OPENAI_API_KEY": "sk-test",
+                    "OPENAI_BASE_URL": "https://proxy.example.internal"
+                ]
+            },
+            urlSession: mockedSession,
+            timeoutSeconds: 2
+        )
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary.contains("Routed through proxy"))
+        case let .failure(message):
+            #expect(Bool(false), "Expected success via proxy endpoint, got: \(message)")
+        }
+    }
+}
+
+struct ItemModelTests {
+    @Test("item stores provided timestamp")
+    func storesProvidedTimestamp() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let item = Item(timestamp: timestamp)
+
+        #expect(item.timestamp == timestamp)
     }
 }
 
@@ -1926,6 +2176,54 @@ struct KanbanFlowTests {
     }
 }
 
+struct KanbanSupportTypeTests {
+    @Test("board health recommendation id is stable for each action")
+    func boardHealthRecommendationIDMapping() {
+        #expect(
+            BoardHealthRecommendation(action: .autoAssignUnassignedTodo, title: "", detail: "").id
+                == "auto-assign-unassigned-todo"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .openManualTriage, title: "", detail: "").id
+                == "open-manual-triage"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .openNewAgent, title: "", detail: "").id
+                == "open-new-agent"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .rebalanceTodoLoad, title: "", detail: "").id
+                == "rebalance-todo-load"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .increaseWIPLimit(.review), title: "", detail: "").id
+                == "increase-wip-Review"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .archiveDone, title: "", detail: "").id
+                == "archive-done"
+        )
+    }
+
+    @Test("global task search result id combines board and task identifiers")
+    func globalTaskSearchResultID() {
+        let boardID = UUID()
+        let taskID = UUID()
+        let result = GlobalTaskSearchResult(
+            taskID: taskID,
+            taskTitle: "Task",
+            taskDetails: "Details",
+            status: .todo,
+            boardID: boardID,
+            boardName: "Board",
+            assigneeName: "None"
+        )
+
+        #expect(result.id == "\(boardID.uuidString)-\(taskID.uuidString)")
+    }
+}
+
+@Suite(.serialized)
 @MainActor
 struct KanbanPersistenceTests {
 
@@ -3546,7 +3844,7 @@ struct KanbanPersistenceTests {
         let assignedCount = viewModel.bulkAssignTriageTasks()
 
         #expect(assignedCount == 1)
-        #expect(viewModel.lastBoardMessage == "Assigned 1 triage task. 1 task still needs manual attention")
+        #expect(viewModel.lastBoardMessage == "Assigned 1 triage task. 1 task still need manual attention")
         #expect(viewModel.lastBoardMessageSeverity?.rawValue == "warning")
     }
 
@@ -4870,6 +5168,251 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.count == 1)
     }
 
+    @Test("run task execution in background updates record and completion")
+    func runTaskExecutionInBackgroundUpdatesRecord() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Background run",
+            details: "Do work",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Background succeeded")],
+            progressUpdatesByTaskID: [task.id: ["step 1", "step 2"]]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var completionValue: Bool?
+        viewModel.runTaskExecutionInBackground(task.id) { didRun in
+            completionValue = didRun
+        }
+
+        #expect(waitForMainQueue(timeout: 12.0) { completionValue != nil })
+        #expect(completionValue == true)
+        #expect(viewModel.tasks[0].status == .review)
+        #expect(viewModel.tasks[0].executionRecord?.status == .succeeded)
+        #expect(viewModel.executionEvents(for: agent.id).count >= 3)
+    }
+
+    @Test("run task execution in background rejects task without details")
+    func runTaskExecutionInBackgroundRejectsMissingDetails() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Missing details",
+            details: "  ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        var completionValue: Bool?
+        viewModel.runTaskExecutionInBackground(task.id) { didRun in
+            completionValue = didRun
+        }
+
+        #expect(waitForMainQueue { completionValue != nil })
+        #expect(completionValue == false)
+        #expect(viewModel.lastBoardMessage == "Task details are required before running this task")
+    }
+
+    @Test("retry task execution in background reruns failed task")
+    func retryTaskExecutionInBackgroundRerunsFailedTask() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Retry me",
+            details: "Allow retry",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .failed,
+                runCount: 1,
+                lastError: "Initial failure"
+            )
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Retry success")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var completionValue: Bool?
+        viewModel.retryTaskExecutionInBackground(task.id) { didRun in
+            completionValue = didRun
+        }
+
+        #expect(waitForMainQueue(timeout: 12.0) { completionValue != nil })
+        #expect(completionValue == true)
+        #expect(viewModel.tasks[0].executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks[0].executionRecord?.runCount == 2)
+    }
+
+    @Test("retry task execution in background rejects non-failed task")
+    func retryTaskExecutionInBackgroundRejectsNonFailedTask() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Not failed",
+            details: "Already fine",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(status: .succeeded, runCount: 1)
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        var completionValue: Bool?
+        viewModel.retryTaskExecutionInBackground(task.id) { didRun in
+            completionValue = didRun
+        }
+
+        #expect(waitForMainQueue { completionValue != nil })
+        #expect(completionValue == false)
+        #expect(viewModel.lastBoardMessage == "Only failed executions can be retried")
+    }
+
+    @Test("run assigned executions in background processes assigned queue")
+    func runAssignedTaskExecutionsInBackgroundProcessesQueue() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let successTask = WorkTask(
+            title: "Background success",
+            details: "Detailed task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let failedTask = WorkTask(
+            title: "Background fail",
+            details: "Also detailed",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                successTask.id: .success(summary: "ok"),
+                failedTask.id: .failure(message: "boom")
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [successTask, failedTask],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedCount: Int?
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil })
+        #expect(startedCount == 2)
+        #expect(viewModel.lastBoardMessage?.contains("Batch run finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("2 started") == true)
+        #expect(viewModel.lastBoardMessage?.contains("1 succeeded") == true)
+        #expect(viewModel.lastBoardMessage?.contains("1 failed") == true)
+    }
+
+    @Test("run assigned executions in background warns when assigned tasks have empty details")
+    func runAssignedTaskExecutionsInBackgroundWarnsForEmptyDetails() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Blocked assigned",
+            details: "  ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        var startedCount: Int?
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(waitForMainQueue { startedCount != nil })
+        #expect(startedCount == 0)
+        #expect(viewModel.lastBoardMessage == "1 assigned task with empty details. Fill details before batch run.")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("workspace import preview from file URL supports success and read failure")
+    func workspaceImportPreviewFromURL() throws {
+        let task = WorkTask(
+            title: "Imported Task",
+            details: "from file",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openmac-preview-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempFile) }
+
+        let data = try #require(viewModel.workspaceExportData())
+        try data.write(to: tempFile, options: .atomic)
+
+        let preview = viewModel.workspaceImportPreview(from: tempFile)
+        #expect(preview?.boardCount == 1)
+        #expect(preview?.taskCount == 1)
+
+        let missingFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openmac-missing-\(UUID().uuidString).json")
+        let missingPreview = viewModel.workspaceImportPreview(from: missingFile)
+        #expect(missingPreview == nil)
+        #expect(viewModel.lastBoardMessage == "Failed to read workspace file")
+    }
+
+    @Test("demo board exposes seeded tasks and agents")
+    func demoBoardExposesSeedData() {
+        let viewModel = KanbanBoardViewModel.demoBoard()
+
+        #expect(viewModel.tasks.count == 3)
+        #expect(viewModel.agents.count == 3)
+        #expect(viewModel.tasks.contains(where: { $0.status == .inProgress }))
+        #expect(viewModel.tasks.contains(where: { $0.status == .review }))
+        #expect(viewModel.tasks.contains(where: { $0.status == .todo }))
+    }
+
     @Test("removing unknown agent returns false and does not persist")
     func rejectsRemovingUnknownAgent() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -4953,6 +5496,32 @@ struct AppLanguageResolverTests {
                 overrideRawValue: "invalid-language-code"
             ).rawValue == "es"
         )
+    }
+
+    @Test("app language preference raw value getter returns stable storage values")
+    func appLanguagePreferenceRawValueGetter() {
+        #expect(AppLanguagePreference.system.rawValue == AppLanguageSettings.systemValue)
+        #expect(AppLanguagePreference.language(.japanese).rawValue == AppLanguage.japanese.rawValue)
+    }
+
+    @Test("resolved default locale keeps runtime locale when language matches override")
+    func resolvedDefaultLocaleKeepsMatchingRuntimeLanguage() {
+        let resolved = L10n.resolvedDefaultLocale(
+            overrideRawValue: AppLanguage.english.rawValue,
+            runtimeLocale: Locale(identifier: "en-US")
+        )
+
+        #expect(resolved.identifier == "en-US")
+    }
+
+    @Test("resolved default locale falls back to override locale when runtime language mismatches")
+    func resolvedDefaultLocaleFallsBackWhenRuntimeLanguageDiffers() {
+        let resolved = L10n.resolvedDefaultLocale(
+            overrideRawValue: AppLanguage.english.rawValue,
+            runtimeLocale: Locale(identifier: "zh-Hant")
+        )
+
+        #expect(AppLanguage.resolve(preferredLanguages: [resolved.identifier]) == .english)
     }
 }
 
