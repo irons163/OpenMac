@@ -155,6 +155,8 @@
 "%d started" = "%d 开始";
 "%d succeeded" = "%d 成功";
 "%d unassigned task(s) can be dispatched automatically" = "%d 未分配的任务可以自动分派";
+"%d assigned %@ with empty details. Fill details before batch run." = "%d 个已分配%@缺少详细信息。请先补齐详细信息再批量运行。";
+"Assigned %d triage %@. %d %@ still need manual attention" = "已分配 %d 个分流%@。仍有 %d %@需要人工处理。";
 "Add an agent profile so pending To Do tasks can be assigned" = "请先新增代理配置，才能分配待办任务";
 "Agent %@ does not match required skills" = "代理 %@ 不符合所需技能";
 "Agent %@ is at max load (%d)" = "代理 %@ 处于最大负载 (%d)";

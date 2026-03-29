@@ -2678,9 +2678,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? message("task has") : message("tasks have")
+                let label = detailsMissingCount == 1 ? message("task") : message("tasks")
                 lastBoardMessage = message(
-                    "%d assigned %@ empty details. Fill details before batch run.",
+                    "%d assigned %@ with empty details. Fill details before batch run.",
                     detailsMissingCount,
                     label
                 )
@@ -2755,9 +2755,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? message("task has") : message("tasks have")
+                let label = detailsMissingCount == 1 ? message("task") : message("tasks")
                 lastBoardMessage = message(
-                    "%d assigned %@ empty details. Fill details before batch run.",
+                    "%d assigned %@ with empty details. Fill details before batch run.",
                     detailsMissingCount,
                     label
                 )
@@ -3059,9 +3059,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private func bulkTriageAssignmentSummary(assignedCount: Int, remainingCount: Int) -> String {
         let assignedLabel = assignedCount == 1 ? message("task") : message("tasks")
-        let remainingLabel = remainingCount == 1 ? message("task still needs") : message("tasks still need")
+        let remainingLabel = remainingCount == 1 ? message("task") : message("tasks")
         return message(
-            "Assigned %d triage %@. %d %@ manual attention",
+            "Assigned %d triage %@. %d %@ still need manual attention",
             assignedCount,
             assignedLabel,
             remainingCount,

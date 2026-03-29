@@ -155,6 +155,8 @@
 "%d started" = "%d comenzó";
 "%d succeeded" = "%d tuvo éxito";
 "%d unassigned task(s) can be dispatched automatically" = "%d las tareas no asignadas se pueden enviar automáticamente";
+"%d assigned %@ with empty details. Fill details before batch run." = "%d %@ asignadas tienen detalles vacíos. Complete los detalles antes de la ejecución por lotes.";
+"Assigned %d triage %@. %d %@ still need manual attention" = "Se asignaron %d %@ de triaje. %d %@ aún necesitan atención manual.";
 "Add an agent profile so pending To Do tasks can be assigned" = "Agregue un perfil de agente para que se puedan asignar tareas pendientes";
 "Agent %@ does not match required skills" = "El agente %@ no cumple con las habilidades requeridas";
 "Agent %@ is at max load (%d)" = "El agente %@ está en carga máxima (%d)";

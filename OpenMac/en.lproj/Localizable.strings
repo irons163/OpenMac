@@ -155,6 +155,8 @@
 "%d started" = "%d started";
 "%d succeeded" = "%d succeeded";
 "%d unassigned task(s) can be dispatched automatically" = "%d unassigned task(s) can be dispatched automatically";
+"%d assigned %@ with empty details. Fill details before batch run." = "%d assigned %@ with empty details. Fill details before batch run.";
+"Assigned %d triage %@. %d %@ still need manual attention" = "Assigned %d triage %@. %d %@ still need manual attention";
 "Add an agent profile so pending To Do tasks can be assigned" = "Add an agent profile so pending To Do tasks can be assigned";
 "Agent %@ does not match required skills" = "Agent %@ does not match required skills";
 "Agent %@ is at max load (%d)" = "Agent %@ is at max load (%d)";

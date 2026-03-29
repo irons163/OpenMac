@@ -4068,7 +4068,7 @@ struct KanbanPersistenceTests {
         let started = viewModel.runAssignedTaskExecutions()
 
         #expect(started == 0)
-        #expect(viewModel.lastBoardMessage == "1 assigned task has empty details. Fill details before batch run.")
+        #expect(viewModel.lastBoardMessage == "1 assigned task with empty details. Fill details before batch run.")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
         #expect(viewModel.tasks.first?.executionRecord == nil)
         #expect(store.savedSnapshots.isEmpty)

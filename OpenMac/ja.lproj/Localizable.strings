@@ -155,6 +155,8 @@
 "%d started" = "%d を開始しました";
 "%d succeeded" = "%d は成功しました";
 "%d unassigned task(s) can be dispatched automatically" = "%d 割り当てられていないタスクを自動的にディスパッチできます";
+"%d assigned %@ with empty details. Fill details before batch run." = "割り当て済みの%d%@で詳細が空です。バッチ実行の前に詳細を入力してください。";
+"Assigned %d triage %@. %d %@ still need manual attention" = "優先順位付けの%d%@を割り当てました。%d%@はまだ手動対応が必要です。";
 "Add an agent profile so pending To Do tasks can be assigned" = "エージェント プロファイルを追加して、保留中の To Do タスクを割り当てられるようにする";
 "Agent %@ does not match required skills" = "エージェント %@ は必要なスキルと一致しません";
 "Agent %@ is at max load (%d)" = "エージェント %@ は最大負荷です (%d)";
