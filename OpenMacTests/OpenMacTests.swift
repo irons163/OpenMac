@@ -4467,6 +4467,50 @@ struct KanbanPersistenceTests {
         #expect(results.first?.taskTitle == "Incident Response")
     }
 
+    @Test("global task search results are sorted by board then task title")
+    func globalTaskSearchSortsByBoardThenTitle() {
+        let seedTask = WorkTask(
+            title: "Seed",
+            details: "crosssort",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [seedTask], agents: [])
+
+        _ = viewModel.createBoard(name: "Beta")
+        _ = viewModel.addTask(
+            title: "Zulu Task",
+            details: "crosssort",
+            requiredSkillsText: "ops",
+            storyPoints: 2
+        )
+        _ = viewModel.addTask(
+            title: "Alpha Task",
+            details: "crosssort",
+            requiredSkillsText: "ops",
+            storyPoints: 1
+        )
+
+        _ = viewModel.createBoard(name: "Alpha")
+        _ = viewModel.addTask(
+            title: "Gamma Task",
+            details: "crosssort",
+            requiredSkillsText: "ops",
+            storyPoints: 1
+        )
+
+        let results = viewModel.globalTaskSearchResults(query: "crosssort task")
+
+        let orderedLabels = results.map { "\($0.boardName)|\($0.taskTitle)" }
+        #expect(orderedLabels == [
+            "Alpha|Gamma Task",
+            "Beta|Alpha Task",
+            "Beta|Zulu Task"
+        ])
+    }
+
     @Test("open task switches board context and persists selection")
     func openTaskSwitchesBoardContextAndPersists() {
         let defaultTask = WorkTask(
@@ -4996,6 +5040,16 @@ struct KanbanPersistenceTests {
         #expect(loaded == nil)
     }
 
+    @Test("agentName resolves unassigned, known, and unknown ids")
+    func agentNameResolvesKnownUnknownAndUnassigned() {
+        let agent = AgentProfile(name: "Known Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent])
+
+        #expect(viewModel.agentName(for: nil) == "Unassigned")
+        #expect(viewModel.agentName(for: agent.id) == "Known Agent")
+        #expect(viewModel.agentName(for: UUID()) == "Unknown")
+    }
+
     @Test("updates WIP limit and persists new board snapshot")
     func updatesWIPLimitAndPersists() {
         let task = WorkTask(
@@ -5296,6 +5350,69 @@ struct KanbanPersistenceTests {
         let candidates = viewModel.reassignableAgents(for: assignedTask.id)
 
         #expect(candidates.map(\.id) == [eligibleAgent.id])
+    }
+
+    @Test("assignable agents are ordered by load then name")
+    func assignableAgentsAreOrderedByLoadThenName() {
+        let task = WorkTask(
+            title: "Triage target",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let alpha = AgentProfile(name: "Alpha", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let beta = AgentProfile(name: "Beta", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let zetaLoaded = AgentProfile(name: "Zeta", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let loadTask = WorkTask(
+            title: "Busy",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: zetaLoaded.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task, loadTask],
+            agents: [zetaLoaded, beta, alpha]
+        )
+
+        let eligible = viewModel.assignableAgents(for: task.id)
+
+        #expect(eligible.map(\.name) == ["Alpha", "Beta", "Zeta"])
+    }
+
+    @Test("reassignable agents are ordered by load then name")
+    func reassignableAgentsAreOrderedByLoadThenName() {
+        let source = AgentProfile(name: "Source", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let alpha = AgentProfile(name: "Alpha", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let beta = AgentProfile(name: "Beta", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let zetaLoaded = AgentProfile(name: "Zeta", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let assignedTask = WorkTask(
+            title: "Reassign me",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: source.id
+        )
+        let loadTask = WorkTask(
+            title: "Busy",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: zetaLoaded.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [assignedTask, loadTask],
+            agents: [source, zetaLoaded, beta, alpha]
+        )
+
+        let candidates = viewModel.reassignableAgents(for: assignedTask.id)
+
+        #expect(candidates.map(\.name) == ["Alpha", "Beta", "Zeta"])
     }
 
     @Test("triage candidates include todo tasks that remain unassigned without auto-assign")
@@ -6305,6 +6422,76 @@ struct KanbanPersistenceTests {
         #expect(events.contains(where: { $0.message == "Planning changes" }))
         #expect(events.contains(where: { $0.message == "Applying patch" }))
         #expect(events.contains(where: { $0.status == .succeeded }))
+    }
+
+    @Test("clearExecutionEvents removes stored events for a specific agent")
+    func clearExecutionEventsRemovesStoredEventsForAgent() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Streaming task",
+            details: "Track progress logs",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Done")],
+            progressUpdatesByTaskID: [task.id: ["Planning changes"]]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        _ = viewModel.runTaskExecution(task.id)
+        #expect(!viewModel.executionEvents(for: agent.id).isEmpty)
+
+        viewModel.clearExecutionEvents(for: agent.id)
+
+        #expect(viewModel.executionEvents(for: agent.id).isEmpty)
+    }
+
+    @Test("isAgentExecutionRunning checks running status by lastAgentID and assignee")
+    func isAgentExecutionRunningChecksLastAgentAndAssignee() {
+        let agentA = AgentProfile(name: "Agent A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let agentB = AgentProfile(name: "Agent B", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let runningByLastAgent = WorkTask(
+            title: "Run A",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: nil,
+            executionRecord: TaskExecutionRecord(status: .running, lastAgentID: agentA.id)
+        )
+        let runningByAssignee = WorkTask(
+            title: "Run B",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agentB.id,
+            executionRecord: TaskExecutionRecord(status: .running, lastAgentID: nil)
+        )
+        let completed = WorkTask(
+            title: "Done C",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agentB.id,
+            executionRecord: TaskExecutionRecord(status: .succeeded, lastAgentID: agentB.id)
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [runningByLastAgent, runningByAssignee, completed],
+            agents: [agentA, agentB]
+        )
+
+        #expect(viewModel.isAgentExecutionRunning(agentA.id))
+        #expect(viewModel.isAgentExecutionRunning(agentB.id))
+        #expect(!viewModel.isAgentExecutionRunning(UUID()))
     }
 
     @Test("run task execution marks blocker summaries as failed")
