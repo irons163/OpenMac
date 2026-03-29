@@ -3089,6 +3089,74 @@ struct ContentViewLogicTests {
         )
     }
 
+    @Test("task edit helper applies valid updates and rejects invalid title")
+    func applyTaskEditsHelperCoverage() {
+        let task = WorkTask(
+            title: "Original",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let updated = ContentViewTestHooks.applyTaskEdits(
+            viewModel: viewModel,
+            taskID: task.id,
+            title: "Updated",
+            details: "new details",
+            requiredSkillsText: "swiftui, qa",
+            storyPoints: 5
+        )
+        #expect(updated)
+        #expect(viewModel.tasks.first?.title == "Updated")
+        #expect(viewModel.tasks.first?.storyPoints == 5)
+
+        let rejected = ContentViewTestHooks.applyTaskEdits(
+            viewModel: viewModel,
+            taskID: task.id,
+            title: "   ",
+            details: "invalid",
+            requiredSkillsText: "",
+            storyPoints: 1
+        )
+        #expect(!rejected)
+    }
+
+    @Test("agent edit helper applies profile updates and rejects empty name")
+    func applyAgentEditsHelperCoverage() {
+        let agent = AgentProfile(
+            name: "Agent A",
+            skills: ["swiftui"],
+            maxConcurrentTasks: 2
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [agent])
+        let runtimeProfile = AgentRuntimeProfile(provider: .openAICompatible, model: "gpt-5", openAIAuthMode: .apiKey)
+
+        let updated = ContentViewTestHooks.applyAgentEdits(
+            viewModel: viewModel,
+            agentID: agent.id,
+            name: "Agent B",
+            skillsText: "swiftui, qa",
+            maxConcurrentTasks: 3,
+            runtimeProfile: runtimeProfile
+        )
+        #expect(updated)
+        #expect(viewModel.agents.first?.name == "Agent B")
+        #expect(viewModel.agents.first?.runtimeProfile?.model == "gpt-5")
+
+        let rejected = ContentViewTestHooks.applyAgentEdits(
+            viewModel: viewModel,
+            agentID: agent.id,
+            name: " ",
+            skillsText: "",
+            maxConcurrentTasks: 3,
+            runtimeProfile: nil
+        )
+        #expect(!rejected)
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
