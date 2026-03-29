@@ -2557,6 +2557,11 @@ final class KanbanBoardViewModel: ObservableObject {
         agentExecutionEventsByAgentID[agentID] = []
     }
 
+    func clearLocalizedTransientBoardMessage() {
+        lastBoardMessage = nil
+        lastBoardMessageSeverity = nil
+    }
+
     func isAgentExecutionRunning(_ agentID: UUID) -> Bool {
         tasks.contains { task in
             guard task.executionRecord?.status == .running else { return false }

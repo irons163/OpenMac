@@ -1911,6 +1911,23 @@ struct KanbanFlowTests {
 @MainActor
 struct KanbanPersistenceTests {
 
+    @Test("clears localized transient board message")
+    func clearsLocalizedTransientBoardMessage() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        _ = viewModel.addTask(
+            title: "",
+            details: "missing title",
+            requiredSkillsText: "",
+            storyPoints: 1
+        )
+        #expect(viewModel.lastBoardMessage != nil)
+
+        viewModel.clearLocalizedTransientBoardMessage()
+
+        #expect(viewModel.lastBoardMessage == nil)
+        #expect(viewModel.lastBoardMessageSeverity == nil)
+    }
+
     @Test("persists board snapshot after successful state mutation")
     func persistsBoardAfterMove() {
         let task = WorkTask(

@@ -700,6 +700,7 @@ struct ContentView: View {
             L10n.setRuntimeLocale(
                 AppLanguageResolver.resolvedLocale(overrideRawValue: newValue)
             )
+            viewModel.clearLocalizedTransientBoardMessage()
         }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
