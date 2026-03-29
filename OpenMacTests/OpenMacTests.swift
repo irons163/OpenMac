@@ -4944,6 +4944,29 @@ struct LocalizationCatalogTests {
         }
     }
 
+    @Test("Chinese localizations avoid leftover English kanban terms")
+    func chineseLocalizationsAvoidEnglishKanbanTerms() {
+        let chineseLocales = ["zh-Hant", "zh-Hans"]
+        let forbiddenPatterns = [#"\bAgent\b"#, #"\bBoard\b"#]
+
+        for locale in chineseLocales {
+            let localizedTable = localizationTable(for: locale)
+            let offendingKeys = localizedTable
+                .filter { _, value in
+                    forbiddenPatterns.contains { pattern in
+                        value.range(of: pattern, options: .regularExpression) != nil
+                    }
+                }
+                .keys
+                .sorted()
+
+            #expect(
+                offendingKeys.isEmpty,
+                "\(locale) contains untranslated terms in \(offendingKeys.count) key(s)"
+            )
+        }
+    }
+
     private func localizationTable(for localeCode: String) -> [String: String] {
         let fileURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
