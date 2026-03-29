@@ -1,5 +1,10 @@
 import Foundation
 
+enum AppLanguageSettings {
+    static let userDefaultsKey = "appLanguageOverride"
+    static let systemValue = "system"
+}
+
 enum AppLanguage: String, CaseIterable {
     case english = "en"
     case traditionalChinese = "zh-Hant"
@@ -10,6 +15,25 @@ enum AppLanguage: String, CaseIterable {
     case korean = "ko"
 
     var locale: Locale { Locale(identifier: rawValue) }
+
+    var displayNameKey: String {
+        switch self {
+        case .english:
+            return "English"
+        case .traditionalChinese:
+            return "Traditional Chinese"
+        case .simplifiedChinese:
+            return "Simplified Chinese"
+        case .french:
+            return "French"
+        case .spanish:
+            return "Spanish"
+        case .japanese:
+            return "Japanese"
+        case .korean:
+            return "Korean"
+        }
+    }
 
     static func resolve(preferredLanguages: [String] = Locale.preferredLanguages) -> AppLanguage {
         for preferredLanguage in preferredLanguages {
@@ -52,19 +76,72 @@ enum AppLanguage: String, CaseIterable {
     }
 }
 
+enum AppLanguagePreference: Equatable {
+    case system
+    case language(AppLanguage)
+
+    init(rawValue: String?) {
+        let normalized = (rawValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty || normalized == AppLanguageSettings.systemValue {
+            self = .system
+            return
+        }
+        if let language = AppLanguage(rawValue: normalized) {
+            self = .language(language)
+            return
+        }
+        self = .system
+    }
+
+    var rawValue: String {
+        switch self {
+        case .system:
+            return AppLanguageSettings.systemValue
+        case let .language(language):
+            return language.rawValue
+        }
+    }
+}
+
 enum AppLanguageResolver {
-    static func resolvedLanguage(preferredLanguages: [String] = Locale.preferredLanguages) -> AppLanguage {
+    static func resolvedLanguage(
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        overrideRawValue: String? = nil
+    ) -> AppLanguage {
+        let resolvedPreference: AppLanguagePreference
+        if let overrideRawValue {
+            resolvedPreference = AppLanguagePreference(rawValue: overrideRawValue)
+        } else {
+            resolvedPreference = AppLanguagePreference(
+                rawValue: UserDefaults.standard.string(forKey: AppLanguageSettings.userDefaultsKey)
+            )
+        }
+
+        if case let .language(language) = resolvedPreference {
+            return language
+        }
+
         #if DEBUG
-        // Keep deterministic message assertions in unit tests regardless of host system language.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        // Keep deterministic message assertions in unit tests when using host locale defaults.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
+           overrideRawValue == nil,
+           preferredLanguages == Locale.preferredLanguages {
             return .english
         }
         #endif
+
         return AppLanguage.resolve(preferredLanguages: preferredLanguages)
     }
 
-    static func resolvedLocale(preferredLanguages: [String] = Locale.preferredLanguages) -> Locale {
-        resolvedLanguage(preferredLanguages: preferredLanguages).locale
+    static func resolvedLocale(
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        overrideRawValue: String? = nil
+    ) -> Locale {
+        resolvedLanguage(
+            preferredLanguages: preferredLanguages,
+            overrideRawValue: overrideRawValue
+        ).locale
     }
 }
 

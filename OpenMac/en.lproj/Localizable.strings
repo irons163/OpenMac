@@ -308,3 +308,15 @@
 "tasks" = "tasks";
 "tasks have" = "tasks have";
 "tasks still need" = "tasks still need";
+
+"Language" = "Language";
+"Language: %@" = "Language: %@";
+"System Default" = "System Default";
+"Switch app language or follow system default" = "Switch app language or follow system default";
+"English" = "English";
+"Traditional Chinese" = "Traditional Chinese";
+"Simplified Chinese" = "Simplified Chinese";
+"French" = "French";
+"Spanish" = "Spanish";
+"Japanese" = "Japanese";
+"Korean" = "Korean";

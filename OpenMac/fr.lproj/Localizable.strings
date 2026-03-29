@@ -308,3 +308,15 @@
 "tasks" = "tâches";
 "tasks have" = "les tâches ont";
 "tasks still need" = "les tâches nécessitent encore";
+
+"Language" = "Langue";
+"Language: %@" = "Langue : %@";
+"System Default" = "Système par défaut";
+"Switch app language or follow system default" = "Changer la langue de l’app ou suivre le système par défaut";
+"English" = "Anglais";
+"Traditional Chinese" = "Chinois traditionnel";
+"Simplified Chinese" = "Chinois simplifié";
+"French" = "Français";
+"Spanish" = "Espagnol";
+"Japanese" = "Japonais";
+"Korean" = "Coréen";

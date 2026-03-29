@@ -10,7 +10,7 @@ import SwiftUI
 @main
 struct OpenMacApp: App {
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
-    private let appLocale = AppLanguageResolver.resolvedLocale()
+    @AppStorage(AppLanguageSettings.userDefaultsKey) private var appLanguageOverrideRawValue = AppLanguageSettings.systemValue
 
     var body: some Scene {
         WindowGroup {
@@ -30,7 +30,21 @@ struct OpenMacApp: App {
                 appearanceCommandButton(for: .light, shortcut: "l")
                 appearanceCommandButton(for: .dark, shortcut: "d")
             }
+
+            CommandMenu("Language") {
+                languageCommandButton(for: nil)
+
+                Divider()
+
+                ForEach(AppLanguage.allCases, id: \.rawValue) { language in
+                    languageCommandButton(for: language)
+                }
+            }
         }
+    }
+
+    private var appLocale: Locale {
+        AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
     }
 
     private func appearanceCommandButton(for mode: AppAppearanceMode, shortcut: Character) -> some View {
@@ -48,6 +62,40 @@ struct OpenMacApp: App {
 
     private var selectedAppearanceMode: AppAppearanceMode {
         AppAppearanceMode.resolve(rawValue: appearanceModeRawValue)
+    }
+
+    private var selectedLanguagePreference: AppLanguagePreference {
+        AppLanguagePreference(rawValue: appLanguageOverrideRawValue)
+    }
+
+    private func languageCommandButton(for language: AppLanguage?) -> some View {
+        Button {
+            appLanguageOverrideRawValue = language?.rawValue ?? AppLanguageSettings.systemValue
+        } label: {
+            if isSelectedLanguage(language) {
+                Label(languageLabel(for: language), systemImage: "checkmark")
+            } else {
+                Text(languageLabel(for: language))
+            }
+        }
+    }
+
+    private func isSelectedLanguage(_ language: AppLanguage?) -> Bool {
+        switch (selectedLanguagePreference, language) {
+        case (.system, nil):
+            return true
+        case let (.language(selectedLanguage), .some(language)):
+            return selectedLanguage == language
+        default:
+            return false
+        }
+    }
+
+    private func languageLabel(for language: AppLanguage?) -> String {
+        guard let language else {
+            return L10n.string("System Default")
+        }
+        return L10n.string(language.displayNameKey)
     }
 
     private func cycleAppearanceMode() {

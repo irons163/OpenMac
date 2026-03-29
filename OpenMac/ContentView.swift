@@ -17,6 +17,7 @@ private extension UTType {
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
+    @AppStorage(AppLanguageSettings.userDefaultsKey) private var appLanguageOverrideRawValue = AppLanguageSettings.systemValue
     @AppStorage("developerModeEnabled") private var developerModeEnabled = false
     @AppStorage(CodexProjectsDirectorySettings.userDefaultsKey) private var codexProjectsDirectoryPath = ""
     @StateObject private var viewModel: KanbanBoardViewModel
@@ -502,6 +503,16 @@ struct ContentView: View {
                     }
                 }
                 .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
+                Menu(L10n.format("Language: %@", selectedLanguageLabel)) {
+                    languageSelectionButton(for: nil)
+
+                    Divider()
+
+                    ForEach(AppLanguage.allCases, id: \.rawValue) { language in
+                        languageSelectionButton(for: language)
+                    }
+                }
+                .help("Switch app language or follow system default")
                 Menu("Developer") {
                     Toggle("Developer Mode", isOn: $developerModeEnabled)
                     Divider()
@@ -1435,6 +1446,19 @@ struct ContentView: View {
         AppAppearanceMode.resolve(rawValue: appearanceModeRawValue)
     }
 
+    private var selectedLanguagePreference: AppLanguagePreference {
+        AppLanguagePreference(rawValue: appLanguageOverrideRawValue)
+    }
+
+    private var selectedLanguageLabel: String {
+        switch selectedLanguagePreference {
+        case .system:
+            return L10n.string("System Default")
+        case let .language(language):
+            return L10n.string(language.displayNameKey)
+        }
+    }
+
     @ViewBuilder
     private func appearanceMenuButton(for mode: AppAppearanceMode) -> some View {
         switch mode {
@@ -1464,6 +1488,36 @@ struct ContentView: View {
 
     private func cycleAppearanceMode() {
         appearanceModeRawValue = selectedAppearanceMode.next().rawValue
+    }
+
+    private func languageSelectionButton(for language: AppLanguage?) -> some View {
+        Button {
+            appLanguageOverrideRawValue = language?.rawValue ?? AppLanguageSettings.systemValue
+        } label: {
+            if isSelectedLanguage(language) {
+                Label(languageLabel(for: language), systemImage: "checkmark")
+            } else {
+                Text(languageLabel(for: language))
+            }
+        }
+    }
+
+    private func isSelectedLanguage(_ language: AppLanguage?) -> Bool {
+        switch (selectedLanguagePreference, language) {
+        case (.system, nil):
+            return true
+        case let (.language(selectedLanguage), .some(language)):
+            return selectedLanguage == language
+        default:
+            return false
+        }
+    }
+
+    private func languageLabel(for language: AppLanguage?) -> String {
+        guard let language else {
+            return L10n.string("System Default")
+        }
+        return L10n.string(language.displayNameKey)
     }
 }
 

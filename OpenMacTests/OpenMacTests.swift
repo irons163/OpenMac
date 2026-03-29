@@ -4728,6 +4728,36 @@ struct AppLanguageResolverTests {
     func picksFirstSupportedPreferredLanguage() {
         #expect(AppLanguageResolver.resolvedLanguage(preferredLanguages: ["de-DE", "ja-JP", "fr-FR"]).rawValue == "ja")
     }
+
+    @Test("uses explicit language override when provided")
+    func usesExplicitOverrideLanguage() {
+        #expect(
+            AppLanguageResolver.resolvedLanguage(
+                preferredLanguages: ["en-US"],
+                overrideRawValue: "ja"
+            ).rawValue == "ja"
+        )
+    }
+
+    @Test("system override follows preferred languages")
+    func systemOverrideUsesPreferredLanguages() {
+        #expect(
+            AppLanguageResolver.resolvedLanguage(
+                preferredLanguages: ["fr-FR"],
+                overrideRawValue: AppLanguageSettings.systemValue
+            ).rawValue == "fr"
+        )
+    }
+
+    @Test("invalid override falls back to preferred language matching")
+    func invalidOverrideFallsBackToPreferredLanguages() {
+        #expect(
+            AppLanguageResolver.resolvedLanguage(
+                preferredLanguages: ["es-ES"],
+                overrideRawValue: "invalid-language-code"
+            ).rawValue == "es"
+        )
+    }
 }
 
 struct LocalizationCatalogTests {

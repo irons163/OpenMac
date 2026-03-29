@@ -308,3 +308,15 @@
 "tasks" = "タスク";
 "tasks have" = "タスクには";
 "tasks still need" = "タスクにはまだ必要です";
+
+"Language" = "言語";
+"Language: %@" = "言語: %@";
+"System Default" = "システム設定";
+"Switch app language or follow system default" = "アプリの言語を切り替えるか、システム設定に従います";
+"English" = "英語";
+"Traditional Chinese" = "繁体字中国語";
+"Simplified Chinese" = "簡体字中国語";
+"French" = "フランス語";
+"Spanish" = "スペイン語";
+"Japanese" = "日本語";
+"Korean" = "韓国語";
