@@ -166,6 +166,211 @@ struct AutoAssignmentEngineTests {
         #expect(!(decision?.reason.isEmpty ?? true))
         #expect((decision?.score ?? 0) > 0)
     }
+
+    @Test("assign resolves equal-score ties by agent name")
+    func assignResolvesEqualScoreTiesByAgentName() {
+        let task = WorkTask(
+            title: "Build board shell",
+            details: "Implement kanban layout",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let laterName = AgentProfile(name: "Zeta Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let earlierName = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+
+        let result = AutoAssignmentEngine().assign(tasks: [task], agents: [laterName, earlierName])
+
+        #expect(result.tasks[0].assignedAgentID == earlierName.id)
+    }
+
+    @Test("bestAgent resolves equal-score ties by agent name")
+    func bestAgentResolvesEqualScoreTiesByAgentName() {
+        let task = WorkTask(
+            title: "Build board shell",
+            details: "Implement kanban layout",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let laterName = AgentProfile(name: "Zeta Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let earlierName = AgentProfile(name: "Alpha Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
+
+        let decision = AutoAssignmentEngine().bestAgent(
+            for: task,
+            among: [task],
+            agents: [laterName, earlierName]
+        )
+
+        #expect(decision?.agentID == earlierName.id)
+    }
+
+    @Test("assign prefers lower load when candidate scores tie")
+    func assignPrefersLowerLoadWhenScoresTie() {
+        let task = WorkTask(
+            title: "Kanban polish",
+            details: "Refine board interactions",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+
+        let lowerLoadAgent = AgentProfile(name: "Lower Load", skills: ["swiftui"], maxConcurrentTasks: 10)
+        let higherLoadAgent = AgentProfile(name: "Higher Load", skills: ["swiftui", "kanban"], maxConcurrentTasks: 10)
+
+        let lowerLoadTasks = (0..<8).map { index in
+            WorkTask(
+                title: "Lower \(index)",
+                details: "",
+                requiredSkills: ["swiftui"],
+                storyPoints: 1,
+                status: .inProgress,
+                assignedAgentID: lowerLoadAgent.id
+            )
+        }
+        let higherLoadTasks = (0..<9).map { index in
+            WorkTask(
+                title: "Higher \(index)",
+                details: "",
+                requiredSkills: ["swiftui"],
+                storyPoints: 1,
+                status: .inProgress,
+                assignedAgentID: higherLoadAgent.id
+            )
+        }
+
+        let result = AutoAssignmentEngine().assign(
+            tasks: lowerLoadTasks + higherLoadTasks + [task],
+            agents: [higherLoadAgent, lowerLoadAgent]
+        )
+
+        let assignedTask = result.tasks.first { $0.id == task.id }
+        #expect(assignedTask?.assignedAgentID == lowerLoadAgent.id)
+    }
+
+    @Test("bestAgent prefers lower load when candidate scores tie")
+    func bestAgentPrefersLowerLoadWhenScoresTie() {
+        let task = WorkTask(
+            title: "Kanban polish",
+            details: "Refine board interactions",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+
+        let lowerLoadAgent = AgentProfile(name: "Lower Load", skills: ["swiftui"], maxConcurrentTasks: 10)
+        let higherLoadAgent = AgentProfile(name: "Higher Load", skills: ["swiftui", "kanban"], maxConcurrentTasks: 10)
+
+        let lowerLoadTasks = (0..<8).map { index in
+            WorkTask(
+                title: "Lower \(index)",
+                details: "",
+                requiredSkills: ["swiftui"],
+                storyPoints: 1,
+                status: .inProgress,
+                assignedAgentID: lowerLoadAgent.id
+            )
+        }
+        let higherLoadTasks = (0..<9).map { index in
+            WorkTask(
+                title: "Higher \(index)",
+                details: "",
+                requiredSkills: ["swiftui"],
+                storyPoints: 1,
+                status: .inProgress,
+                assignedAgentID: higherLoadAgent.id
+            )
+        }
+
+        let decision = AutoAssignmentEngine().bestAgent(
+            for: task,
+            among: lowerLoadTasks + higherLoadTasks + [task],
+            agents: [higherLoadAgent, lowerLoadAgent]
+        )
+
+        #expect(decision?.agentID == lowerLoadAgent.id)
+    }
+}
+
+@Suite(.serialized)
+struct OpenMacAppLogicTests {
+    @Test("appearance selection action resolves raw value")
+    func appearanceSelectionActionResolvesRawValue() {
+        let updatedRawValue = OpenMacAppTestHooks.appearanceSelectionRawValue(
+            initialRawValue: AppAppearanceMode.system.rawValue,
+            mode: .dark
+        )
+
+        #expect(updatedRawValue == AppAppearanceMode.dark.rawValue)
+        #expect(OpenMacAppTestHooks.appearanceRawValue(for: .light) == AppAppearanceMode.light.rawValue)
+    }
+
+    @Test("language selection action supports explicit and system values")
+    func languageSelectionActionSupportsExplicitAndSystemValues() {
+        let explicit = OpenMacAppTestHooks.languageSelectionRawValue(
+            initialRawValue: AppLanguageSettings.systemValue,
+            language: .japanese
+        )
+        #expect(explicit == AppLanguage.japanese.rawValue)
+
+        let system = OpenMacAppTestHooks.languageSelectionRawValue(
+            initialRawValue: AppLanguage.japanese.rawValue,
+            language: nil
+        )
+        #expect(system == AppLanguageSettings.systemValue)
+        #expect(OpenMacAppTestHooks.languageOverrideRawValue(for: .english) == AppLanguage.english.rawValue)
+        #expect(OpenMacAppTestHooks.languageOverrideRawValue(for: nil) == AppLanguageSettings.systemValue)
+    }
+
+    @Test("selected language matching covers system and explicit branches")
+    func selectedLanguageMatchingCoversSystemAndExplicitBranches() {
+        #expect(OpenMacAppTestHooks.isSelectedLanguage(overrideRawValue: AppLanguageSettings.systemValue, language: nil))
+        #expect(OpenMacAppTestHooks.isSelectedLanguage(overrideRawValue: AppLanguage.korean.rawValue, language: .korean))
+        #expect(!OpenMacAppTestHooks.isSelectedLanguage(overrideRawValue: AppLanguage.korean.rawValue, language: nil))
+        #expect(!OpenMacAppTestHooks.isSelectedLanguage(overrideRawValue: AppLanguageSettings.systemValue, language: .english))
+    }
+
+    @Test("language label and appearance cycle helpers return expected values")
+    func languageLabelAndAppearanceCycleHelpersReturnExpectedValues() {
+        #expect(OpenMacAppTestHooks.languageLabel(for: nil) == L10n.string("System Default"))
+        #expect(OpenMacAppTestHooks.languageLabel(for: .french) == L10n.string(AppLanguage.french.displayNameKey))
+
+        let cycledFromSystem = OpenMacAppTestHooks.cycledAppearanceRawValue(
+            currentRawValue: AppAppearanceMode.system.rawValue
+        )
+        #expect(cycledFromSystem == AppAppearanceMode.system.next().rawValue)
+
+        let cycledFromInvalid = OpenMacAppTestHooks.cycledAppearanceRawValue(currentRawValue: "invalid-mode")
+        #expect(cycledFromInvalid == AppAppearanceMode.system.next().rawValue)
+
+        let cycledViaAction = OpenMacAppTestHooks.cycleAppearanceActionRawValue(
+            initialRawValue: AppAppearanceMode.light.rawValue
+        )
+        #expect(cycledViaAction == AppAppearanceMode.light.next().rawValue)
+    }
+
+    @Test("app mutators update and cycle persisted appearance/language values")
+    func appMutatorsUpdateAndCyclePersistedValues() {
+        let result = OpenMacAppTestHooks.exerciseInternalMutators(
+            initialAppearanceRawValue: AppAppearanceMode.system.rawValue,
+            initialLanguageRawValue: AppLanguageSettings.systemValue,
+            appearanceRawValueToApply: AppAppearanceMode.dark.rawValue,
+            languageRawValueToApply: AppLanguage.japanese.rawValue
+        )
+
+        #expect(result.appliedAppearance == AppAppearanceMode.dark.rawValue)
+        #expect(result.appliedLanguage == AppLanguage.japanese.rawValue)
+        #expect(result.cycledAppearance == AppAppearanceMode.dark.next().rawValue)
+
+        let readBack = OpenMacAppTestHooks.readAppearanceRawValueFromAppStorage(
+            initialAppearanceRawValue: AppAppearanceMode.light.rawValue
+        )
+        #expect(readBack == AppAppearanceMode.light.rawValue)
+    }
 }
 
 @Suite(.serialized)
@@ -4777,6 +4982,18 @@ struct KanbanPersistenceTests {
         #expect(loadedTask?.status == snapshotTask?.status)
         #expect(loadedTask?.assignedAgentID == snapshotTask?.assignedAgentID)
         #expect(abs((loadedTask?.createdAt.timeIntervalSince(snapshotTask?.createdAt ?? .distantPast) ?? 1)) < 0.01)
+    }
+
+    @Test("file store load returns nil when snapshot file is missing")
+    func fileStoreLoadReturnsNilWhenSnapshotFileIsMissing() throws {
+        let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let fileURL = directoryURL.appendingPathComponent("missing-board.json")
+        let store = FileKanbanBoardStore(fileURL: fileURL)
+
+        let loaded = try store.load()
+
+        #expect(loaded == nil)
     }
 
     @Test("updates WIP limit and persists new board snapshot")
