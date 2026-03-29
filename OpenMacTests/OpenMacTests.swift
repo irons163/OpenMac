@@ -3007,6 +3007,60 @@ struct ContentViewLogicTests {
         )
     }
 
+    @Test("selected agent console resolver prefers selected id and falls back safely")
+    func selectedAgentForConsoleResolverCoverage() {
+        let agentA = AgentProfile(name: "A", skills: [], maxConcurrentTasks: 1)
+        let agentB = AgentProfile(name: "B", skills: [], maxConcurrentTasks: 1)
+
+        #expect(
+            ContentViewTestHooks.selectedAgentForConsoleID(selectedAgentID: nil, agents: [agentA, agentB]) == agentA.id
+        )
+        #expect(
+            ContentViewTestHooks.selectedAgentForConsoleID(selectedAgentID: agentB.id, agents: [agentA, agentB]) == agentB.id
+        )
+        #expect(
+            ContentViewTestHooks.selectedAgentForConsoleID(selectedAgentID: UUID(), agents: [agentA, agentB]) == agentA.id
+        )
+        #expect(
+            ContentViewTestHooks.selectedAgentForConsoleID(selectedAgentID: agentA.id, agents: []) == nil
+        )
+    }
+
+    @Test("console selection sync helper keeps valid id and repairs invalid or empty states")
+    func syncedSelectedAgentConsoleAgentIDCoverage() {
+        let agentA = AgentProfile(name: "A", skills: [], maxConcurrentTasks: 1)
+        let agentB = AgentProfile(name: "B", skills: [], maxConcurrentTasks: 1)
+        let agents = [agentA, agentB]
+
+        #expect(
+            ContentViewTestHooks.syncedSelectedAgentConsoleAgentID(currentID: nil, agents: agents) == agentA.id
+        )
+        #expect(
+            ContentViewTestHooks.syncedSelectedAgentConsoleAgentID(currentID: agentB.id, agents: agents) == agentB.id
+        )
+        #expect(
+            ContentViewTestHooks.syncedSelectedAgentConsoleAgentID(currentID: UUID(), agents: agents) == agentA.id
+        )
+        #expect(
+            ContentViewTestHooks.syncedSelectedAgentConsoleAgentID(currentID: agentA.id, agents: []) == nil
+        )
+    }
+
+    @Test("assignee filter key normalization keeps valid key and resets invalid key")
+    func normalizedAssigneeFilterKeyCoverage() {
+        let validKeys: Set<String> = ["all", "unassigned", "agent-id"]
+
+        #expect(
+            ContentViewTestHooks.normalizedAssigneeFilterKey(currentKey: "all", validKeys: validKeys) == "all"
+        )
+        #expect(
+            ContentViewTestHooks.normalizedAssigneeFilterKey(currentKey: "agent-id", validKeys: validKeys) == "agent-id"
+        )
+        #expect(
+            ContentViewTestHooks.normalizedAssigneeFilterKey(currentKey: "missing", validKeys: validKeys) == "all"
+        )
+    }
+
     @Test("toolbar auto-assign availability depends on unassigned todo tasks and agents")
     func canAutoAssignFromToolbarRequiresTasksAndAgents() {
         let agent = AgentProfile(name: "A", skills: ["swift"], maxConcurrentTasks: 1)
@@ -3191,6 +3245,58 @@ struct ContentViewLogicTests {
         )
         #expect(succeeded)
         #expect(assignAttempts == 2)
+    }
+
+    @Test("post manual assignment helper updates selections refreshes and closes triage when needed")
+    func postManualAssignmentHelperCoverage() {
+        let taskID = UUID()
+        let otherTaskID = UUID()
+        var triageSelectionByTaskID: [UUID: UUID] = [
+            taskID: UUID(),
+            otherTaskID: UUID()
+        ]
+        var refreshCount = 0
+        var closeCount = 0
+
+        let rejected = ContentViewTestHooks.postManualAssignment(
+            assigned: false,
+            taskID: taskID,
+            triageSelectionByTaskID: &triageSelectionByTaskID,
+            refresh: { refreshCount += 1 },
+            hasRemainingCandidates: { true },
+            closeManualTriage: { closeCount += 1 }
+        )
+        #expect(!rejected)
+        #expect(triageSelectionByTaskID.count == 2)
+        #expect(refreshCount == 0)
+        #expect(closeCount == 0)
+
+        let assignedWithRemaining = ContentViewTestHooks.postManualAssignment(
+            assigned: true,
+            taskID: taskID,
+            triageSelectionByTaskID: &triageSelectionByTaskID,
+            refresh: { refreshCount += 1 },
+            hasRemainingCandidates: { true },
+            closeManualTriage: { closeCount += 1 }
+        )
+        #expect(assignedWithRemaining)
+        #expect(triageSelectionByTaskID[taskID] == nil)
+        #expect(triageSelectionByTaskID[otherTaskID] != nil)
+        #expect(refreshCount == 1)
+        #expect(closeCount == 0)
+
+        let assignedWithoutRemaining = ContentViewTestHooks.postManualAssignment(
+            assigned: true,
+            taskID: otherTaskID,
+            triageSelectionByTaskID: &triageSelectionByTaskID,
+            refresh: { refreshCount += 1 },
+            hasRemainingCandidates: { false },
+            closeManualTriage: { closeCount += 1 }
+        )
+        #expect(assignedWithoutRemaining)
+        #expect(triageSelectionByTaskID.isEmpty)
+        #expect(refreshCount == 2)
+        #expect(closeCount == 1)
     }
 
     @Test("post auto-assign helper always refreshes and opens triage when required")

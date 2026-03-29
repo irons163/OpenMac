@@ -74,6 +74,21 @@ struct ContentView: View {
     @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
     @State private var isBatchRunning = false
     @State private var selectedAgentConsoleAgentID: UUID?
+    fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
+        (panel.runModal(), panel.url)
+    }
+    fileprivate static var openPanelResultProvider: (NSOpenPanel) -> (NSApplication.ModalResponse, URL?) = { panel in
+        (panel.runModal(), panel.url)
+    }
+    fileprivate static var alertRunner: (NSAlert) -> NSApplication.ModalResponse = { alert in
+        alert.runModal()
+    }
+    fileprivate static var workspaceActivator: ([URL]) -> Void = { urls in
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+    fileprivate static var codexDirectoryEnsurer: (String) throws -> URL = { path in
+        try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(at: path)
+    }
 
     init(viewModel: KanbanBoardViewModel = .demoBoard()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -797,16 +812,17 @@ struct ContentView: View {
     }
 
     private func createBoardFromSheet() {
-        if viewModel.createBoard(name: newBoardName) {
-            closeNewBoardSheet()
-            handleBoardContextChanged()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.createBoard(name: newBoardName),
+            onChanged: closeNewBoardSheetAndHandleContext
+        )
     }
 
     private func renameBoardFromSheet() {
-        if viewModel.renameBoard(viewModel.selectedBoardID, to: renameBoardName) {
-            closeRenameBoardSheet()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.renameBoard(viewModel.selectedBoardID, to: renameBoardName),
+            onChanged: closeRenameBoardSheet
+        )
     }
 
     private func removeSelectedBoard() {
@@ -877,30 +893,30 @@ struct ContentView: View {
     }
 
     private func applyTaskEdits() {
-        if Self.applyTaskEdits(
-            viewModel: viewModel,
-            editingTaskID: editingTaskID,
-            title: editTaskTitle,
-            details: editTaskDetails,
-            requiredSkillsText: editTaskSkills,
-            storyPoints: editTaskPoints
-        ) {
-            refreshTriageSelections()
-            closeEditTaskSheet()
-        }
+        _ = Self.handleBoolResult(
+            Self.applyTaskEdits(
+                viewModel: viewModel,
+                editingTaskID: editingTaskID,
+                title: editTaskTitle,
+                details: editTaskDetails,
+                requiredSkillsText: editTaskSkills,
+                storyPoints: editTaskPoints
+            ),
+            onChanged: refreshAndCloseEditTaskSheet
+        )
     }
 
     private func createTaskFromSheet(autoAssign: Bool) {
-        if viewModel.addTask(
-            title: newTaskTitle,
-            details: newTaskDetails,
-            requiredSkillsText: newTaskSkills,
-            storyPoints: newTaskPoints,
-            autoAssign: autoAssign
-        ) {
-            refreshTriageSelections()
-            resetDraftAndClose()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.addTask(
+                title: newTaskTitle,
+                details: newTaskDetails,
+                requiredSkillsText: newTaskSkills,
+                storyPoints: newTaskPoints,
+                autoAssign: autoAssign
+            ),
+            onChanged: refreshAndResetTaskDraft
+        )
     }
 
     private func archiveDoneTasks() {
@@ -910,9 +926,10 @@ struct ContentView: View {
     }
 
     private func rebalanceTodoAssignments() {
-        if viewModel.rebalanceTodoAssignments() > 0 {
-            refreshTriageSelections()
-        }
+        _ = Self.handlePositiveCountResult(
+            viewModel.rebalanceTodoAssignments(),
+            onPositive: refreshTriageSelections
+        )
     }
 
     private func runAutoAssignFromToolbar() {
@@ -943,9 +960,7 @@ struct ContentView: View {
             hasPendingManualTriage: viewModel.hasPendingManualTriage,
             refresh: refreshTriageSelections,
             openManualTriage: openManualTriage,
-            openNewAgent: {
-                isShowingNewAgentSheet = true
-            }
+            openNewAgent: openNewAgentSheet
         )
     }
 
@@ -965,10 +980,11 @@ struct ContentView: View {
 
     private func exportWorkspaceFromToolbar() {
         let panel = Self.configuredWorkspaceExportPanel()
+        let (modalResponse, url) = Self.savePanelResultProvider(panel)
 
         _ = Self.handleSavePanelResult(
-            modalResponse: panel.runModal(),
-            url: panel.url
+            modalResponse: modalResponse,
+            url: url
         ) { url in
             viewModel.exportWorkspace(to: url)
         }
@@ -976,10 +992,11 @@ struct ContentView: View {
 
     private func exportSelectedBoardFromToolbar() {
         let panel = Self.configuredSelectedBoardExportPanel(defaultFileName: selectedBoardExportFileName())
+        let (modalResponse, url) = Self.savePanelResultProvider(panel)
 
         _ = Self.handleSavePanelResult(
-            modalResponse: panel.runModal(),
-            url: panel.url
+            modalResponse: modalResponse,
+            url: url
         ) { url in
             viewModel.exportSelectedBoard(to: url)
         }
@@ -987,10 +1004,11 @@ struct ContentView: View {
 
     private func importWorkspaceFromToolbar() {
         let panel = Self.configuredWorkspaceImportPanel()
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
 
         _ = Self.handleWorkspaceImport(
-            modalResponse: panel.runModal(),
-            url: panel.url,
+            modalResponse: modalResponse,
+            url: url,
             previewProvider: { url in
                 viewModel.workspaceImportPreview(from: url)
             },
@@ -1078,7 +1096,7 @@ struct ContentView: View {
 
     private func chooseWorkspaceImportStrategy(preview: WorkspaceImportPreview) -> WorkspaceImportStrategy? {
         let alert = Self.configuredWorkspaceImportAlert(preview: preview)
-        return Self.workspaceImportStrategy(for: alert.runModal())
+        return Self.workspaceImportStrategy(for: Self.alertRunner(alert))
     }
 
     private func selectedBoardExportFileName() -> String {
@@ -1096,17 +1114,16 @@ struct ContentView: View {
         let assigned = Self.manualAssignTask(
             taskID: taskID,
             selectedAgentID: triageSelectionByTaskID[taskID],
-            assigner: { taskID, agentID in
-                viewModel.manuallyAssignTask(taskID, to: agentID)
-            }
+            assigner: viewModel.manuallyAssignTask
         )
-        if assigned {
-            triageSelectionByTaskID.removeValue(forKey: taskID)
-            refreshTriageSelections()
-            if viewModel.triageCandidates().isEmpty {
-                isShowingManualTriageSheet = false
-            }
-        }
+        _ = Self.postManualAssignment(
+            assigned: assigned,
+            taskID: taskID,
+            triageSelectionByTaskID: &triageSelectionByTaskID,
+            refresh: refreshTriageSelections,
+            hasRemainingCandidates: hasManualTriageCandidates,
+            closeManualTriage: closeManualTriageSheet
+        )
     }
 
     private func assignAllManually() {
@@ -1137,9 +1154,10 @@ struct ContentView: View {
     }
 
     private func unassignTodoTasks(for agentID: UUID) {
-        if viewModel.unassignTodoTasks(for: agentID) > 0 {
-            refreshTriageSelections()
-        }
+        _ = Self.handlePositiveCountResult(
+            viewModel.unassignTodoTasks(for: agentID),
+            onPositive: refreshTriageSelections
+        )
     }
 
     private func removeTask(_ taskID: UUID) {
@@ -1178,9 +1196,10 @@ struct ContentView: View {
     }
 
     private func autoAssignTask(_ taskID: UUID) {
-        if viewModel.autoAssignTask(taskID) {
-            refreshTriageSelections()
-        }
+        _ = Self.handleBoolResult(
+            viewModel.autoAssignTask(taskID),
+            onChanged: refreshTriageSelections
+        )
     }
 
     private func runTaskExecution(_ taskID: UUID) {
@@ -1193,9 +1212,7 @@ struct ContentView: View {
 
     private func retryTaskExecution(_ taskID: UUID) {
         viewModel.retryTaskExecutionInBackground(taskID) { retried in
-            if retried {
-                refreshTriageSelections()
-            }
+            _ = Self.handleBoolResult(retried, onChanged: refreshTriageSelections)
         }
     }
 
@@ -1253,17 +1270,17 @@ struct ContentView: View {
             codexProfile: editAgentCodexProfile
         )
 
-        if Self.applyAgentEdits(
-            viewModel: viewModel,
-            editingAgentID: editingAgentID,
-            name: editAgentName,
-            skillsText: editAgentSkills,
-            maxConcurrentTasks: editAgentCapacity,
-            runtimeProfile: runtimeProfile
-        ) {
-            refreshTriageSelections()
-            closeEditAgentSheet()
-        }
+        _ = Self.handleBoolResult(
+            Self.applyAgentEdits(
+                viewModel: viewModel,
+                editingAgentID: editingAgentID,
+                name: editAgentName,
+                skillsText: editAgentSkills,
+                maxConcurrentTasks: editAgentCapacity,
+                runtimeProfile: runtimeProfile
+            ),
+            onChanged: refreshAndCloseEditAgentSheet
+        )
     }
 
     private var assigneeFilterOptions: [(key: String, label: String)] {
@@ -1305,10 +1322,10 @@ struct ContentView: View {
     }
 
     private var selectedAgentForConsole: AgentProfile? {
-        guard let selectedAgentConsoleAgentID else {
-            return viewModel.agents.first
-        }
-        return viewModel.agents.first(where: { $0.id == selectedAgentConsoleAgentID }) ?? viewModel.agents.first
+        Self.resolveSelectedAgentForConsole(
+            selectedAgentID: selectedAgentConsoleAgentID,
+            agents: viewModel.agents
+        )
     }
 
     private var resolvedCodexProjectsDirectoryPath: String {
@@ -1328,6 +1345,38 @@ struct ContentView: View {
         selectedAssigneeFilterKey = "all"
     }
 
+    private func hasManualTriageCandidates() -> Bool {
+        !viewModel.triageCandidates().isEmpty
+    }
+
+    private func closeManualTriageSheet() {
+        isShowingManualTriageSheet = false
+    }
+
+    private func closeNewBoardSheetAndHandleContext() {
+        closeNewBoardSheet()
+        handleBoardContextChanged()
+    }
+
+    private func refreshAndCloseEditTaskSheet() {
+        refreshTriageSelections()
+        closeEditTaskSheet()
+    }
+
+    private func refreshAndResetTaskDraft() {
+        refreshTriageSelections()
+        resetDraftAndClose()
+    }
+
+    private func openNewAgentSheet() {
+        isShowingNewAgentSheet = true
+    }
+
+    private func refreshAndCloseEditAgentSheet() {
+        refreshTriageSelections()
+        closeEditAgentSheet()
+    }
+
     private func chooseCodexProjectsDirectory() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -1339,7 +1388,8 @@ struct ContentView: View {
         panel.prompt = L10n.string("Use Folder")
         panel.directoryURL = URL(fileURLWithPath: resolvedCodexProjectsDirectoryPath, isDirectory: true)
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
+        guard modalResponse == .OK, let url else { return }
         codexProjectsDirectoryPath = url.path
         ensureCodexProjectsDirectoryExists()
     }
@@ -1351,10 +1401,8 @@ struct ContentView: View {
 
     private func openCodexProjectsDirectoryInFinder() {
         do {
-            let url = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(
-                at: resolvedCodexProjectsDirectoryPath
-            )
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+            let url = try Self.codexDirectoryEnsurer(resolvedCodexProjectsDirectoryPath)
+            Self.workspaceActivator([url])
         } catch {
             presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
         }
@@ -1362,9 +1410,7 @@ struct ContentView: View {
 
     private func ensureCodexProjectsDirectoryExists() {
         do {
-            _ = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(
-                at: resolvedCodexProjectsDirectoryPath
-            )
+            _ = try Self.codexDirectoryEnsurer(resolvedCodexProjectsDirectoryPath)
         } catch {
             presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
         }
@@ -1380,28 +1426,25 @@ struct ContentView: View {
         )
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("OK"))
-        alert.runModal()
+        _ = Self.alertRunner(alert)
     }
 
     private func syncSelectedAgentConsoleSelection() {
-        guard !viewModel.agents.isEmpty else {
-            selectedAgentConsoleAgentID = nil
-            return
-        }
-
-        if let selectedAgentConsoleAgentID,
-           viewModel.agents.contains(where: { $0.id == selectedAgentConsoleAgentID }) {
-            return
-        }
-
-        selectedAgentConsoleAgentID = viewModel.agents.first?.id
+        selectedAgentConsoleAgentID = Self.syncedSelectedAgentConsoleAgentID(
+            currentID: selectedAgentConsoleAgentID,
+            agents: viewModel.agents
+        )
     }
 
     private func normalizeAssigneeFilterSelection() {
-        let validKeys = Set(assigneeFilterOptions.map { $0.key })
-        if !validKeys.contains(selectedAssigneeFilterKey) {
-            selectedAssigneeFilterKey = "all"
+        var validKeys: Set<String> = []
+        for option in assigneeFilterOptions {
+            validKeys.insert(option.key)
         }
+        selectedAssigneeFilterKey = Self.normalizedAssigneeFilterKey(
+            currentKey: selectedAssigneeFilterKey,
+            validKeys: validKeys
+        )
     }
 
     private var canAutoAssignFromToolbar: Bool {
@@ -1586,6 +1629,39 @@ struct ContentView: View {
         }
     }
 
+    private static func containsAgent(id: UUID, in agents: [AgentProfile]) -> Bool {
+        for agent in agents where agent.id == id {
+            return true
+        }
+        return false
+    }
+
+    fileprivate static func resolveSelectedAgentForConsole(
+        selectedAgentID: UUID?,
+        agents: [AgentProfile]
+    ) -> AgentProfile? {
+        guard let selectedAgentID else { return agents.first }
+        return agents.first(where: { $0.id == selectedAgentID }) ?? agents.first
+    }
+
+    fileprivate static func syncedSelectedAgentConsoleAgentID(
+        currentID: UUID?,
+        agents: [AgentProfile]
+    ) -> UUID? {
+        guard !agents.isEmpty else { return nil }
+        if let currentID, containsAgent(id: currentID, in: agents) {
+            return currentID
+        }
+        return agents.first?.id
+    }
+
+    fileprivate static func normalizedAssigneeFilterKey(
+        currentKey: String,
+        validKeys: Set<String>
+    ) -> String {
+        validKeys.contains(currentKey) ? currentKey : "all"
+    }
+
     fileprivate static func handleBoolResult(
         _ changed: Bool,
         onChanged: () -> Void
@@ -1620,6 +1696,24 @@ struct ContentView: View {
     ) -> Bool {
         guard let selectedAgentID else { return false }
         return assigner(taskID, selectedAgentID)
+    }
+
+    fileprivate static func postManualAssignment(
+        assigned: Bool,
+        taskID: UUID,
+        triageSelectionByTaskID: inout [UUID: UUID],
+        refresh: () -> Void,
+        hasRemainingCandidates: () -> Bool,
+        closeManualTriage: () -> Void
+    ) -> Bool {
+        guard assigned else { return false }
+
+        triageSelectionByTaskID.removeValue(forKey: taskID)
+        refresh()
+        if !hasRemainingCandidates() {
+            closeManualTriage()
+        }
+        return true
     }
 
     fileprivate static func applyTaskEdits(
@@ -3615,14 +3709,83 @@ private extension ContentView {
             assignedAgentID: agentA.id,
             executionRecord: failedRecord
         )
+        let failedInProgressTask = WorkTask(
+            title: "Retry Task",
+            details: "Can retry",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agentA.id,
+            executionRecord: failedRecord
+        )
 
-        let viewModel = KanbanBoardViewModel(tasks: [todoAssigned, todoUnassigned, doneTask], agents: [agentA, agentB])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [todoAssigned, todoUnassigned, doneTask, failedInProgressTask],
+            agents: [agentA, agentB]
+        )
         let initialBoardID = viewModel.selectedBoardID
         _ = viewModel.createBoard(name: "Coverage Secondary")
         let secondaryBoardID = viewModel.selectedBoardID
         _ = viewModel.switchBoard(to: initialBoardID)
 
         let view = ContentView(viewModel: viewModel)
+        let fileManager = FileManager.default
+        let workspaceImportURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-coverage-import-\(UUID().uuidString).json"
+        )
+        let workspaceExportURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-coverage-export-\(UUID().uuidString).json"
+        )
+        let projectsDirectoryURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-coverage-projects-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        _ = viewModel.exportWorkspace(to: workspaceImportURL)
+        try? fileManager.createDirectory(at: projectsDirectoryURL, withIntermediateDirectories: true)
+
+        let savedSavePanelResultProvider = Self.savePanelResultProvider
+        let savedOpenPanelResultProvider = Self.openPanelResultProvider
+        let savedAlertRunner = Self.alertRunner
+        let savedWorkspaceActivator = Self.workspaceActivator
+        let savedCodexDirectoryEnsurer = Self.codexDirectoryEnsurer
+        var shouldFailCodexDirectoryEnsurer = false
+        Self.savePanelResultProvider = { _ in
+            (.OK, workspaceExportURL)
+        }
+        Self.openPanelResultProvider = { panel in
+            if panel.canChooseDirectories {
+                return (.OK, projectsDirectoryURL)
+            }
+            return (.OK, workspaceImportURL)
+        }
+        Self.alertRunner = { _ in
+            .alertFirstButtonReturn
+        }
+        Self.workspaceActivator = { _ in }
+        Self.codexDirectoryEnsurer = { path in
+            if shouldFailCodexDirectoryEnsurer {
+                throw NSError(
+                    domain: "Coverage",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "coverage failure"]
+                )
+            }
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+        defer {
+            Self.savePanelResultProvider = savedSavePanelResultProvider
+            Self.openPanelResultProvider = savedOpenPanelResultProvider
+            Self.alertRunner = savedAlertRunner
+            Self.workspaceActivator = savedWorkspaceActivator
+            Self.codexDirectoryEnsurer = savedCodexDirectoryEnsurer
+
+            try? fileManager.removeItem(at: workspaceImportURL)
+            try? fileManager.removeItem(at: workspaceExportURL)
+            try? fileManager.removeItem(at: projectsDirectoryURL)
+        }
+
         var exercised = 0
 
         func hit(_ action: () -> Void) {
@@ -3666,6 +3829,7 @@ private extension ContentView {
         hit { view.openRenameBoardSheet() }
         hit { view.closeRenameBoardSheet() }
         hit { view.createBoardFromSheet() }
+        hit { view.closeNewBoardSheetAndHandleContext() }
         hit {
             view.renameBoardName = "Coverage Board Renamed"
             view.renameBoardFromSheet()
@@ -3717,6 +3881,22 @@ private extension ContentView {
             }
         }
         hit { view.handleBoardContextChanged() }
+        hit {
+            if let firstAgent = viewModel.agents.first {
+                view.selectedAgentConsoleAgentID = firstAgent.id
+                view.syncSelectedAgentConsoleSelection()
+            }
+        }
+        hit {
+            if let firstAgent = viewModel.agents.first {
+                view.selectedAssigneeFilterKey = firstAgent.id.uuidString
+                view.normalizeAssigneeFilterSelection()
+            }
+        }
+        hit {
+            view.selectedAgentConsoleAgentID = UUID()
+            _ = view.selectedAgentForConsole
+        }
         hit { view.openWIPSettings() }
         hit { view.applyWIPSettings() }
 
@@ -3742,7 +3922,20 @@ private extension ContentView {
         hit { view.applyHealthRecommendation(.openNewAgent) }
         hit { view.applyHealthRecommendation(.increaseWIPLimit(.review)) }
         hit { view.applyAllHealthRecommendations() }
+        hit { view.openNewAgentSheet() }
+        hit { view.exportWorkspaceFromToolbar() }
+        hit { view.exportSelectedBoardFromToolbar() }
+        hit { view.importWorkspaceFromToolbar() }
+        hit { view.chooseCodexProjectsDirectory() }
+        hit { view.openCodexProjectsDirectoryInFinder() }
+        hit {
+            shouldFailCodexDirectoryEnsurer = true
+            view.openCodexProjectsDirectoryInFinder()
+            shouldFailCodexDirectoryEnsurer = false
+        }
         hit { view.openManualTriage() }
+        hit { _ = view.hasManualTriageCandidates() }
+        hit { view.closeManualTriageSheet() }
         hit { view.assignManually(taskID: UUID()) }
         hit {
             let candidates = viewModel.triageCandidates()
@@ -3812,11 +4005,14 @@ private extension ContentView {
                 if let otherAgent = viewModel.agents.first(where: { $0.id != firstAgent.id }) {
                     view.reassignTaskToAgent(task.id, otherAgent.id)
                 }
+                view.assignTaskToAgent(UUID(), firstAgent.id)
+                view.reassignTaskToAgent(UUID(), firstAgent.id)
                 view.runTaskExecution(task.id)
                 view.retryTaskExecution(task.id)
                 view.removeTask(task.id)
             }
         }
+        hit { view.retryTaskExecution(failedInProgressTask.id) }
         hit { view.applyAgentEdits() }
         hit {
             if let firstAgent = viewModel.agents.first {
@@ -3834,11 +4030,27 @@ private extension ContentView {
         }
 
         hit { _ = view.selectedBoardExportFileName() }
+        hit { view.refreshAndCloseEditTaskSheet() }
+        hit { view.refreshAndResetTaskDraft() }
+        hit { view.refreshAndCloseEditAgentSheet() }
         hit { view.resetTaskFilters() }
         hit { view.useDefaultCodexProjectsDirectory() }
         hit { view.ensureCodexProjectsDirectoryExists() }
+        hit {
+            shouldFailCodexDirectoryEnsurer = true
+            view.ensureCodexProjectsDirectoryExists()
+            shouldFailCodexDirectoryEnsurer = false
+        }
         hit { view.syncSelectedAgentConsoleSelection() }
         hit { view.normalizeAssigneeFilterSelection() }
+        hit {
+            view.selectedAgentConsoleAgentID = UUID()
+            view.syncSelectedAgentConsoleSelection()
+        }
+        hit {
+            view.selectedAssigneeFilterKey = "invalid"
+            view.normalizeAssigneeFilterSelection()
+        }
         hit {
             view.appLanguageOverrideRawValue = AppLanguageSettings.systemValue
             _ = view.selectedLanguageLabel
@@ -3850,6 +4062,7 @@ private extension ContentView {
             _ = view.isSelectedLanguage(.japanese)
         }
         hit { _ = view.hasAssignedTodoTasks(for: agentA.id) }
+        hit { _ = view.hasAssignedTodoTasks(for: UUID()) }
         hit { _ = view.selectedAgentForConsole }
 
         return exercised
@@ -4055,6 +4268,30 @@ enum ContentViewTestHooks {
         ContentView.testResolveSelectedAssigneeFilter(selectedKey: selectedKey, agents: agents)
     }
 
+    static func selectedAgentForConsoleID(
+        selectedAgentID: UUID?,
+        agents: [AgentProfile]
+    ) -> UUID? {
+        ContentView.resolveSelectedAgentForConsole(
+            selectedAgentID: selectedAgentID,
+            agents: agents
+        )?.id
+    }
+
+    static func syncedSelectedAgentConsoleAgentID(
+        currentID: UUID?,
+        agents: [AgentProfile]
+    ) -> UUID? {
+        ContentView.syncedSelectedAgentConsoleAgentID(currentID: currentID, agents: agents)
+    }
+
+    static func normalizedAssigneeFilterKey(
+        currentKey: String,
+        validKeys: Set<String>
+    ) -> String {
+        ContentView.normalizedAssigneeFilterKey(currentKey: currentKey, validKeys: validKeys)
+    }
+
     static func canAutoAssignFromToolbar(tasks: [WorkTask], agents: [AgentProfile]) -> Bool {
         ContentView.testCanAutoAssignFromToolbar(tasks: tasks, agents: agents)
     }
@@ -4088,6 +4325,24 @@ enum ContentViewTestHooks {
         assigner: (UUID, UUID) -> Bool
     ) -> Bool {
         ContentView.manualAssignTask(taskID: taskID, selectedAgentID: selectedAgentID, assigner: assigner)
+    }
+
+    static func postManualAssignment(
+        assigned: Bool,
+        taskID: UUID,
+        triageSelectionByTaskID: inout [UUID: UUID],
+        refresh: () -> Void,
+        hasRemainingCandidates: () -> Bool,
+        closeManualTriage: () -> Void
+    ) -> Bool {
+        ContentView.postManualAssignment(
+            assigned: assigned,
+            taskID: taskID,
+            triageSelectionByTaskID: &triageSelectionByTaskID,
+            refresh: refresh,
+            hasRemainingCandidates: hasRemainingCandidates,
+            closeManualTriage: closeManualTriage
+        )
     }
 
     static func postAutoAssign(
