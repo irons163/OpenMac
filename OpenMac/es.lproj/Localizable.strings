@@ -91,6 +91,12 @@
 "Codex Login Command" = "Comando de inicio de sesión de Codex";
 "Copy Command" = "Copiar comando";
 "Copy Log" = "Copiar registro";
+"Output" = "Salida";
+"Error" = "Error";
+"Debug Log" = "Registro de depuración";
+"Copy Output" = "Copiar salida";
+"Copy Error" = "Copiar error";
+"Copy Debug Log" = "Copiar registro de depuración";
 "Copy Last Debug Log" = "Copiar último registro de depuración";
 "Copy Board Message" = "Copiar mensaje del tablero";
 "Copy Codex Login Command" = "Copiar comando de inicio de sesión de Codex";

@@ -91,6 +91,12 @@
 "Codex Login Command" = "Commande de connexion Codex";
 "Copy Command" = "Copier la commande";
 "Copy Log" = "Copier le journal";
+"Output" = "Sortie";
+"Error" = "Erreur";
+"Debug Log" = "Journal de debug";
+"Copy Output" = "Copier la sortie";
+"Copy Error" = "Copier l'erreur";
+"Copy Debug Log" = "Copier le journal de debug";
 "Copy Last Debug Log" = "Copier le dernier journal de débogage";
 "Copy Board Message" = "Copier le message du tableau";
 "Copy Codex Login Command" = "Copier la commande de connexion Codex";

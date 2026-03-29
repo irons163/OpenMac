@@ -91,6 +91,12 @@
 "Codex Login Command" = "Codexログインコマンド";
 "Copy Command" = "コマンドをコピー";
 "Copy Log" = "ログをコピー";
+"Output" = "出力";
+"Error" = "エラー";
+"Debug Log" = "デバッグログ";
+"Copy Output" = "出力をコピー";
+"Copy Error" = "エラーをコピー";
+"Copy Debug Log" = "デバッグログをコピー";
 "Copy Last Debug Log" = "最新デバッグログをコピー";
 "Copy Board Message" = "ボードメッセージをコピー";
 "Copy Codex Login Command" = "Codexログインコマンドをコピー";

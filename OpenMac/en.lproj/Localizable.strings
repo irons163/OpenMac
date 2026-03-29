@@ -91,6 +91,12 @@
 "Codex Login Command" = "Codex Login Command";
 "Copy Command" = "Copy Command";
 "Copy Log" = "Copy Log";
+"Output" = "Output";
+"Error" = "Error";
+"Debug Log" = "Debug Log";
+"Copy Output" = "Copy Output";
+"Copy Error" = "Copy Error";
+"Copy Debug Log" = "Copy Debug Log";
 "Copy Last Debug Log" = "Copy Last Debug Log";
 "Copy Board Message" = "Copy Board Message";
 "Copy Codex Login Command" = "Copy Codex Login Command";

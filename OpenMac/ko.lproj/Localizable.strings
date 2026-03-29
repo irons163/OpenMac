@@ -91,6 +91,12 @@
 "Codex Login Command" = "코덱스 로그인 명령어";
 "Copy Command" = "복사 명령";
 "Copy Log" = "로그 복사";
+"Output" = "출력";
+"Error" = "오류";
+"Debug Log" = "디버그 로그";
+"Copy Output" = "출력 복사";
+"Copy Error" = "오류 복사";
+"Copy Debug Log" = "디버그 로그 복사";
 "Copy Last Debug Log" = "마지막 디버그 로그 복사";
 "Copy Board Message" = "보드 메시지 복사";
 "Copy Codex Login Command" = "Codex 로그인 명령 복사";

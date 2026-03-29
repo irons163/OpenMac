@@ -18,8 +18,8 @@ struct OpenMacApp: App {
                 .environment(\.locale, appLocale)
         }
         .commands {
-            CommandMenu("Appearance") {
-                Button("Cycle Appearance") {
+            CommandMenu(L10n.string("Appearance")) {
+                Button(L10n.string("Cycle Appearance")) {
                     cycleAppearanceMode()
                 }
                 .keyboardShortcut("`", modifiers: [.command, .option])
@@ -31,7 +31,7 @@ struct OpenMacApp: App {
                 appearanceCommandButton(for: .dark, shortcut: "d")
             }
 
-            CommandMenu("Language") {
+            CommandMenu(L10n.string("Language")) {
                 languageCommandButton(for: nil)
 
                 Divider()

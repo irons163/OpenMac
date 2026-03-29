@@ -91,6 +91,12 @@
 "Codex Login Command" = "Codex 登录命令";
 "Copy Command" = "复制命令";
 "Copy Log" = "复制日志";
+"Output" = "输出";
+"Error" = "错误";
+"Debug Log" = "调试日志";
+"Copy Output" = "复制输出";
+"Copy Error" = "复制错误";
+"Copy Debug Log" = "复制调试日志";
 "Copy Last Debug Log" = "复制最后调试日志";
 "Copy Board Message" = "复制看板消息";
 "Copy Codex Login Command" = "复制 Codex 登录命令";

@@ -518,44 +518,169 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     }
 
     private func buildMessages(task: WorkTask, agent: AgentProfile) -> [ChatMessage] {
-        let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
-        let skillsLine = sortedSkills.isEmpty ? "none" : sortedSkills
-        let userPrompt = """
-        Agent: \(agent.name)
-        Task title: \(task.title)
-        Task details: \(task.details)
-        Required skills: \(skillsLine)
-        Story points: \(task.storyPoints)
-
-        Return plain text using these sections:
-        Summary:
-        Actions taken:
-        Evidence (files/commands/results):
-        Risks or blockers:
-        """
+        let template = executionPromptTemplate()
+        let userPrompt = executionPrompt(task: task, agent: agent, template: template)
         return [
-            ChatMessage(role: "system", content: "You are an autonomous software execution agent. Respond with concise plain text."),
+            ChatMessage(role: "system", content: template.systemPrompt),
             ChatMessage(role: "user", content: userPrompt)
         ]
     }
 
     private func buildCodexBridgePrompt(task: WorkTask, agent: AgentProfile) -> String {
-        let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
-        let skillsLine = sortedSkills.isEmpty ? "none" : sortedSkills
-        return """
-        You are supporting an assigned AI agent in a kanban execution system.
-        Agent: \(agent.name)
-        Task title: \(task.title)
-        Task details: \(task.details)
-        Required skills: \(skillsLine)
-        Story points: \(task.storyPoints)
+        let template = executionPromptTemplate()
+        return executionPrompt(task: task, agent: agent, template: template)
+    }
 
-        Return plain text using these sections:
-        Summary:
-        Actions taken:
-        Evidence (files/commands/results):
-        Risks or blockers:
+    private func executionPrompt(task: WorkTask, agent: AgentProfile, template: ExecutionPromptTemplate) -> String {
+        let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
+        let skillsLine = sortedSkills.isEmpty ? template.noneSkillsText : sortedSkills
+        return """
+        \(template.preamble)
+        \(template.agentLabel): \(agent.name)
+        \(template.taskTitleLabel): \(task.title)
+        \(template.taskDetailsLabel): \(task.details)
+        \(template.requiredSkillsLabel): \(skillsLine)
+        \(template.storyPointsLabel): \(task.storyPoints)
+
+        \(template.sectionsInstruction)
+        \(template.summarySection)
+        \(template.actionsSection)
+        \(template.evidenceSection)
+        \(template.risksSection)
         """
+    }
+
+    private func executionPromptTemplate() -> ExecutionPromptTemplate {
+        switch AppLanguageResolver.resolvedLanguage() {
+        case .english:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in English.",
+                preamble: "You are supporting an assigned AI agent in a kanban execution system.",
+                agentLabel: "Agent",
+                taskTitleLabel: "Task title",
+                taskDetailsLabel: "Task details",
+                requiredSkillsLabel: "Required skills",
+                storyPointsLabel: "Story points",
+                sectionsInstruction: "Return plain text using these sections:",
+                summarySection: "Summary:",
+                actionsSection: "Actions taken:",
+                evidenceSection: "Evidence (files/commands/results):",
+                risksSection: "Risks or blockers:",
+                noneSkillsText: "none"
+            )
+        case .traditionalChinese:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Traditional Chinese.",
+                preamble: "你正在看板執行系統中支援一位已指派的 AI 代理。",
+                agentLabel: "Agent",
+                taskTitleLabel: "任務標題",
+                taskDetailsLabel: "任務細節",
+                requiredSkillsLabel: "所需技能",
+                storyPointsLabel: "故事點數",
+                sectionsInstruction: "請用純文字並使用以下段落：",
+                summarySection: "摘要：",
+                actionsSection: "已執行動作：",
+                evidenceSection: "證據（檔案／指令／結果）：",
+                risksSection: "風險或阻塞：",
+                noneSkillsText: "無"
+            )
+        case .simplifiedChinese:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Simplified Chinese.",
+                preamble: "你正在看板执行系统中支持一位已分配的 AI 代理。",
+                agentLabel: "Agent",
+                taskTitleLabel: "任务标题",
+                taskDetailsLabel: "任务细节",
+                requiredSkillsLabel: "所需技能",
+                storyPointsLabel: "故事点数",
+                sectionsInstruction: "请用纯文本并使用以下段落：",
+                summarySection: "摘要：",
+                actionsSection: "已执行动作：",
+                evidenceSection: "证据（文件/命令/结果）：",
+                risksSection: "风险或阻塞：",
+                noneSkillsText: "无"
+            )
+        case .french:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in French.",
+                preamble: "Vous assistez un agent IA assigne dans un systeme d'execution kanban.",
+                agentLabel: "Agent",
+                taskTitleLabel: "Titre de la tache",
+                taskDetailsLabel: "Details de la tache",
+                requiredSkillsLabel: "Competences requises",
+                storyPointsLabel: "Points d'histoire",
+                sectionsInstruction: "Repondez en texte brut avec les sections suivantes :",
+                summarySection: "Resume :",
+                actionsSection: "Actions realisees :",
+                evidenceSection: "Preuves (fichiers/commandes/resultats) :",
+                risksSection: "Risques ou blocages :",
+                noneSkillsText: "aucune"
+            )
+        case .spanish:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Spanish.",
+                preamble: "Estas apoyando a un agente de IA asignado en un sistema kanban de ejecucion.",
+                agentLabel: "Agente",
+                taskTitleLabel: "Titulo de la tarea",
+                taskDetailsLabel: "Detalles de la tarea",
+                requiredSkillsLabel: "Habilidades requeridas",
+                storyPointsLabel: "Puntos de historia",
+                sectionsInstruction: "Devuelve texto plano con estas secciones:",
+                summarySection: "Resumen:",
+                actionsSection: "Acciones realizadas:",
+                evidenceSection: "Evidencia (archivos/comandos/resultados):",
+                risksSection: "Riesgos o bloqueos:",
+                noneSkillsText: "ninguna"
+            )
+        case .japanese:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Japanese.",
+                preamble: "あなたはカンバン実行システムで割り当て済みの AI エージェントを支援しています。",
+                agentLabel: "Agent",
+                taskTitleLabel: "タスクタイトル",
+                taskDetailsLabel: "タスク詳細",
+                requiredSkillsLabel: "必要スキル",
+                storyPointsLabel: "ストーリーポイント",
+                sectionsInstruction: "次の見出しで簡潔なプレーンテキストを返してください:",
+                summarySection: "要約:",
+                actionsSection: "実施した内容:",
+                evidenceSection: "証拠（ファイル/コマンド/結果）:",
+                risksSection: "リスクまたはブロッカー:",
+                noneSkillsText: "なし"
+            )
+        case .korean:
+            return ExecutionPromptTemplate(
+                systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Korean.",
+                preamble: "당신은 칸반 실행 시스템에서 할당된 AI 에이전트를 지원하고 있습니다.",
+                agentLabel: "Agent",
+                taskTitleLabel: "작업 제목",
+                taskDetailsLabel: "작업 세부사항",
+                requiredSkillsLabel: "필수 스킬",
+                storyPointsLabel: "스토리 포인트",
+                sectionsInstruction: "다음 섹션으로 간결한 일반 텍스트를 반환하세요:",
+                summarySection: "요약:",
+                actionsSection: "수행한 작업:",
+                evidenceSection: "근거 (파일/명령/결과):",
+                risksSection: "위험 또는 차단 요인:",
+                noneSkillsText: "없음"
+            )
+        }
+    }
+
+    private struct ExecutionPromptTemplate {
+        let systemPrompt: String
+        let preamble: String
+        let agentLabel: String
+        let taskTitleLabel: String
+        let taskDetailsLabel: String
+        let requiredSkillsLabel: String
+        let storyPointsLabel: String
+        let sectionsInstruction: String
+        let summarySection: String
+        let actionsSection: String
+        let evidenceSection: String
+        let risksSection: String
+        let noneSkillsText: String
     }
 
     private func send(request: URLRequest) throws -> ChatCompletionResponse {

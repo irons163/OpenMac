@@ -197,7 +197,7 @@ struct ContentView: View {
                                 .textSelection(.enabled)
                             if developerModeEnabled {
                                 Spacer()
-                                Button("Copy") {
+                                Button(L10n.string("Copy")) {
                                     copyToPasteboard(message)
                                 }
                                 .buttonStyle(.bordered)
@@ -208,12 +208,12 @@ struct ContentView: View {
                         if developerModeEnabled,
                            let loginCommand = viewModel.lastCodexLoginCommand,
                            !loginCommand.isEmpty {
-                            HStack {
-                                Text("Codex Login Command")
+                           HStack {
+                                Text(L10n.string("Codex Login Command"))
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
                                 Spacer()
-                                Button("Copy Command") {
+                                Button(L10n.string("Copy Command")) {
                                     copyToPasteboard(loginCommand)
                                 }
                                 .buttonStyle(.bordered)
@@ -241,12 +241,12 @@ struct ContentView: View {
                         if developerModeEnabled,
                            let debugLog = viewModel.lastExecutionDebugLog,
                            !debugLog.isEmpty {
-                            HStack {
-                                Text("Execution Debug Log")
+                           HStack {
+                                Text(L10n.string("Execution Debug Log"))
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
                                 Spacer()
-                                Button("Copy Log") {
+                                Button(L10n.string("Copy Log")) {
                                     copyToPasteboard(debugLog)
                                 }
                                 .buttonStyle(.bordered)
@@ -348,50 +348,50 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup {
-                Button("Auto Assign AI") {
+                Button(L10n.string("Auto Assign AI")) {
                     runAutoAssignFromToolbar()
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
-                .help("Auto-assign all eligible To Do tasks (Shift-Command-A)")
+                .help(L10n.string("Auto-assign all eligible To Do tasks (Shift-Command-A)"))
                 .disabled(!canAutoAssignFromToolbar)
-                Button(isBatchRunning ? "Running..." : "Run Assigned") {
+                Button(isBatchRunning ? L10n.string("Running...") : L10n.string("Run Assigned")) {
                     runAssignedExecutionsFromToolbar()
                 }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
-                .help("Batch-run assigned To Do/In Progress tasks (Shift-Command-G)")
+                .help(L10n.string("Batch-run assigned To Do/In Progress tasks (Shift-Command-G)"))
                 .disabled(!canBatchRunAssignedTasks)
-                Button("New Task") {
+                Button(L10n.string("New Task")) {
                     isShowingNewTaskSheet = true
                 }
                 .keyboardShortcut("n", modifiers: [.command])
-                .help("Create a new task (Command-N)")
-                Button("New Agent") {
+                .help(L10n.string("Create a new task (Command-N)"))
+                Button(L10n.string("New Agent")) {
                     isShowingNewAgentSheet = true
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
-                .help("Create a new agent profile (Option-Command-N)")
-                Button("Find Task") {
+                .help(L10n.string("Create a new agent profile (Option-Command-N)"))
+                Button(L10n.string("Find Task")) {
                     openGlobalTaskFinder()
                 }
                 .keyboardShortcut("f", modifiers: [.command])
-                .help("Search tasks across boards (Command-F)")
+                .help(L10n.string("Search tasks across boards (Command-F)"))
                 Menu(L10n.format("Board: %@", viewModel.selectedBoardName)) {
-                    Button("New Board") {
+                    Button(L10n.string("New Board")) {
                         openNewBoardSheet()
                     }
                     .keyboardShortcut("b", modifiers: [.command, .option])
 
-                    Button("Rename Current Board") {
+                    Button(L10n.string("Rename Current Board")) {
                         openRenameBoardSheet()
                     }
                     .disabled(viewModel.boards.isEmpty)
 
-                    Button("Delete Current Board") {
+                    Button(L10n.string("Delete Current Board")) {
                         isShowingDeleteBoardAlert = true
                     }
                     .disabled(viewModel.boards.count <= 1)
 
-                    Button("Duplicate Current Board") {
+                    Button(L10n.string("Duplicate Current Board")) {
                         duplicateSelectedBoard()
                     }
                     .disabled(viewModel.boards.isEmpty)
@@ -410,45 +410,45 @@ struct ContentView: View {
                         }
                     }
                 }
-                .help("Create a board or switch board context")
-                Menu("Board Actions") {
-                    Section("Health") {
+                .help(L10n.string("Create a board or switch board context"))
+                Menu(L10n.string("Board Actions")) {
+                    Section(L10n.string("Health")) {
                         if viewModel.hasAutoFixableHealthRecommendations {
                             Button(L10n.format("Apply Health Fixes (%d)", viewModel.autoFixableHealthRecommendationCount)) {
                                 applyAllHealthRecommendations()
                             }
                             .keyboardShortcut("h", modifiers: [.command, .shift])
                         } else {
-                            Text("No health fixes available")
+                            Text(L10n.string("No health fixes available"))
                         }
                     }
 
-                    Section("Board") {
-                        Button(isBatchRunning ? "Running Assigned Tasks..." : "Run Assigned Tasks") {
+                    Section(L10n.string("Board")) {
+                        Button(isBatchRunning ? L10n.string("Running Assigned Tasks...") : L10n.string("Run Assigned Tasks")) {
                             runAssignedExecutionsFromToolbar()
                         }
                         .disabled(!canBatchRunAssignedTasks)
 
                         Divider()
 
-                        Button("Archive Done") {
+                        Button(L10n.string("Archive Done")) {
                             archiveDoneTasks()
                         }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                         .disabled(viewModel.tasks(in: .done).isEmpty)
 
-                        Button("Rebalance Load") {
+                        Button(L10n.string("Rebalance Load")) {
                             rebalanceTodoAssignments()
                         }
                         .keyboardShortcut("r", modifiers: [.command, .shift])
                         .disabled(!viewModel.canRebalanceTodoAssignments())
 
-                        Button("WIP Limits") {
+                        Button(L10n.string("WIP Limits")) {
                             openWIPSettings()
                         }
                         .keyboardShortcut("l", modifiers: [.command, .shift])
 
-                        Button("Manual Triage") {
+                        Button(L10n.string("Manual Triage")) {
                             openManualTriage()
                         }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
@@ -456,42 +456,42 @@ struct ContentView: View {
 
                         Divider()
 
-                        Button("Export Current Board JSON...") {
+                        Button(L10n.string("Export Current Board JSON...")) {
                             exportSelectedBoardFromToolbar()
                         }
                         .keyboardShortcut("e", modifiers: [.command, .shift, .option])
 
-                        Button("Export Workspace JSON...") {
+                        Button(L10n.string("Export Workspace JSON...")) {
                             exportWorkspaceFromToolbar()
                         }
                         .keyboardShortcut("e", modifiers: [.command, .shift])
 
-                        Button("Import Workspace JSON...") {
+                        Button(L10n.string("Import Workspace JSON...")) {
                             importWorkspaceFromToolbar()
                         }
                         .keyboardShortcut("i", modifiers: [.command, .shift])
 
                         Divider()
 
-                        Button("Rename Board") {
+                        Button(L10n.string("Rename Board")) {
                             openRenameBoardSheet()
                         }
                         .disabled(viewModel.boards.isEmpty)
 
-                        Button("Delete Board") {
+                        Button(L10n.string("Delete Board")) {
                             isShowingDeleteBoardAlert = true
                         }
                         .disabled(viewModel.boards.count <= 1)
 
-                        Button("Duplicate Board") {
+                        Button(L10n.string("Duplicate Board")) {
                             duplicateSelectedBoard()
                         }
                         .disabled(viewModel.boards.isEmpty)
                     }
                 }
-                .help("Archive, rebalance, WIP settings, and manual triage actions")
+                .help(L10n.string("Archive, rebalance, WIP settings, and manual triage actions"))
                 Menu(L10n.format("Appearance: %@", selectedAppearanceMode.title)) {
-                    Button("Cycle Appearance") {
+                    Button(L10n.string("Cycle Appearance")) {
                         cycleAppearanceMode()
                     }
                     .keyboardShortcut("`", modifiers: [.command, .option])
@@ -502,7 +502,7 @@ struct ContentView: View {
                         appearanceMenuButton(for: mode)
                     }
                 }
-                .help("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)")
+                .help(L10n.string("Switch between system, light, and dark appearance (Option-Command-`/0/L/D)"))
                 Menu(L10n.format("Language: %@", selectedLanguageLabel)) {
                     languageSelectionButton(for: nil)
 
@@ -512,43 +512,43 @@ struct ContentView: View {
                         languageSelectionButton(for: language)
                     }
                 }
-                .help("Switch app language or follow system default")
-                Menu("Developer") {
-                    Toggle("Developer Mode", isOn: $developerModeEnabled)
+                .help(L10n.string("Switch app language or follow system default"))
+                Menu(L10n.string("Developer")) {
+                    Toggle(L10n.string("Developer Mode"), isOn: $developerModeEnabled)
                     Divider()
-                    Text("Projects Folder")
+                    Text(L10n.string("Projects Folder"))
                     Text(resolvedCodexProjectsDirectoryPath)
                         .font(.caption2.monospaced())
-                    Button("Choose Projects Folder...") {
+                    Button(L10n.string("Choose Projects Folder...")) {
                         chooseCodexProjectsDirectory()
                     }
-                    Button("Use Default Projects Folder") {
+                    Button(L10n.string("Use Default Projects Folder")) {
                         useDefaultCodexProjectsDirectory()
                     }
                     .disabled(isUsingDefaultCodexProjectsDirectory)
-                    Button("Open Projects Folder in Finder") {
+                    Button(L10n.string("Open Projects Folder in Finder")) {
                         openCodexProjectsDirectoryInFinder()
                     }
-                    Button("Copy Projects Folder Path") {
+                    Button(L10n.string("Copy Projects Folder Path")) {
                         copyToPasteboard(resolvedCodexProjectsDirectoryPath)
                     }
                     if let message = viewModel.lastBoardMessage, !message.isEmpty {
-                        Button("Copy Board Message") {
+                        Button(L10n.string("Copy Board Message")) {
                             copyToPasteboard(message)
                         }
                     }
                     if let debugLog = viewModel.lastExecutionDebugLog, !debugLog.isEmpty {
-                        Button("Copy Last Debug Log") {
+                        Button(L10n.string("Copy Last Debug Log")) {
                             copyToPasteboard(debugLog)
                         }
                     }
                     if let loginCommand = viewModel.lastCodexLoginCommand, !loginCommand.isEmpty {
-                        Button("Copy Codex Login Command") {
+                        Button(L10n.string("Copy Codex Login Command")) {
                             copyToPasteboard(loginCommand)
                         }
                     }
                 }
-                .help("Enable developer diagnostics and quick-copy execution logs")
+                .help(L10n.string("Enable developer diagnostics and quick-copy execution logs"))
             }
         }
         .sheet(isPresented: $isShowingNewBoardSheet) {
@@ -699,9 +699,9 @@ struct ContentView: View {
         .onChange(of: viewModel.selectedBoardID) { _, _ in
             handleBoardContextChanged()
         }
-        .alert("Delete Board?", isPresented: $isShowingDeleteBoardAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
+        .alert(L10n.string("Delete Board?"), isPresented: $isShowingDeleteBoardAlert) {
+            Button(L10n.string("Cancel"), role: .cancel) {}
+            Button(L10n.string("Delete"), role: .destructive) {
                 removeSelectedBoard()
             }
         } message: {
@@ -1787,7 +1787,7 @@ private struct KanbanColumnView: View {
             }
 
             if tasks.isEmpty {
-                Text("No tasks")
+                Text(L10n.string("No tasks"))
                     .font(.caption)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .frame(maxWidth: .infinity, minHeight: 120)
@@ -1952,7 +1952,7 @@ private struct TaskCardView: View {
                         .foregroundStyle(executionStatusColor(for: executionRecord.status))
                     Spacer(minLength: 0)
                     if executionRecord.lastOutputSummary != nil || executionRecord.lastError != nil {
-                        Button("Details") {
+                        Button(L10n.string("Details")) {
                             onShowExecutionDetails()
                         }
                         .buttonStyle(.bordered)
@@ -1980,7 +1980,7 @@ private struct TaskCardView: View {
                     Button {
                         onMoveBackward()
                     } label: {
-                        Label("Back", systemImage: "arrow.left")
+                        Label(L10n.string("Back"), systemImage: "arrow.left")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1990,7 +1990,7 @@ private struct TaskCardView: View {
                     Button {
                         onMoveForward()
                     } label: {
-                        Label("Next", systemImage: "arrow.right")
+                        Label(L10n.string("Next"), systemImage: "arrow.right")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -2004,21 +2004,21 @@ private struct TaskCardView: View {
                 .stroke(taskCardBorder, lineWidth: 1)
         )
         .contextMenu {
-            Button("Edit Task", action: onEdit)
+            Button(L10n.string("Edit Task"), action: onEdit)
             if canAutoAssign {
-                Button("Auto Assign This Task", action: onAutoAssign)
+                Button(L10n.string("Auto Assign This Task"), action: onAutoAssign)
             }
             if canRunAgent {
-                Button("Run Agent", action: onRunAgent)
+                Button(L10n.string("Run Agent"), action: onRunAgent)
             }
             if canRetryAgent {
-                Button("Retry Last Run", action: onRetryAgent)
+                Button(L10n.string("Retry Last Run"), action: onRetryAgent)
             }
             if executionRecord?.lastOutputSummary != nil || executionRecord?.lastError != nil {
-                Button("View Execution Details", action: onShowExecutionDetails)
+                Button(L10n.string("View Execution Details"), action: onShowExecutionDetails)
             }
             if !manualAssignableAgents.isEmpty {
-                Menu("Assign To Agent") {
+                Menu(L10n.string("Assign To Agent")) {
                     ForEach(manualAssignableAgents) { agent in
                         Button(agent.name) {
                             onManualAssign(agent.id)
@@ -2027,7 +2027,7 @@ private struct TaskCardView: View {
                 }
             }
             if !reassignableAgents.isEmpty {
-                Menu("Reassign To Agent") {
+                Menu(L10n.string("Reassign To Agent")) {
                     ForEach(reassignableAgents) { agent in
                         Button(agent.name) {
                             onReassign(agent.id)
@@ -2036,17 +2036,17 @@ private struct TaskCardView: View {
                 }
             }
             if canUnassign {
-                Button("Unassign Task", action: onUnassign)
+                Button(L10n.string("Unassign Task"), action: onUnassign)
             }
             if !moveToBoardTargets.isEmpty {
-                Menu("Move To Board") {
+                Menu(L10n.string("Move To Board")) {
                     ForEach(moveToBoardTargets) { board in
                         Button(board.name) {
                             onMoveToBoard(board.id)
                         }
                     }
                 }
-                Menu("Copy To Board") {
+                Menu(L10n.string("Copy To Board")) {
                     ForEach(moveToBoardTargets) { board in
                         Button(board.name) {
                             onCopyToBoard(board.id)
@@ -2054,8 +2054,8 @@ private struct TaskCardView: View {
                     }
                 }
             }
-            Button("Duplicate Task", action: onDuplicate)
-            Button("Delete Task", role: .destructive, action: onDelete)
+            Button(L10n.string("Duplicate Task"), action: onDuplicate)
+            Button(L10n.string("Delete Task"), role: .destructive, action: onDelete)
         }
         .draggable(TaskDragPayload(taskID: task.id))
     }
@@ -2110,7 +2110,7 @@ private struct ExecutionDetailsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Execution Details")
+            Text(L10n.string("Execution Details"))
                 .font(.title3.weight(.semibold))
 
             Group {
@@ -2130,34 +2130,34 @@ private struct ExecutionDetailsSheet: View {
 
             if let output = details.executionRecord.lastOutputSummary, !output.isEmpty {
                 executionTextSection(
-                    title: "Output",
+                    title: L10n.string("Output"),
                     value: output,
                     tint: BoardSemanticTextPalette.color(for: .success, scheme: colorScheme),
-                    copyButtonTitle: "Copy Output"
+                    copyButtonTitle: L10n.string("Copy Output")
                 )
             }
 
             if let error = details.executionRecord.lastError, !error.isEmpty {
                 executionTextSection(
-                    title: "Error",
+                    title: L10n.string("Error"),
                     value: error,
                     tint: BoardSemanticTextPalette.color(for: .error, scheme: colorScheme),
-                    copyButtonTitle: "Copy Error"
+                    copyButtonTitle: L10n.string("Copy Error")
                 )
             }
 
             if let debug = details.executionRecord.lastDebugOutput, !debug.isEmpty {
                 executionTextSection(
-                    title: "Debug Log",
+                    title: L10n.string("Debug Log"),
                     value: debug,
                     tint: BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme),
-                    copyButtonTitle: "Copy Debug Log"
+                    copyButtonTitle: L10n.string("Copy Debug Log")
                 )
             }
 
             HStack {
                 Spacer()
-                Button("Close", action: onClose)
+                Button(L10n.string("Close"), action: onClose)
                     .keyboardShortcut(.cancelAction)
             }
         }
@@ -2238,14 +2238,14 @@ private struct AgentLiveConsoleView: View {
                             : BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme)
                     )
                 if !events.isEmpty {
-                    Button("Clear", action: onClear)
+                    Button(L10n.string("Clear"), action: onClear)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
             }
 
             if events.isEmpty {
-                Text("No execution events yet. Run a task to see live updates for this agent.")
+                Text(L10n.string("No execution events yet. Run a task to see live updates for this agent."))
                     .font(.caption)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .padding(.vertical, 10)
@@ -2294,7 +2294,7 @@ private struct AgentExecutionEventRow: View {
                     .font(.caption2.weight(.semibold))
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Button("Copy") {
+                Button(L10n.string("Copy")) {
                     onCopy(copyText)
                 }
                 .buttonStyle(.bordered)
@@ -2369,19 +2369,19 @@ private struct GlobalTaskSearchSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Find Task")
+            Text(L10n.string("Find Task"))
                 .font(.title3.weight(.semibold))
 
-            TextField("Search title, details, skills, assignee, board", text: $query)
+            TextField(L10n.string("Search title, details, skills, assignee, board"), text: $query)
                 .textFieldStyle(.roundedBorder)
 
             if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Type to search all boards.")
+                Text(L10n.string("Type to search all boards."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if results.isEmpty {
-                Text("No matching tasks found.")
+                Text(L10n.string("No matching tasks found."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -2416,7 +2416,7 @@ private struct GlobalTaskSearchSheet: View {
 
             HStack {
                 Spacer()
-                Button("Close", action: onClose)
+                Button(L10n.string("Close"), action: onClose)
                     .keyboardShortcut(.cancelAction)
             }
         }
@@ -2434,10 +2434,10 @@ private struct NewBoardSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Board")
+            Text(L10n.string("New Board"))
                 .font(.title3.weight(.semibold))
 
-            TextField("Board Name", text: $name)
+            TextField(L10n.string("Board Name"), text: $name)
                 .textFieldStyle(.roundedBorder)
 
             if let boardMessage, !boardMessage.isEmpty {
@@ -2446,8 +2446,8 @@ private struct NewBoardSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Create", action: onCreate)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Create"), action: onCreate)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2464,10 +2464,10 @@ private struct RenameBoardSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Rename Board")
+            Text(L10n.string("Rename Board"))
                 .font(.title3.weight(.semibold))
 
-            TextField("Board Name", text: $name)
+            TextField(L10n.string("Board Name"), text: $name)
                 .textFieldStyle(.roundedBorder)
 
             if let boardMessage, !boardMessage.isEmpty {
@@ -2476,8 +2476,8 @@ private struct RenameBoardSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Rename", action: onRename)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Rename"), action: onRename)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2500,25 +2500,25 @@ private struct NewTaskSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Create Task")
+            Text(L10n.string("Create Task"))
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            TextField("Title", text: $title)
-            TextField("Details", text: $details)
-            TextField("Skills (comma separated)", text: $skills)
+            TextField(L10n.string("Title"), text: $title)
+            TextField(L10n.string("Details"), text: $details)
+            TextField(L10n.string("Skills (comma separated)"), text: $skills)
 
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Create", action: onCreate)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Create"), action: onCreate)
                     .keyboardShortcut(.defaultAction)
-                Button("Create + Auto Assign", action: onCreateAutoAssign)
+                Button(L10n.string("Create + Auto Assign"), action: onCreateAutoAssign)
             }
         }
         .padding(18)
@@ -2539,22 +2539,22 @@ private struct EditTaskSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Task")
+            Text(L10n.string("Edit Task"))
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            TextField("Title", text: $title)
-            TextField("Details", text: $details)
-            TextField("Skills (comma separated)", text: $skills)
+            TextField(L10n.string("Title"), text: $title)
+            TextField(L10n.string("Details"), text: $details)
+            TextField(L10n.string("Skills (comma separated)"), text: $skills)
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save", action: onSave)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Save"), action: onSave)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2572,20 +2572,20 @@ private struct WIPSettingsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Edit WIP Limits")
+            Text(L10n.string("Edit WIP Limits"))
                 .font(.title3.weight(.semibold))
 
             Stepper(L10n.format("In Progress: %d", inProgressLimit), value: $inProgressLimit, in: 1 ... 20)
             Stepper(L10n.format("Review: %d", reviewLimit), value: $reviewLimit, in: 1 ... 20)
 
-            Text("Tip: limit cannot be smaller than the number of tasks currently in that column.")
+            Text(L10n.string("Tip: limit cannot be smaller than the number of tasks currently in that column."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Apply", action: onApply)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Apply"), action: onApply)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2613,26 +2613,26 @@ private struct NewAgentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Create Agent")
+            Text(L10n.string("Create Agent"))
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            TextField("Name", text: $name)
-            TextField("Skills (comma separated)", text: $skills)
+            TextField(L10n.string("Name"), text: $name)
+            TextField(L10n.string("Skills (comma separated)"), text: $skills)
             Stepper(L10n.format("Max Concurrent Tasks: %d", maxConcurrentTasks), value: $maxConcurrentTasks, in: 1 ... 20)
-            Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
+            Toggle(L10n.string("Configure Runtime Profile"), isOn: $runtimeEnabled)
             if runtimeEnabled {
-                Picker("Runtime Provider", selection: $runtimeProvider) {
+                Picker(L10n.string("Runtime Provider"), selection: $runtimeProvider) {
                     ForEach(AgentRuntimeProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
-                TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
+                TextField(L10n.string("Model"), text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
                 if runtimeProvider == .openAICompatible {
-                    Picker("OpenAI Auth", selection: $openAIAuthMode) {
+                    Picker(L10n.string("OpenAI Auth"), selection: $openAIAuthMode) {
                         ForEach(OpenAICompatibleAuthMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }
@@ -2640,24 +2640,24 @@ private struct NewAgentSheet: View {
 
                     switch openAIAuthMode {
                     case .apiKey:
-                        TextField("Endpoint (optional)", text: $runtimeEndpoint)
-                        Text("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment.")
+                        TextField(L10n.string("Endpoint (optional)"), text: $runtimeEndpoint)
+                        Text(L10n.string("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     case .codexBridge:
-                        TextField("Codex Profile (optional)", text: $codexProfile)
-                        Text("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model.")
+                        TextField(L10n.string("Codex Profile (optional)"), text: $codexProfile)
+                        Text(L10n.string("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
-                TextField("Tools (comma separated)", text: $runtimeTools)
+                TextField(L10n.string("Tools (comma separated)"), text: $runtimeTools)
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Create", action: onCreate)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Create"), action: onCreate)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2685,26 +2685,26 @@ private struct EditAgentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Agent")
+            Text(L10n.string("Edit Agent"))
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            TextField("Name", text: $name)
-            TextField("Skills (comma separated)", text: $skills)
+            TextField(L10n.string("Name"), text: $name)
+            TextField(L10n.string("Skills (comma separated)"), text: $skills)
             Stepper(L10n.format("Max Concurrent Tasks: %d", maxConcurrentTasks), value: $maxConcurrentTasks, in: 1 ... 20)
-            Toggle("Configure Runtime Profile", isOn: $runtimeEnabled)
+            Toggle(L10n.string("Configure Runtime Profile"), isOn: $runtimeEnabled)
             if runtimeEnabled {
-                Picker("Runtime Provider", selection: $runtimeProvider) {
+                Picker(L10n.string("Runtime Provider"), selection: $runtimeProvider) {
                     ForEach(AgentRuntimeProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
-                TextField("Model", text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
+                TextField(L10n.string("Model"), text: $runtimeModel, prompt: Text(runtimeProvider.defaultModel))
                 if runtimeProvider == .openAICompatible {
-                    Picker("OpenAI Auth", selection: $openAIAuthMode) {
+                    Picker(L10n.string("OpenAI Auth"), selection: $openAIAuthMode) {
                         ForEach(OpenAICompatibleAuthMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }
@@ -2712,24 +2712,24 @@ private struct EditAgentSheet: View {
 
                     switch openAIAuthMode {
                     case .apiKey:
-                        TextField("Endpoint (optional)", text: $runtimeEndpoint)
-                        Text("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment.")
+                        TextField(L10n.string("Endpoint (optional)"), text: $runtimeEndpoint)
+                        Text(L10n.string("Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     case .codexBridge:
-                        TextField("Codex Profile (optional)", text: $codexProfile)
-                        Text("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model.")
+                        TextField(L10n.string("Codex Profile (optional)"), text: $codexProfile)
+                        Text(L10n.string("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
-                TextField("Tools (comma separated)", text: $runtimeTools)
+                TextField(L10n.string("Tools (comma separated)"), text: $runtimeTools)
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save", action: onSave)
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Save"), action: onSave)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -2754,7 +2754,7 @@ private struct ManualTriageSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Manual Triage")
+            Text(L10n.string("Manual Triage"))
                 .font(.title3.weight(.semibold))
 
             if let boardMessage, !boardMessage.isEmpty {
@@ -2775,7 +2775,7 @@ private struct ManualTriageSheet: View {
             }
 
             if tasks.isEmpty {
-                Text("No tasks waiting for manual triage.")
+                Text(L10n.string("No tasks waiting for manual triage."))
                     .font(.callout)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             } else {
@@ -2792,18 +2792,18 @@ private struct ManualTriageSheet: View {
                                 let eligibleAgents = assignableAgents(task)
 
                                 if eligibleAgents.isEmpty {
-                                    Text("No eligible agents currently available.")
+                                    Text(L10n.string("No eligible agents currently available."))
                                         .font(.caption)
                                         .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
                                 } else {
-                                    Picker("Assign To", selection: selectionBinding(for: task.id, fallback: eligibleAgents[0].id)) {
+                                    Picker(L10n.string("Assign To"), selection: selectionBinding(for: task.id, fallback: eligibleAgents[0].id)) {
                                         ForEach(eligibleAgents) { agent in
                                             Text(L10n.format("%@ (%@)", agent.name, loadText(agent)))
                                                 .tag(agent.id)
                                         }
                                     }
 
-                                    Button("Assign") {
+                                    Button(L10n.string("Assign")) {
                                         onAssign(task.id)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -2820,7 +2820,7 @@ private struct ManualTriageSheet: View {
 
             HStack {
                 Spacer()
-                Button("Close", action: onClose)
+                Button(L10n.string("Close"), action: onClose)
             }
         }
         .padding(18)
