@@ -553,6 +553,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         \(template.storyPointsLabel): \(task.storyPoints)
 
         \(template.sectionsInstruction)
+        \(template.languageInstruction)
         \(template.summarySection)
         \(template.actionsSection)
         \(template.evidenceSection)
@@ -572,6 +573,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 requiredSkillsLabel: "Required skills",
                 storyPointsLabel: "Story points",
                 sectionsInstruction: "Return plain text using these sections:",
+                languageInstruction: "Use English for all section titles and narrative text. Do not mix multiple natural languages unless quoting user-provided text.",
                 summarySection: "Summary:",
                 actionsSection: "Actions taken:",
                 evidenceSection: "Evidence (files/commands/results):",
@@ -582,12 +584,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return ExecutionPromptTemplate(
                 systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Traditional Chinese.",
                 preamble: "你正在看板執行系統中支援一位已指派的 AI 代理。",
-                agentLabel: "Agent",
+                agentLabel: "代理",
                 taskTitleLabel: "任務標題",
                 taskDetailsLabel: "任務細節",
                 requiredSkillsLabel: "所需技能",
                 storyPointsLabel: "故事點數",
                 sectionsInstruction: "請用純文字並使用以下段落：",
+                languageInstruction: "請使用繁體中文撰寫所有段落標題與敘述內容，除非是引用使用者原文或程式碼，否則不要混用英文。",
                 summarySection: "摘要：",
                 actionsSection: "已執行動作：",
                 evidenceSection: "證據（檔案／指令／結果）：",
@@ -598,12 +601,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return ExecutionPromptTemplate(
                 systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Simplified Chinese.",
                 preamble: "你正在看板执行系统中支持一位已分配的 AI 代理。",
-                agentLabel: "Agent",
+                agentLabel: "代理",
                 taskTitleLabel: "任务标题",
                 taskDetailsLabel: "任务细节",
                 requiredSkillsLabel: "所需技能",
                 storyPointsLabel: "故事点数",
                 sectionsInstruction: "请用纯文本并使用以下段落：",
+                languageInstruction: "请使用简体中文撰写所有段落标题与叙述内容，除非是引用用户原文或代码，否则不要混用英文。",
                 summarySection: "摘要：",
                 actionsSection: "已执行动作：",
                 evidenceSection: "证据（文件/命令/结果）：",
@@ -620,6 +624,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 requiredSkillsLabel: "Competences requises",
                 storyPointsLabel: "Points d'histoire",
                 sectionsInstruction: "Repondez en texte brut avec les sections suivantes :",
+                languageInstruction: "Utilisez le francais pour tous les titres et le texte narratif. N'utilisez pas plusieurs langues sauf citation explicite du contenu utilisateur.",
                 summarySection: "Resume :",
                 actionsSection: "Actions realisees :",
                 evidenceSection: "Preuves (fichiers/commandes/resultats) :",
@@ -636,6 +641,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 requiredSkillsLabel: "Habilidades requeridas",
                 storyPointsLabel: "Puntos de historia",
                 sectionsInstruction: "Devuelve texto plano con estas secciones:",
+                languageInstruction: "Usa espanol en todos los titulos de seccion y en la narrativa. No mezcles idiomas salvo para citas textuales del contenido del usuario.",
                 summarySection: "Resumen:",
                 actionsSection: "Acciones realizadas:",
                 evidenceSection: "Evidencia (archivos/comandos/resultados):",
@@ -646,12 +652,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return ExecutionPromptTemplate(
                 systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Japanese.",
                 preamble: "あなたはカンバン実行システムで割り当て済みの AI エージェントを支援しています。",
-                agentLabel: "Agent",
+                agentLabel: "エージェント",
                 taskTitleLabel: "タスクタイトル",
                 taskDetailsLabel: "タスク詳細",
                 requiredSkillsLabel: "必要スキル",
                 storyPointsLabel: "ストーリーポイント",
                 sectionsInstruction: "次の見出しで簡潔なプレーンテキストを返してください:",
+                languageInstruction: "見出しと本文は日本語で統一してください。ユーザー原文やコードの引用以外で英語を混在させないでください。",
                 summarySection: "要約:",
                 actionsSection: "実施した内容:",
                 evidenceSection: "証拠（ファイル/コマンド/結果）:",
@@ -662,12 +669,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             return ExecutionPromptTemplate(
                 systemPrompt: "You are an autonomous software execution agent. Respond with concise plain text in Korean.",
                 preamble: "당신은 칸반 실행 시스템에서 할당된 AI 에이전트를 지원하고 있습니다.",
-                agentLabel: "Agent",
+                agentLabel: "에이전트",
                 taskTitleLabel: "작업 제목",
                 taskDetailsLabel: "작업 세부사항",
                 requiredSkillsLabel: "필수 스킬",
                 storyPointsLabel: "스토리 포인트",
                 sectionsInstruction: "다음 섹션으로 간결한 일반 텍스트를 반환하세요:",
+                languageInstruction: "모든 섹션 제목과 본문은 한국어로 작성하세요. 사용자 원문이나 코드 인용을 제외하고 다른 언어를 섞지 마세요.",
                 summarySection: "요약:",
                 actionsSection: "수행한 작업:",
                 evidenceSection: "근거 (파일/명령/결과):",
@@ -686,6 +694,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let requiredSkillsLabel: String
         let storyPointsLabel: String
         let sectionsInstruction: String
+        let languageInstruction: String
         let summarySection: String
         let actionsSection: String
         let evidenceSection: String
@@ -3061,6 +3070,48 @@ final class KanbanBoardViewModel: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func normalizeExecutionSummary(_ value: String?) -> String? {
+        guard let normalized = normalizeExecutionText(value) else { return nil }
+        let lines = normalized
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map(String.init)
+        guard let firstNonEmptyIndex = lines.firstIndex(where: {
+            !$0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty
+        }) else {
+            return normalized
+        }
+
+        let firstLine = lines[firstNonEmptyIndex].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let headingPattern = #"^(Summary|摘要|Resumen|Resume|要約|요약)\s*[:：]\s*(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: headingPattern, options: [.caseInsensitive]) else {
+            return normalized
+        }
+        let firstLineRange = NSRange(firstLine.startIndex..<firstLine.endIndex, in: firstLine)
+        guard let match = regex.firstMatch(in: firstLine, options: [], range: firstLineRange) else {
+            return normalized
+        }
+
+        let inlineBodyRange = match.range(at: 2)
+        let inlineBody: String
+        if inlineBodyRange.location != NSNotFound,
+           let swiftRange = Range(inlineBodyRange, in: firstLine) {
+            inlineBody = firstLine[swiftRange].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        } else {
+            inlineBody = ""
+        }
+
+        var remainingLines = lines
+        remainingLines.remove(at: firstNonEmptyIndex)
+        let bodyFromRemaining = remainingLines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let merged = [inlineBody, bodyFromRemaining]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return merged.isEmpty ? nil : merged
+    }
+
     private func appendAgentExecutionEvent(
         agentID: UUID,
         taskID: UUID,
@@ -3181,7 +3232,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         switch outcome {
         case let .success(summary):
-            let normalizedSummary = normalizeExecutionText(summary)
+            let normalizedSummary = normalizeExecutionSummary(summary)
             if let normalizedSummary, let blockerMessage = blockedExecutionMessage(from: normalizedSummary) {
                 var blockedRecord = baselineRecord
                 blockedRecord.status = .failed

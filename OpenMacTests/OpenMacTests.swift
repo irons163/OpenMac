@@ -262,7 +262,9 @@ struct AgentTaskExecutorTests {
             #expect(Bool(false), "Expected success for Codex Bridge runtime")
         }
         #expect(capturedPrompt.contains("你正在看板執行系統中支援一位已指派的 AI 代理。"))
+        #expect(capturedPrompt.contains("代理: Bridge Agent"))
         #expect(capturedPrompt.contains("任務標題"))
+        #expect(capturedPrompt.contains("請使用繁體中文撰寫所有段落標題與敘述內容"))
         #expect(capturedPrompt.contains("摘要："))
         #expect(capturedPrompt.contains("所需技能: 無"))
     }
@@ -3901,6 +3903,34 @@ struct KanbanPersistenceTests {
         #expect(agentEvents.first?.status == .succeeded)
         #expect(agentEvents.last?.status == .running)
         #expect(agentEvents.first?.taskID == task.id)
+    }
+
+    @Test("run task execution strips leading summary heading from successful output")
+    func runTaskExecutionStripsSummaryHeading() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Generate UI spec",
+            details: "Produce handoff notes",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "Summary: Spec generated\nActions taken:\n- Drafted UI notes")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let summary = updatedTask?.executionRecord?.lastOutputSummary
+
+        #expect(executed)
+        #expect(summary == "Spec generated\nActions taken:\n- Drafted UI notes")
     }
 
     @Test("run task execution rejects unassigned task")
