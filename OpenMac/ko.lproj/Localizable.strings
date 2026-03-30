@@ -425,3 +425,5 @@
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "자동 생성된 의존성 작업입니다. 다른 작업이 이 의존성을 참조하여 생성되었습니다: %@";
 "Referenced by tasks: %@" = "이 의존성을 참조하는 작업: %@";
 "Inferred required skills: %@" = "추론된 필수 스킬: %@";
+
+"Cancelled" = "취소됨";

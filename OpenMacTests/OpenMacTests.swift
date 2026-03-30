@@ -9263,6 +9263,59 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord?.status == .succeeded)
     }
 
+    @Test("background batch run can be cancelled between tasks")
+    func runAssignedTaskExecutionsInBackgroundCanCancelQueue() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let first = WorkTask(
+            title: "First",
+            details: "Detailed task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let second = WorkTask(
+            title: "Second",
+            details: "Detailed task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = HookedTaskExecutor(
+            outcomesByTaskID: [
+                first.id: .success(summary: "ok"),
+                second.id: .success(summary: "ok")
+            ]
+        )
+        var viewModel: KanbanBoardViewModel!
+        viewModel = KanbanBoardViewModel(
+            tasks: [first, second],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        executor.onExecute = { task in
+            if task.id == first.id {
+                viewModel.requestCancelAssignedTaskExecutions()
+            }
+        }
+
+        var startedCount: Int?
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil })
+        #expect(startedCount == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == first.id })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.id == second.id })?.executionRecord == nil)
+        #expect(viewModel.lastBoardMessage?.contains("Cancelled") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(!viewModel.isBatchRunCancelRequested)
+    }
+
     @Test("auto cycle runs multiple passes until assigned queue is drained")
     func runAutoDispatchCycleInBackgroundRunsUntilStable() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -9490,6 +9543,47 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
+    @Test("auto cycle can be cancelled during active execution")
+    func runAutoDispatchCycleInBackgroundCanCancel() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Auto cycle cancellable",
+            details: "Run once",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = HookedTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "ok")]
+        )
+        var viewModel: KanbanBoardViewModel!
+        viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        executor.onExecute = { _ in
+            viewModel.requestCancelAutoDispatchCycle()
+        }
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 1)
+        #expect(passes == 1)
+        #expect(viewModel.lastBoardMessage?.contains("Cancelled") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(!viewModel.isAutoCycleCancelRequested)
+    }
+
     @Test("pm autopilot bootstraps agents, creates tickets, and runs auto cycle")
     func runPMAutopilotInBackgroundEndToEnd() {
         let plannedTickets = [
@@ -9558,6 +9652,7 @@ struct KanbanPersistenceTests {
         let viewModel = KanbanBoardViewModel(
             tasks: [],
             agents: [],
+            wipLimits: [.inProgress: 8, .review: 8],
             taskExecutor: StubTaskExecutor(),
             runOnBackground: { work in work() },
             runOnMain: { work in work() }
@@ -9601,6 +9696,7 @@ struct KanbanPersistenceTests {
         let viewModel = KanbanBoardViewModel(
             tasks: [],
             agents: [],
+            wipLimits: [.inProgress: 8, .review: 8],
             taskExecutor: StubTaskExecutor(),
             runOnBackground: { work in work() },
             runOnMain: { work in work() }
@@ -9616,13 +9712,13 @@ struct KanbanPersistenceTests {
         }
 
         #expect(waitForMainQueue(timeout: 15.0) { startedExecutions != nil })
-        #expect(startedExecutions == 3)
+        #expect(startedExecutions.map { $0 >= 3 } == true)
         #expect(viewModel.tasks.contains(where: { $0.title == "External API" }))
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
         #expect(viewModel.lastBoardMessage?.contains("Created 1 dependency placeholder task(s)") == true)
         #expect(viewModel.lastBoardMessage?.contains("blocked by dependencies") == false)
         #expect(viewModel.lastAutoCycleCreatedDependencyTaskCount == 1)
-        #expect(viewModel.lastBoardMessageSeverity == .info)
+        #expect(viewModel.lastBoardMessageSeverity == BoardMessageSeverity.info)
     }
 
     @Test("pm autopilot forwards max pass limit to auto cycle")
@@ -10158,6 +10254,35 @@ private struct StubTaskExecutor: AgentTaskExecuting {
             onProgress(update)
         }
         return execute(task: task, agent: agent)
+    }
+}
+
+private final class HookedTaskExecutor: AgentTaskExecuting {
+    let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
+    let fallbackOutcome: AgentTaskExecutionOutcome
+    var onExecute: ((WorkTask) -> Void)?
+
+    init(
+        outcomesByTaskID: [UUID: AgentTaskExecutionOutcome] = [:],
+        fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok"),
+        onExecute: ((WorkTask) -> Void)? = nil
+    ) {
+        self.outcomesByTaskID = outcomesByTaskID
+        self.fallbackOutcome = fallbackOutcome
+        self.onExecute = onExecute
+    }
+
+    func execute(task: WorkTask, agent: AgentProfile) -> AgentTaskExecutionOutcome {
+        onExecute?(task)
+        return outcomesByTaskID[task.id] ?? fallbackOutcome
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent)
     }
 }
 

@@ -237,17 +237,25 @@ struct ContentView: View {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .help(L10n.string("Auto-assign all eligible To Do tasks (Shift-Command-A)"))
                 .disabled(!canAutoAssignFromToolbar)
-                Button(isBatchRunning ? L10n.string("Running...") : L10n.string("Run Assigned")) {
-                    runAssignedExecutionsFromToolbar()
+                Button(isBatchRunning ? L10n.string("Cancel") : L10n.string("Run Assigned")) {
+                    if isBatchRunning {
+                        cancelAssignedExecutionsFromToolbar()
+                    } else {
+                        runAssignedExecutionsFromToolbar()
+                    }
                 }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .help(L10n.string("Batch-run assigned To Do/In Progress tasks (Shift-Command-G)"))
-                .disabled(!canBatchRunAssignedTasks)
-                Button(isAutoCycleRunning ? L10n.string("Auto Cycling...") : L10n.string("Run Auto Cycle")) {
-                    runAutoCycleFromToolbar()
+                .disabled(isBatchRunning ? viewModel.isBatchRunCancelRequested : !canBatchRunAssignedTasks)
+                Button(isAutoCycleRunning ? L10n.string("Cancel") : L10n.string("Run Auto Cycle")) {
+                    if isAutoCycleRunning {
+                        cancelAutoCycleFromToolbar()
+                    } else {
+                        runAutoCycleFromToolbar()
+                    }
                 }
                 .help(L10n.string("Auto-assign then batch-run in repeated passes until queue is stable"))
-                .disabled(!canRunAutoCycle)
+                .disabled(isAutoCycleRunning ? viewModel.isAutoCycleCancelRequested : !canRunAutoCycle)
                 Button(L10n.string("New Task")) {
                     isShowingNewTaskSheet = true
                 }
@@ -319,15 +327,23 @@ struct ContentView: View {
 
                         Divider()
 
-                        Button(isBatchRunning ? L10n.string("Running Assigned Tasks...") : L10n.string("Run Assigned Tasks")) {
-                            runAssignedExecutionsFromToolbar()
+                        Button(isBatchRunning ? L10n.string("Cancel") : L10n.string("Run Assigned Tasks")) {
+                            if isBatchRunning {
+                                cancelAssignedExecutionsFromToolbar()
+                            } else {
+                                runAssignedExecutionsFromToolbar()
+                            }
                         }
-                        .disabled(!canBatchRunAssignedTasks)
+                        .disabled(isBatchRunning ? viewModel.isBatchRunCancelRequested : !canBatchRunAssignedTasks)
 
-                        Button(isAutoCycleRunning ? L10n.string("Auto Cycling...") : L10n.string("Run Auto Cycle")) {
-                            runAutoCycleFromToolbar()
+                        Button(isAutoCycleRunning ? L10n.string("Cancel") : L10n.string("Run Auto Cycle")) {
+                            if isAutoCycleRunning {
+                                cancelAutoCycleFromToolbar()
+                            } else {
+                                runAutoCycleFromToolbar()
+                            }
                         }
-                        .disabled(!canRunAutoCycle)
+                        .disabled(isAutoCycleRunning ? viewModel.isAutoCycleCancelRequested : !canRunAutoCycle)
 
                         Toggle(
                             L10n.string("Auto Create Missing Dependencies During Cycle"),
@@ -1085,6 +1101,11 @@ struct ContentView: View {
         }
     }
 
+    private func cancelAssignedExecutionsFromToolbar() {
+        guard isBatchRunning else { return }
+        viewModel.requestCancelAssignedTaskExecutions()
+    }
+
     private func runAutoCycleFromToolbar() {
         guard !isAutoCycleRunning else { return }
         guard !isBatchRunning else { return }
@@ -1098,6 +1119,11 @@ struct ContentView: View {
                 refreshTriageSelections()
             }
         }
+    }
+
+    private func cancelAutoCycleFromToolbar() {
+        guard isAutoCycleRunning else { return }
+        viewModel.requestCancelAutoDispatchCycle()
     }
 
     private func applyHealthRecommendation(_ action: BoardHealthAction) {

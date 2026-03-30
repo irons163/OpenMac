@@ -1304,6 +1304,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var lastExecutionDebugLog: String?
     @Published private(set) var lastCodexLoginCommand: String?
     @Published private(set) var lastAutoCycleCreatedDependencyTaskCount = 0
+    @Published private(set) var isBatchRunCancelRequested = false
+    @Published private(set) var isAutoCycleCancelRequested = false
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
@@ -3373,8 +3375,11 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
+        isBatchRunCancelRequested = false
         var attemptedTaskIDs: Set<UUID> = []
         var batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
+        var wasCancelled = false
+        var hasFinished = false
 
         guard !batchPreparation.runnableTaskIDs.isEmpty else {
             lastBoardMessage = noRunnableAssignedBatchMessage(
@@ -3382,6 +3387,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 dependencyBlockedCount: batchPreparation.dependencyBlockedCount
             )
             lastBoardMessageSeverity = .warning
+            isBatchRunCancelRequested = false
             completion(0)
             return
         }
@@ -3392,6 +3398,8 @@ final class KanbanBoardViewModel: ObservableObject {
         var skippedCount = 0
 
         func finish(_ finalPreparation: BatchRunPreparation) {
+            guard !hasFinished else { return }
+            hasFinished = true
             let detailsMissingCount = finalPreparation.detailsMissingCount
             let dependencyBlockedCount = finalPreparation.dependencyBlockedCount
             var summaryParts = [
@@ -3400,6 +3408,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 message("%d succeeded", succeededCount),
                 message("%d failed", failedCount)
             ]
+            if wasCancelled {
+                summaryParts.append(message("Cancelled"))
+            }
             if skippedCount > 0 {
                 summaryParts.append(message("%d skipped", skippedCount))
             }
@@ -3412,15 +3423,22 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessage = summaryParts.joined(separator: " · ")
             lastBoardMessageSeverity = (
                 failedCount > 0 ||
+                    wasCancelled ||
                     skippedCount > 0 ||
                     detailsMissingCount > 0 ||
                     dependencyBlockedCount > 0
             ) ? .warning : .info
+            isBatchRunCancelRequested = false
             completion(startedCount)
         }
 
         func runNextRunnableBatch() {
             batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
+            if self.isBatchRunCancelRequested {
+                wasCancelled = true
+                finish(batchPreparation)
+                return
+            }
             guard !batchPreparation.runnableTaskIDs.isEmpty else {
                 finish(batchPreparation)
                 return
@@ -3429,6 +3447,11 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         func runBatch(_ runnableTaskIDs: [UUID], at index: Int) {
+            if self.isBatchRunCancelRequested {
+                wasCancelled = true
+                finish(batchPreparation)
+                return
+            }
             guard index < runnableTaskIDs.count else {
                 runNextRunnableBatch()
                 return
@@ -3455,6 +3478,11 @@ final class KanbanBoardViewModel: ObservableObject {
                     }
                 }
 
+                if self.isBatchRunCancelRequested {
+                    wasCancelled = true
+                    finish(batchPreparation)
+                    return
+                }
                 runBatch(runnableTaskIDs, at: index + 1)
             }
         }
@@ -3467,16 +3495,21 @@ final class KanbanBoardViewModel: ObservableObject {
         autoCreateMissingDependencies: Bool = false,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
+        isAutoCycleCancelRequested = false
         let cappedPasses = min(12, max(1, maxPasses))
         var totalStarted = 0
         var completedPasses = 0
         var hadWarning = false
         var createdDependencyTaskCount = 0
+        var wasCancelled = false
+        var hasFinished = false
         lastAutoCycleCreatedDependencyTaskCount = 0
 
         func finish() {
+            guard !hasFinished else { return }
+            hasFinished = true
             self.lastAutoCycleCreatedDependencyTaskCount = createdDependencyTaskCount
-            if totalStarted > 0 {
+            if totalStarted > 0 || wasCancelled {
                 let remainingPreparation = prepareAssignedBatchRunQueue()
                 let remainingDetailsMissing = remainingPreparation.detailsMissingCount
                 let remainingDependencyBlocked = remainingPreparation.dependencyBlockedCount
@@ -3484,6 +3517,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 var summaryParts: [String] = [
                     message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
                 ]
+                if wasCancelled {
+                    summaryParts.append(message("Cancelled"))
+                }
                 if createdDependencyTaskCount > 0 {
                     summaryParts.append(message("Created %d dependency placeholder task(s)", createdDependencyTaskCount))
                 }
@@ -3496,6 +3532,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastBoardMessage = summaryParts.joined(separator: " · ")
                 lastBoardMessageSeverity = (
                     hadWarning ||
+                        wasCancelled ||
                         remainingDetailsMissing > 0 ||
                         remainingDependencyBlocked > 0
                 ) ? .warning : .info
@@ -3503,11 +3540,17 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastBoardMessage = message("Auto cycle finished with no runnable assigned tasks")
                 lastBoardMessageSeverity = .warning
             }
+            self.isAutoCycleCancelRequested = false
             completion(totalStarted, completedPasses)
         }
 
         func runPass(_ passIndex: Int) {
             guard passIndex < cappedPasses else {
+                finish()
+                return
+            }
+            if self.isAutoCycleCancelRequested {
+                wasCancelled = true
                 finish()
                 return
             }
@@ -3526,6 +3569,11 @@ final class KanbanBoardViewModel: ObservableObject {
                 if self.lastBoardMessageSeverity == .warning && !isTerminalNoRunnable {
                     hadWarning = true
                 }
+                if self.isAutoCycleCancelRequested {
+                    wasCancelled = true
+                    finish()
+                    return
+                }
                 guard started > 0 else {
                     finish()
                     return
@@ -3535,6 +3583,15 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         runPass(0)
+    }
+
+    func requestCancelAssignedTaskExecutions() {
+        isBatchRunCancelRequested = true
+    }
+
+    func requestCancelAutoDispatchCycle() {
+        isAutoCycleCancelRequested = true
+        requestCancelAssignedTaskExecutions()
     }
 
     func runPMAutopilotInBackground(

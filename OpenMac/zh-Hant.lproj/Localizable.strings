@@ -425,3 +425,5 @@
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "自動產生的依賴任務。由於其他任務參照此依賴而建立：%@";
 "Referenced by tasks: %@" = "參照此依賴的任務：%@";
 "Inferred required skills: %@" = "推斷所需技能：%@";
+
+"Cancelled" = "已取消";

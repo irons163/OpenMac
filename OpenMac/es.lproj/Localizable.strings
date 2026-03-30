@@ -425,3 +425,5 @@
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "Tarea de dependencia autogenerada. Creada porque otras tareas hacen referencia a esta dependencia: %@";
 "Referenced by tasks: %@" = "Tareas que hacen referencia: %@";
 "Inferred required skills: %@" = "Habilidades requeridas inferidas: %@";
+
+"Cancelled" = "Cancelado";
