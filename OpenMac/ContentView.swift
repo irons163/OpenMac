@@ -1569,6 +1569,49 @@ struct ContentView: View {
         lines.append("4. \(L10n.string("Quality Gates"))")
         lines.append("- \(L10n.string("No blocker defects in critical paths."))")
         lines.append("- \(L10n.string("All acceptance criteria are covered by automated or manual checks."))")
+        lines.append("")
+
+        lines.append("5. \(L10n.string("Roadmap"))")
+        if tickets.isEmpty {
+            lines.append("- \(L10n.string("No generated tickets yet. Click Generate Plan."))")
+        } else {
+            let groupedByMilestone = Dictionary(grouping: tickets) { ticket in
+                let milestone = ticket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+                return milestone.isEmpty ? L10n.string("Unscheduled") : milestone
+            }
+            let sortedMilestones = groupedByMilestone.keys.sorted {
+                $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            }
+
+            for milestone in sortedMilestones {
+                let milestoneTickets = (groupedByMilestone[milestone] ?? []).sorted {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                let milestoneStoryPoints = milestoneTickets.reduce(0) { partialResult, ticket in
+                    partialResult + max(1, ticket.storyPoints)
+                }
+                let uniqueEpics = Set(
+                    milestoneTickets
+                        .map { $0.epic.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                )
+                lines.append("- \(L10n.format("Milestone: %@", milestone))")
+                lines.append(
+                    "  \(L10n.format("Total Tickets: %d", milestoneTickets.count)), \(L10n.format("Total Story Points: %d", milestoneStoryPoints)), \(L10n.format("Total Epics: %d", uniqueEpics.count))"
+                )
+                for ticket in milestoneTickets.prefix(3) {
+                    let title = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? L10n.string("New Task")
+                        : ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let epic = ticket.epic.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if epic.isEmpty {
+                        lines.append("  - \(title)")
+                    } else {
+                        lines.append("  - [\(epic)] \(title)")
+                    }
+                }
+            }
+        }
 
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }

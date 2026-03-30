@@ -4784,13 +4784,25 @@ struct ContentViewLogicTests {
                 title: "Matching Engine",
                 details: "Build candidate ranking",
                 requiredSkills: ["backend"],
-                storyPoints: 5
+                storyPoints: 5,
+                epic: "Core Product",
+                milestone: "M2 MVP Complete"
             ),
             PMPlannedTicket(
                 title: "Chat UI",
                 details: "Build chat thread view",
                 requiredSkills: ["swiftui"],
-                storyPoints: 3
+                storyPoints: 3,
+                epic: "Quality",
+                milestone: "M3 Quality Gate"
+            ),
+            PMPlannedTicket(
+                title: "Analytics Event Hooks",
+                details: "Track key user actions",
+                requiredSkills: ["backend"],
+                storyPoints: 2,
+                epic: "",
+                milestone: ""
             )
         ]
 
@@ -4800,11 +4812,16 @@ struct ContentViewLogicTests {
             tickets: tickets
         )
         #expect(text.contains("Test Plan"))
-        #expect(text.contains("Total Tickets: 2"))
+        #expect(text.contains("Total Tickets: 3"))
         #expect(text.contains("Unit Test Coverage"))
         #expect(text.contains("Integration Test Flows"))
         #expect(text.contains("End-to-End Scenarios"))
         #expect(text.contains("Quality Gates"))
+        #expect(text.contains("5. Roadmap"))
+        #expect(text.contains("Milestone: M2 MVP Complete"))
+        #expect(text.contains("[Core Product] Matching Engine"))
+        #expect(text.contains("Milestone: M3 Quality Gate"))
+        #expect(text.contains("Milestone: Unscheduled"))
     }
 
     @Test("pm plan copy text helper includes summary and ticket breakdown")
