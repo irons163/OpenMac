@@ -422,3 +422,5 @@
 "Created %d dependency placeholder task(s)" = "依存プレースホルダータスクを %d 件作成しました";
 "No missing dependency tasks were found" = "不足している依存タスクは見つかりませんでした";
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "自動生成された依存タスクです。ほかのタスクがこの依存を参照しているため作成されました: %@";
+"Referenced by tasks: %@" = "この依存を参照するタスク: %@";
+"Inferred required skills: %@" = "推定された必要スキル: %@";

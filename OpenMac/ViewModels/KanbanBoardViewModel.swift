@@ -2757,7 +2757,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     @discardableResult
     func createMissingDependencyTasks(storyPoints: Int = 1) -> Int {
-        let missingDependencies = missingDependencyReferences()
+        let missingDependencies = missingDependencyDescriptors()
         guard !missingDependencies.isEmpty else {
             lastBoardMessage = message("No missing dependency tasks were found")
             lastBoardMessageSeverity = .warning
@@ -2769,13 +2769,27 @@ final class KanbanBoardViewModel: ObservableObject {
         createdTaskIDs.reserveCapacity(missingDependencies.count)
 
         for dependency in missingDependencies {
-            let task = WorkTask(
-                title: dependency.displayTitle,
-                details: message(
+            var detailLines = [
+                message(
                     "Auto-generated dependency task. Created because other tasks reference this dependency: %@",
-                    dependency.displayTitle
-                ),
-                requiredSkills: [],
+                    dependency.reference.displayTitle
+                )
+            ]
+            if !dependency.dependentTaskTitles.isEmpty {
+                detailLines.append(
+                    message("Referenced by tasks: %@", dependency.dependentTaskTitles.joined(separator: ", "))
+                )
+            }
+            if !dependency.inferredSkills.isEmpty {
+                detailLines.append(
+                    message("Inferred required skills: %@", dependency.inferredSkills.joined(separator: ", "))
+                )
+            }
+
+            let task = WorkTask(
+                title: dependency.reference.displayTitle,
+                details: detailLines.joined(separator: "\n"),
+                requiredSkills: dependency.inferredSkills,
                 storyPoints: normalizedStoryPoints,
                 status: .todo,
                 assignedAgentID: nil
@@ -2991,6 +3005,12 @@ final class KanbanBoardViewModel: ObservableObject {
         let displayTitle: String
     }
 
+    private struct MissingDependencyDescriptor {
+        let reference: DependencyReference
+        let dependentTaskTitles: [String]
+        let inferredSkills: [String]
+    }
+
     private static func normalizedDependencyTitle(_ raw: String) -> String {
         raw
             .trimmingCharacters(
@@ -3099,6 +3119,10 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func missingDependencyReferences() -> [DependencyReference] {
+        missingDependencyDescriptors().map(\.reference)
+    }
+
+    private func missingDependencyDescriptors() -> [MissingDependencyDescriptor] {
         let existingDependencyTitles = Set(
             tasks.compactMap { task in
                 let normalized = Self.normalizedDependencyTitle(task.title)
@@ -3106,23 +3130,47 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         )
 
-        var uniqueMissingDependenciesByNormalizedTitle: [String: String] = [:]
+        var descriptorsByNormalizedTitle: [String: (
+            displayTitle: String, dependentTaskTitles: Set<String>, inferredSkills: Set<String>
+        )] = [:]
 
         for task in tasks where task.status == .todo || task.status == .inProgress {
             let dependencies = Self.parsedDependencyReferences(from: task.details)
+            let normalizedTaskTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
             for dependency in dependencies {
                 guard !existingDependencyTitles.contains(dependency.normalizedTitle) else { continue }
-                if uniqueMissingDependenciesByNormalizedTitle[dependency.normalizedTitle] == nil {
-                    uniqueMissingDependenciesByNormalizedTitle[dependency.normalizedTitle] = dependency.displayTitle
+                var descriptor = descriptorsByNormalizedTitle[dependency.normalizedTitle] ?? (
+                    displayTitle: dependency.displayTitle,
+                    dependentTaskTitles: [],
+                    inferredSkills: []
+                )
+                if descriptor.displayTitle.isEmpty {
+                    descriptor.displayTitle = dependency.displayTitle
                 }
+                if !normalizedTaskTitle.isEmpty {
+                    descriptor.dependentTaskTitles.insert(normalizedTaskTitle)
+                }
+                descriptor.inferredSkills.formUnion(task.requiredSkills)
+                descriptorsByNormalizedTitle[dependency.normalizedTitle] = descriptor
             }
         }
 
-        return uniqueMissingDependenciesByNormalizedTitle.keys.sorted().compactMap { normalizedTitle in
-            guard let displayTitle = uniqueMissingDependenciesByNormalizedTitle[normalizedTitle] else {
+        return descriptorsByNormalizedTitle.keys.sorted().compactMap { normalizedTitle in
+            guard let descriptor = descriptorsByNormalizedTitle[normalizedTitle] else {
                 return nil
             }
-            return DependencyReference(normalizedTitle: normalizedTitle, displayTitle: displayTitle)
+            let dependentTaskTitles = descriptor.dependentTaskTitles.sorted {
+                $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            }
+            let inferredSkills = descriptor.inferredSkills.sorted()
+            return MissingDependencyDescriptor(
+                reference: DependencyReference(
+                    normalizedTitle: normalizedTitle,
+                    displayTitle: descriptor.displayTitle
+                ),
+                dependentTaskTitles: dependentTaskTitles,
+                inferredSkills: inferredSkills
+            )
         }
     }
 

@@ -422,3 +422,5 @@
 "Created %d dependency placeholder task(s)" = "已建立 %d 個依賴占位任務";
 "No missing dependency tasks were found" = "找不到缺失的依賴任務";
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "自動產生的依賴任務。由於其他任務參照此依賴而建立：%@";
+"Referenced by tasks: %@" = "參照此依賴的任務：%@";
+"Inferred required skills: %@" = "推斷所需技能：%@";

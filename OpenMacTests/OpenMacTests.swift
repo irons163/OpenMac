@@ -2974,8 +2974,53 @@ struct KanbanFlowTests {
 
         #expect(applied)
         #expect(viewModel.tasks.contains(where: { $0.title == "External API Contract" }))
+        let generatedTask = viewModel.tasks.first(where: { $0.title == "External API Contract" })
+        #expect(generatedTask?.requiredSkills == Set(["swiftui"]))
+        #expect(generatedTask?.details.contains("Referenced by tasks: Implementation") == true)
+        #expect(generatedTask?.details.contains("Inferred required skills: swiftui") == true)
         #expect(viewModel.lastBoardMessage == "Created 1 dependency placeholder task(s)")
         #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("create-missing-dependency placeholder merges skills and context from dependent tasks")
+    func createMissingDependencyTasksMergesSkillsAndContextFromDependentTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui", "ux", "backend"], maxConcurrentTasks: 3)
+        let blockedUI = WorkTask(
+            title: "Mobile UI",
+            details: """
+            Depends on: Auth Service
+            Build onboarding views.
+            """,
+            requiredSkills: ["swiftui", "ux"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let blockedAPI = WorkTask(
+            title: "Session APIs",
+            details: """
+            Dependencies: Auth Service
+            Expose login endpoints.
+            """,
+            requiredSkills: ["backend", "swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blockedUI, blockedAPI],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        let createdCount = viewModel.createMissingDependencyTasks(storyPoints: 2)
+
+        #expect(createdCount == 1)
+        let generatedTask = viewModel.tasks.first(where: { $0.title == "Auth Service" })
+        #expect(generatedTask?.storyPoints == 2)
+        #expect(generatedTask?.requiredSkills == Set(["backend", "swiftui", "ux"]))
+        #expect(generatedTask?.details.contains("Referenced by tasks: Mobile UI, Session APIs") == true)
+        #expect(generatedTask?.details.contains("Inferred required skills: backend, swiftui, ux") == true)
     }
 
     @Test("health recommendations include review WIP increase when review reaches limit")

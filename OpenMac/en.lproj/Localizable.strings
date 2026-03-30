@@ -422,3 +422,5 @@
 "Created %d dependency placeholder task(s)" = "Created %d dependency placeholder task(s)";
 "No missing dependency tasks were found" = "No missing dependency tasks were found";
 "Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "Auto-generated dependency task. Created because other tasks reference this dependency: %@";
+"Referenced by tasks: %@" = "Referenced by tasks: %@";
+"Inferred required skills: %@" = "Inferred required skills: %@";
