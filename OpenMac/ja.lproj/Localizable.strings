@@ -402,3 +402,8 @@
 "All required PM skills are already covered by existing agents" = "必要な PM スキルは既存エージェントで既にカバーされています";
 "Created %d PM bootstrap agent(s) for missing skills" = "不足スキル向けに PM ブートストラップエージェントを %d 件作成しました";
 "Auto Agent %d" = "自動エージェント %d";
+"Run Auto Cycle" = "自動サイクル実行";
+"Auto Cycling..." = "自動サイクル実行中...";
+"Auto-assign then batch-run in repeated passes until queue is stable" = "自動アサイン後、キューが安定するまで複数パスで一括実行します。";
+"Auto cycle finished · %d pass(es) · %d started" = "自動サイクル完了 · %d パス · %d 件開始";
+"Auto cycle finished with no runnable assigned tasks" = "自動サイクル完了。実行可能な割り当て済みタスクはありません";

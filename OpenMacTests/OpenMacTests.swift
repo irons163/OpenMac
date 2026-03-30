@@ -3671,19 +3671,95 @@ struct ContentViewLogicTests {
         #expect(
             ContentViewTestHooks.canBatchRunAssignedTasks(
                 tasks: [runnable],
-                isBatchRunning: false
+                isBatchRunning: false,
+                isAutoCycleRunning: false
             )
         )
         #expect(
             !ContentViewTestHooks.canBatchRunAssignedTasks(
                 tasks: [runnable],
-                isBatchRunning: true
+                isBatchRunning: true,
+                isAutoCycleRunning: false
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canBatchRunAssignedTasks(
+                tasks: [runnable],
+                isBatchRunning: false,
+                isAutoCycleRunning: true
             )
         )
         #expect(
             !ContentViewTestHooks.canBatchRunAssignedTasks(
                 tasks: [emptyDetails, unassigned, doneTask],
-                isBatchRunning: false
+                isBatchRunning: false,
+                isAutoCycleRunning: false
+            )
+        )
+    }
+
+    @Test("auto cycle availability allows unassigned work and blocks concurrent runs")
+    func canRunAutoCycleRules() {
+        let agent = AgentProfile(name: "A", skills: ["swift"], maxConcurrentTasks: 1)
+
+        let unassignedTodo = WorkTask(
+            title: "Unassigned",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let inProgress = WorkTask(
+            title: "In Progress",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let doneTask = WorkTask(
+            title: "Done",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .done,
+            assignedAgentID: agent.id
+        )
+
+        #expect(
+            ContentViewTestHooks.canRunAutoCycle(
+                tasks: [unassignedTodo],
+                isBatchRunning: false,
+                isAutoCycleRunning: false
+            )
+        )
+        #expect(
+            ContentViewTestHooks.canRunAutoCycle(
+                tasks: [inProgress],
+                isBatchRunning: false,
+                isAutoCycleRunning: false
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canRunAutoCycle(
+                tasks: [doneTask],
+                isBatchRunning: false,
+                isAutoCycleRunning: false
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canRunAutoCycle(
+                tasks: [unassignedTodo],
+                isBatchRunning: true,
+                isAutoCycleRunning: false
+            )
+        )
+        #expect(
+            !ContentViewTestHooks.canRunAutoCycle(
+                tasks: [unassignedTodo],
+                isBatchRunning: false,
+                isAutoCycleRunning: true
             )
         )
     }
@@ -8794,6 +8870,108 @@ struct KanbanPersistenceTests {
         #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil })
         #expect(startedCount == 1)
         #expect(viewModel.lastBoardMessage?.contains("1 skipped") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("auto cycle runs multiple passes until assigned queue is drained")
+    func runAutoDispatchCycleInBackgroundRunsUntilStable() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Auto cycle task",
+            details: "Run end to end",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "ok")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 1)
+        #expect(passes == 2)
+        #expect(viewModel.lastBoardMessage?.contains("Auto cycle finished") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("auto cycle auto-assigns eligible todo work before executing")
+    func runAutoDispatchCycleInBackgroundAutoAssignsBeforeRun() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Unassigned auto cycle",
+            details: "Needs assignment first",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, _ in
+            totalStarted = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil })
+        #expect(totalStarted == 1)
+        #expect(viewModel.tasks.first?.assignedAgentID == agent.id)
+        #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("auto cycle preserves warning when no runnable assigned tasks exist")
+    func runAutoDispatchCycleInBackgroundReportsNoRunnableTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let blockedTask = WorkTask(
+            title: "Blocked",
+            details: "  ",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blockedTask],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 0)
+        #expect(passes == 1)
+        #expect(viewModel.lastBoardMessage == "1 assigned task with empty details. Fill details before batch run.")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 

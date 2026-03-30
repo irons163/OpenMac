@@ -3092,6 +3092,54 @@ final class KanbanBoardViewModel: ObservableObject {
         runNext(at: 0)
     }
 
+    func runAutoDispatchCycleInBackground(
+        maxPasses: Int = 3,
+        completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
+    ) {
+        let cappedPasses = min(12, max(1, maxPasses))
+        var totalStarted = 0
+        var completedPasses = 0
+        var hadWarning = false
+
+        func finish() {
+            if totalStarted > 0 {
+                lastBoardMessage = message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
+                lastBoardMessageSeverity = hadWarning ? .warning : .info
+            } else if lastBoardMessage == nil {
+                lastBoardMessage = message("Auto cycle finished with no runnable assigned tasks")
+                lastBoardMessageSeverity = .warning
+            }
+            completion(totalStarted, completedPasses)
+        }
+
+        func runPass(_ passIndex: Int) {
+            guard passIndex < cappedPasses else {
+                finish()
+                return
+            }
+
+            completedPasses += 1
+            autoAssignTasks()
+            runAssignedTaskExecutionsInBackground { started in
+                totalStarted += started
+                let isTerminalNoRunnable =
+                    started == 0 &&
+                    totalStarted > 0 &&
+                    self.lastBoardMessage == self.message("No assigned tasks are ready to run")
+                if self.lastBoardMessageSeverity == .warning && !isTerminalNoRunnable {
+                    hadWarning = true
+                }
+                guard started > 0 else {
+                    finish()
+                    return
+                }
+                runPass(passIndex + 1)
+            }
+        }
+
+        runPass(0)
+    }
+
     func triageCandidates() -> [WorkTask] {
         tasks
             .filter { $0.status == .todo && $0.assignedAgentID == nil }

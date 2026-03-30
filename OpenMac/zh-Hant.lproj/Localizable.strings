@@ -402,3 +402,8 @@
 "All required PM skills are already covered by existing agents" = "所有 PM 所需技能都已由現有代理覆蓋";
 "Created %d PM bootstrap agent(s) for missing skills" = "已建立 %d 位 PM 補齊代理以覆蓋缺少技能";
 "Auto Agent %d" = "自動代理 %d";
+"Run Auto Cycle" = "執行自動循環";
+"Auto Cycling..." = "自動循環中...";
+"Auto-assign then batch-run in repeated passes until queue is stable" = "先自動分派，再多輪批次執行直到佇列穩定";
+"Auto cycle finished · %d pass(es) · %d started" = "自動循環完成 · %d 輪 · 啟動 %d 項";
+"Auto cycle finished with no runnable assigned tasks" = "自動循環完成，沒有可執行的已分派任務";

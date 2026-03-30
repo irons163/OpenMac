@@ -402,3 +402,8 @@
 "All required PM skills are already covered by existing agents" = "All required PM skills are already covered by existing agents";
 "Created %d PM bootstrap agent(s) for missing skills" = "Created %d PM bootstrap agent(s) for missing skills";
 "Auto Agent %d" = "Auto Agent %d";
+"Run Auto Cycle" = "Run Auto Cycle";
+"Auto Cycling..." = "Auto Cycling...";
+"Auto-assign then batch-run in repeated passes until queue is stable" = "Auto-assign then batch-run in repeated passes until queue is stable";
+"Auto cycle finished · %d pass(es) · %d started" = "Auto cycle finished · %d pass(es) · %d started";
+"Auto cycle finished with no runnable assigned tasks" = "Auto cycle finished with no runnable assigned tasks";

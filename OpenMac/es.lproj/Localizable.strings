@@ -402,3 +402,8 @@
 "All required PM skills are already covered by existing agents" = "Todas las habilidades PM requeridas ya estan cubiertas por los agentes existentes";
 "Created %d PM bootstrap agent(s) for missing skills" = "Se crearon %d agente(s) bootstrap PM para habilidades faltantes";
 "Auto Agent %d" = "Agente Auto %d";
+"Run Auto Cycle" = "Ejecutar ciclo auto";
+"Auto Cycling..." = "Ciclo auto en curso...";
+"Auto-assign then batch-run in repeated passes until queue is stable" = "Autoasignar y luego ejecutar en lotes en pasadas repetidas hasta estabilizar la cola.";
+"Auto cycle finished · %d pass(es) · %d started" = "Ciclo auto finalizado · %d pasada(s) · %d iniciadas";
+"Auto cycle finished with no runnable assigned tasks" = "Ciclo auto finalizado sin tareas asignadas ejecutables";

@@ -86,6 +86,7 @@ struct ContentView: View {
     @State private var selectedAssigneeFilterKey = "all"
     @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
     @State private var isBatchRunning = false
+    @State private var isAutoCycleRunning = false
     @State private var selectedAgentConsoleAgentID: UUID?
     @State private var pmProjectName = ""
     @State private var pmProjectBrief = ""
@@ -403,6 +404,11 @@ struct ContentView: View {
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .help(L10n.string("Batch-run assigned To Do/In Progress tasks (Shift-Command-G)"))
                 .disabled(!canBatchRunAssignedTasks)
+                Button(isAutoCycleRunning ? L10n.string("Auto Cycling...") : L10n.string("Run Auto Cycle")) {
+                    runAutoCycleFromToolbar()
+                }
+                .help(L10n.string("Auto-assign then batch-run in repeated passes until queue is stable"))
+                .disabled(!canRunAutoCycle)
                 Button(L10n.string("New Task")) {
                     isShowingNewTaskSheet = true
                 }
@@ -478,6 +484,11 @@ struct ContentView: View {
                             runAssignedExecutionsFromToolbar()
                         }
                         .disabled(!canBatchRunAssignedTasks)
+
+                        Button(isAutoCycleRunning ? L10n.string("Auto Cycling...") : L10n.string("Run Auto Cycle")) {
+                            runAutoCycleFromToolbar()
+                        }
+                        .disabled(!canRunAutoCycle)
 
                         Divider()
 
@@ -1173,9 +1184,22 @@ struct ContentView: View {
 
     private func runAssignedExecutionsFromToolbar() {
         guard !isBatchRunning else { return }
+        guard !isAutoCycleRunning else { return }
         isBatchRunning = true
         viewModel.runAssignedTaskExecutionsInBackground { startedCount in
             isBatchRunning = false
+            if startedCount > 0 {
+                refreshTriageSelections()
+            }
+        }
+    }
+
+    private func runAutoCycleFromToolbar() {
+        guard !isAutoCycleRunning else { return }
+        guard !isBatchRunning else { return }
+        isAutoCycleRunning = true
+        viewModel.runAutoDispatchCycleInBackground { startedCount, _ in
+            isAutoCycleRunning = false
             if startedCount > 0 {
                 refreshTriageSelections()
             }
@@ -2006,7 +2030,19 @@ struct ContentView: View {
     }
 
     private var canBatchRunAssignedTasks: Bool {
-        Self.canBatchRunAssignedTasks(tasks: viewModel.tasks, isBatchRunning: isBatchRunning)
+        Self.canBatchRunAssignedTasks(
+            tasks: viewModel.tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
+    }
+
+    private var canRunAutoCycle: Bool {
+        Self.canRunAutoCycle(
+            tasks: viewModel.tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
     }
 
     private func runtimeSummary(for agent: AgentProfile) -> String {
@@ -2168,15 +2204,27 @@ struct ContentView: View {
 
     private static func canBatchRunAssignedTasks(
         tasks: [WorkTask],
-        isBatchRunning: Bool
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
     ) -> Bool {
-        guard !isBatchRunning else { return false }
+        guard !isBatchRunning, !isAutoCycleRunning else { return false }
         return tasks.contains { task in
             guard (task.status == .todo || task.status == .inProgress),
                   task.assignedAgentID != nil else {
                 return false
             }
             return !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private static func canRunAutoCycle(
+        tasks: [WorkTask],
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
+    ) -> Bool {
+        guard !isBatchRunning, !isAutoCycleRunning else { return false }
+        return tasks.contains { task in
+            task.status == .todo || task.status == .inProgress
         }
     }
 
@@ -5079,9 +5127,26 @@ private extension ContentView {
 
     static func testCanBatchRunAssignedTasks(
         tasks: [WorkTask],
-        isBatchRunning: Bool
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
     ) -> Bool {
-        canBatchRunAssignedTasks(tasks: tasks, isBatchRunning: isBatchRunning)
+        canBatchRunAssignedTasks(
+            tasks: tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
+    }
+
+    static func testCanRunAutoCycle(
+        tasks: [WorkTask],
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
+    ) -> Bool {
+        canRunAutoCycle(
+            tasks: tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
     }
 }
 
@@ -5404,9 +5469,26 @@ enum ContentViewTestHooks {
 
     static func canBatchRunAssignedTasks(
         tasks: [WorkTask],
-        isBatchRunning: Bool
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
     ) -> Bool {
-        return ContentView.testCanBatchRunAssignedTasks(tasks: tasks, isBatchRunning: isBatchRunning)
+        return ContentView.testCanBatchRunAssignedTasks(
+            tasks: tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
+    }
+
+    static func canRunAutoCycle(
+        tasks: [WorkTask],
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool
+    ) -> Bool {
+        return ContentView.testCanRunAutoCycle(
+            tasks: tasks,
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning
+        )
     }
 
     static func handleBoolResult(_ changed: Bool, onChanged: () -> Void) -> Bool {

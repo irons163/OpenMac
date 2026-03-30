@@ -402,3 +402,8 @@
 "All required PM skills are already covered by existing agents" = "필요한 PM 스킬은 이미 기존 에이전트가 모두 커버하고 있습니다";
 "Created %d PM bootstrap agent(s) for missing skills" = "누락 스킬을 위해 PM 부트스트랩 에이전트 %d개를 생성했습니다";
 "Auto Agent %d" = "자동 에이전트 %d";
+"Run Auto Cycle" = "자동 사이클 실행";
+"Auto Cycling..." = "자동 사이클 실행 중...";
+"Auto-assign then batch-run in repeated passes until queue is stable" = "자동 할당 후 큐가 안정될 때까지 반복 패스로 일괄 실행합니다.";
+"Auto cycle finished · %d pass(es) · %d started" = "자동 사이클 완료 · %d회 패스 · %d개 시작";
+"Auto cycle finished with no runnable assigned tasks" = "자동 사이클 완료, 실행 가능한 할당 작업이 없습니다";
