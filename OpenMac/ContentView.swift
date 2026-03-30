@@ -732,7 +732,6 @@ struct ContentView: View {
         } message: {
             Text(L10n.format("Delete \"%@\" and all tasks/agents in it? This cannot be undone.", viewModel.selectedBoardName))
         }
-        .environment(\.colorScheme, effectiveColorScheme)
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
     }
 
