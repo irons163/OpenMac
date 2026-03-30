@@ -3302,8 +3302,25 @@ final class KanbanBoardViewModel: ObservableObject {
 
         func finish() {
             if totalStarted > 0 {
-                lastBoardMessage = message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
-                lastBoardMessageSeverity = hadWarning ? .warning : .info
+                let remainingPreparation = prepareAssignedBatchRunQueue()
+                let remainingDetailsMissing = remainingPreparation.detailsMissingCount
+                let remainingDependencyBlocked = remainingPreparation.dependencyBlockedCount
+
+                var summaryParts: [String] = [
+                    message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
+                ]
+                if remainingDetailsMissing > 0 {
+                    summaryParts.append(message("%d missing details", remainingDetailsMissing))
+                }
+                if remainingDependencyBlocked > 0 {
+                    summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))
+                }
+                lastBoardMessage = summaryParts.joined(separator: " · ")
+                lastBoardMessageSeverity = (
+                    hadWarning ||
+                        remainingDetailsMissing > 0 ||
+                        remainingDependencyBlocked > 0
+                ) ? .warning : .info
             } else if lastBoardMessage == nil {
                 lastBoardMessage = message("Auto cycle finished with no runnable assigned tasks")
                 lastBoardMessageSeverity = .warning
@@ -3362,14 +3379,33 @@ final class KanbanBoardViewModel: ObservableObject {
 
         runAutoDispatchCycleInBackground(maxPasses: maxAutoCyclePasses) { startedExecutions, completedPasses in
             let cycleHadWarning = self.lastBoardMessageSeverity == .warning
-            self.lastBoardMessage = self.message(
+            let remainingPreparation = self.prepareAssignedBatchRunQueue()
+            let remainingDetailsMissing = remainingPreparation.detailsMissingCount
+            let remainingDependencyBlocked = remainingPreparation.dependencyBlockedCount
+
+            var summaryParts: [String] = [
+                self.message(
                 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)",
                 createdAgents,
                 createdTickets,
                 startedExecutions,
                 completedPasses
-            )
-            self.lastBoardMessageSeverity = (cycleHadWarning || startedExecutions == 0) ? .warning : .info
+                )
+            ]
+            if remainingDetailsMissing > 0 {
+                summaryParts.append(self.message("%d missing details", remainingDetailsMissing))
+            }
+            if remainingDependencyBlocked > 0 {
+                summaryParts.append(self.message("%d blocked by dependencies", remainingDependencyBlocked))
+            }
+
+            self.lastBoardMessage = summaryParts.joined(separator: " · ")
+            self.lastBoardMessageSeverity = (
+                cycleHadWarning ||
+                    startedExecutions == 0 ||
+                    remainingDetailsMissing > 0 ||
+                    remainingDependencyBlocked > 0
+            ) ? .warning : .info
             completion(createdAgents, createdTickets, startedExecutions, completedPasses)
         }
     }

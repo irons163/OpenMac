@@ -9155,6 +9155,54 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("auto cycle summary reports remaining dependency blockers after execution")
+    func runAutoDispatchCycleInBackgroundSummaryIncludesDependencyBlockers() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let runnable = WorkTask(
+            title: "Design Spec",
+            details: "Finalize spec",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: External API
+            Build implementation.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [runnable.id: .success(summary: "done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked, runnable],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 1)
+        #expect(passes == 2)
+        #expect(viewModel.lastBoardMessage?.contains("Auto cycle finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("auto cycle honors max pass limit")
     func runAutoDispatchCycleInBackgroundHonorsMaxPasses() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -9299,6 +9347,45 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.count == 1)
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+    }
+
+    @Test("pm autopilot summary reports dependency blockers left in backlog")
+    func runPMAutopilotInBackgroundSummaryIncludesDependencyBlockers() {
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Design Spec",
+                details: "Finalize UI spec",
+                requiredSkills: ["swiftui"],
+                storyPoints: 2
+            ),
+            PMPlannedTicket(
+                title: "Implementation",
+                details: """
+                Depends on: External API
+                Build implementation.
+                """,
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedExecutions: Int?
+        viewModel.runPMAutopilotInBackground(plannedTickets: plannedTickets) { _, _, executions, _ in
+            startedExecutions = executions
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedExecutions != nil })
+        #expect(startedExecutions == 1)
+        #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
     @Test("pm autopilot forwards max pass limit to auto cycle")
