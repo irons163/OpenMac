@@ -2301,6 +2301,22 @@ final class KanbanBoardViewModel: ObservableObject {
         return "\(message("Roadmap")) [\(message("Epic"))]: \(segments.joined(separator: " | "))"
     }
 
+    private func pmAutopilotOverallProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
+        guard !createdTasks.isEmpty else { return nil }
+        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
+        let total = createdTasks.count
+        guard total > 0 else { return nil }
+
+        let advanced = createdTasks.reduce(0) { partialResult, descriptor in
+            guard let status = statusByTaskID[descriptor.taskID] else {
+                return partialResult
+            }
+            return partialResult + (status == .todo ? 0 : 1)
+        }
+        let percent = Int(((Double(advanced) / Double(total)) * 100).rounded())
+        return "\(message("Roadmap")) [\(message("Total"))]: \(advanced)/\(total) (\(percent)%)"
+    }
+
     @discardableResult
     func createMissingAgentsForPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
@@ -3779,6 +3795,9 @@ final class KanbanBoardViewModel: ObservableObject {
             ]
             summaryParts.append(self.message("Total Milestones: %d", roadmapMilestoneCount))
             summaryParts.append(self.message("Total Epics: %d", roadmapEpicCount))
+            if let overallProgress = self.pmAutopilotOverallProgressSummary(createdTaskDescriptors) {
+                summaryParts.append(overallProgress)
+            }
             if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(createdTaskDescriptors) {
                 summaryParts.append(milestoneProgress)
             }
