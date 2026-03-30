@@ -413,3 +413,6 @@
 "PM autopilot requires at least one planned ticket" = "PM 오토파일럿은 최소 1개의 계획 티켓이 필요합니다";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 오토파일럿 완료 · %d 에이전트 · %d 티켓 · %d 실행 · %d 패스";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d개의 할당된 %@이(가) 의존성으로 막혀 있습니다. 배치 실행 전에 의존성을 해결하세요.";
+"Blocked" = "차단됨";
+"Blocked by dependencies: %@" = "의존성으로 차단됨: %@";
+"Task blocked by dependencies: %@" = "작업이 의존성으로 차단됨: %@";

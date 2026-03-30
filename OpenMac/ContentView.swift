@@ -127,41 +127,7 @@ struct ContentView: View {
         NavigationSplitView {
             List {
                 ForEach(viewModel.agents) { agent in
-                    AgentRowView(
-                        name: agent.name,
-                        skillsText: agent.skills.sorted().joined(separator: ", "),
-                        runtimeText: runtimeSummary(for: agent),
-                        loadCount: viewModel.activeTaskCount(for: agent.id),
-                        maxLoad: agent.maxConcurrentTasks,
-                        loadPercent: viewModel.loadPercent(for: agent.id),
-                        loadProgress: min(1.0, viewModel.loadRatio(for: agent.id)),
-                        isOverloaded: viewModel.isAgentOverloaded(agent.id),
-                        isRunning: viewModel.isAgentExecutionRunning(agent.id),
-                        recentEventMessage: viewModel.executionEvents(for: agent.id, limit: 1).first?.message,
-                        isSelected: selectedAgentConsoleAgentID == agent.id
-                    )
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedAgentConsoleAgentID = agent.id
-                    }
-                    .listRowBackground(
-                        selectedAgentConsoleAgentID == agent.id
-                            ? BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme)
-                            : Color.clear
-                    )
-                    .contextMenu {
-                        Button(L10n.string("Edit Agent")) {
-                            openEditAgent(agent)
-                        }
-                        Button(L10n.string("Unassign Todo Tasks")) {
-                            unassignTodoTasks(for: agent.id)
-                        }
-                        .disabled(!hasAssignedTodoTasks(for: agent.id))
-                        Button(L10n.string("Remove Agent"), role: .destructive) {
-                            removeAgent(agent.id)
-                        }
-                    }
+                    agentSidebarRow(for: agent)
                 }
                 .onDelete(perform: deleteAgents)
             }
@@ -229,96 +195,7 @@ struct ContentView: View {
                 }
 
                 if let message = viewModel.lastBoardMessage {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(message)
-                                .font(.callout)
-                                .foregroundStyle(
-                                    BoardMessageColorPalette.color(
-                                        for: viewModel.lastBoardMessageSeverity,
-                                        scheme: effectiveColorScheme
-                                    )
-                                )
-                                .textSelection(.enabled)
-                            if developerModeEnabled {
-                                Spacer()
-                                Button(L10n.string("Copy")) {
-                                    copyToPasteboard(message)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                        }
-
-                        if developerModeEnabled,
-                           let loginCommand = viewModel.lastCodexLoginCommand,
-                           !loginCommand.isEmpty {
-                           HStack {
-                                Text(L10n.string("Codex Login Command"))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-                                Spacer()
-                                Button(L10n.string("Copy Command")) {
-                                    copyToPasteboard(loginCommand)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-
-                            Text(loginCommand)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .background(
-                                    BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
-                                    in: RoundedRectangle(cornerRadius: 10)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(
-                                            BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
-                                            lineWidth: 1
-                                        )
-                                )
-                        }
-
-                        if developerModeEnabled,
-                           let debugLog = viewModel.lastExecutionDebugLog,
-                           !debugLog.isEmpty {
-                           HStack {
-                                Text(L10n.string("Execution Debug Log"))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-                                Spacer()
-                                Button(L10n.string("Copy Log")) {
-                                    copyToPasteboard(debugLog)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-
-                            ScrollView {
-                                Text(debugLog)
-                                    .font(.caption.monospaced())
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxHeight: 190)
-                            .padding(10)
-                            .background(
-                                BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
-                                in: RoundedRectangle(cornerRadius: 10)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(
-                                        BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
-                                        lineWidth: 1
-                                    )
-                            )
-                        }
-                    }
+                    boardMessageSection(message)
                 }
 
                 if let selectedAgent = selectedAgentForConsole {
@@ -336,47 +213,7 @@ struct ContentView: View {
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(KanbanStatus.allCases) { status in
-                            KanbanColumnView(
-                                status: status,
-                                tasks: filteredBoardTasks(in: status),
-                                wipLimit: viewModel.wipLimit(for: status),
-                                assigneeName: { task in
-                                    viewModel.agentName(for: task.assignedAgentID)
-                                },
-                                assignmentReason: { task in
-                                    viewModel.assignmentReason(for: task.id)
-                                },
-                                moveBackward: { task in
-                                    guard let previous = status.previous else { return }
-                                    viewModel.moveTask(task.id, to: previous)
-                                },
-                                moveForward: { task in
-                                    guard let next = status.next else { return }
-                                    viewModel.moveTask(task.id, to: next)
-                                },
-                                onEditTask: openEditTask,
-                                onDeleteTask: removeTask,
-                                onDuplicateTask: duplicateTask,
-                                onUnassignTask: unassignTask,
-                                onAutoAssignTask: autoAssignTask,
-                                onRunTaskExecution: runTaskExecution,
-                                onRetryTaskExecution: retryTaskExecution,
-                                assignableAgents: { task in
-                                    viewModel.assignableAgents(for: task.id)
-                                },
-                                reassignableAgents: { task in
-                                    viewModel.reassignableAgents(for: task.id)
-                                },
-                                onManualAssignTask: assignTaskToAgent,
-                                onReassignTask: reassignTaskToAgent,
-                                moveToBoardTargets: moveTaskBoardTargets,
-                                onMoveTaskToBoard: moveTaskToBoard,
-                                onCopyTaskToBoard: copyTaskToBoard,
-                                onShowExecutionDetails: openExecutionDetails,
-                                onDropTask: { taskID in
-                                    viewModel.handleDrop(taskID, to: status)
-                                }
-                            )
+                            kanbanColumn(for: status)
                         }
                     }
                     .padding(.vertical, 4)
@@ -2151,6 +1988,187 @@ struct ContentView: View {
         )
     }
 
+    @ViewBuilder
+    private func boardMessageSection(_ message: String) -> some View {
+        let messageColor = BoardMessageColorPalette.color(
+            for: viewModel.lastBoardMessageSeverity,
+            scheme: effectiveColorScheme
+        )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(messageColor)
+                    .textSelection(.enabled)
+                if developerModeEnabled {
+                    Spacer()
+                    Button(L10n.string("Copy")) {
+                        copyToPasteboard(message)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            if developerModeEnabled,
+               let loginCommand = viewModel.lastCodexLoginCommand,
+               !loginCommand.isEmpty {
+                HStack {
+                    Text(L10n.string("Codex Login Command"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    Spacer()
+                    Button(L10n.string("Copy Command")) {
+                        copyToPasteboard(loginCommand)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                Text(loginCommand)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(
+                        BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
+                                lineWidth: 1
+                            )
+                    )
+            }
+
+            if developerModeEnabled,
+               let debugLog = viewModel.lastExecutionDebugLog,
+               !debugLog.isEmpty {
+                HStack {
+                    Text(L10n.string("Execution Debug Log"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    Spacer()
+                    Button(L10n.string("Copy Log")) {
+                        copyToPasteboard(debugLog)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                ScrollView {
+                    Text(debugLog)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 190)
+                .padding(10)
+                .background(
+                    BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
+                            lineWidth: 1
+                        )
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func agentSidebarRow(for agent: AgentProfile) -> some View {
+        let isSelected = selectedAgentConsoleAgentID == agent.id
+        AgentRowView(
+            name: agent.name,
+            skillsText: agent.skills.sorted().joined(separator: ", "),
+            runtimeText: runtimeSummary(for: agent),
+            loadCount: viewModel.activeTaskCount(for: agent.id),
+            maxLoad: agent.maxConcurrentTasks,
+            loadPercent: viewModel.loadPercent(for: agent.id),
+            loadProgress: min(1.0, viewModel.loadRatio(for: agent.id)),
+            isOverloaded: viewModel.isAgentOverloaded(agent.id),
+            isRunning: viewModel.isAgentExecutionRunning(agent.id),
+            recentEventMessage: viewModel.executionEvents(for: agent.id, limit: 1).first?.message,
+            isSelected: isSelected
+        )
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedAgentConsoleAgentID = agent.id
+        }
+        .listRowBackground(
+            isSelected
+                ? BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme)
+                : Color.clear
+        )
+        .contextMenu {
+            Button(L10n.string("Edit Agent")) {
+                openEditAgent(agent)
+            }
+            Button(L10n.string("Unassign Todo Tasks")) {
+                unassignTodoTasks(for: agent.id)
+            }
+            .disabled(!hasAssignedTodoTasks(for: agent.id))
+            Button(L10n.string("Remove Agent"), role: .destructive) {
+                removeAgent(agent.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func kanbanColumn(for status: KanbanStatus) -> some View {
+        KanbanColumnView(
+            status: status,
+            tasks: filteredBoardTasks(in: status),
+            wipLimit: viewModel.wipLimit(for: status),
+            assigneeName: { task in
+                viewModel.agentName(for: task.assignedAgentID)
+            },
+            assignmentReason: { task in
+                viewModel.assignmentReason(for: task.id)
+            },
+            dependencyBlockedReason: { task in
+                viewModel.dependencyBlockReason(for: task.id)
+            },
+            moveBackward: { task in
+                guard let previous = status.previous else { return }
+                viewModel.moveTask(task.id, to: previous)
+            },
+            moveForward: { task in
+                guard let next = status.next else { return }
+                viewModel.moveTask(task.id, to: next)
+            },
+            onEditTask: openEditTask,
+            onDeleteTask: removeTask,
+            onDuplicateTask: duplicateTask,
+            onUnassignTask: unassignTask,
+            onAutoAssignTask: autoAssignTask,
+            onRunTaskExecution: runTaskExecution,
+            onRetryTaskExecution: retryTaskExecution,
+            assignableAgents: { task in
+                viewModel.assignableAgents(for: task.id)
+            },
+            reassignableAgents: { task in
+                viewModel.reassignableAgents(for: task.id)
+            },
+            onManualAssignTask: assignTaskToAgent,
+            onReassignTask: reassignTaskToAgent,
+            moveToBoardTargets: moveTaskBoardTargets,
+            onMoveTaskToBoard: moveTaskToBoard,
+            onCopyTaskToBoard: copyTaskToBoard,
+            onShowExecutionDetails: openExecutionDetails,
+            onDropTask: { taskID in
+                viewModel.handleDrop(taskID, to: status)
+            }
+        )
+    }
+
     private func runtimeSummary(for agent: AgentProfile) -> String {
         guard let runtimeProfile = agent.runtimeProfile else {
             return L10n.string("Runtime: Disabled")
@@ -2796,6 +2814,7 @@ private struct KanbanColumnView: View {
     let wipLimit: Int?
     let assigneeName: (WorkTask) -> String
     let assignmentReason: (WorkTask) -> String?
+    let dependencyBlockedReason: (WorkTask) -> String?
     let moveBackward: (WorkTask) -> Void
     let moveForward: (WorkTask) -> Void
     let onEditTask: (WorkTask) -> Void
@@ -2847,45 +2866,7 @@ private struct KanbanColumnView: View {
                     .background(emptyStateBackground, in: RoundedRectangle(cornerRadius: 12))
             } else {
                 ForEach(tasks) { task in
-                    TaskCardView(
-                        task: task,
-                        assigneeName: assigneeName(task),
-                        assignmentReason: assignmentReason(task),
-                        canMoveBackward: status.previous != nil,
-                        canMoveForward: status.next != nil,
-                        canUnassign: task.assignedAgentID != nil && task.status != .done,
-                        canAutoAssign: task.status == .todo && task.assignedAgentID == nil,
-                        canRunAgent: task.assignedAgentID != nil && task.status != .done,
-                        canRetryAgent: task.assignedAgentID != nil && task.executionRecord?.status == .failed && task.status != .done,
-                        executionRecord: task.executionRecord,
-                        manualAssignableAgents: assignableAgents(task),
-                        reassignableAgents: reassignableAgents(task),
-                        moveToBoardTargets: moveToBoardTargets,
-                        onEdit: { onEditTask(task) },
-                        onAutoAssign: { onAutoAssignTask(task.id) },
-                        onRunAgent: { onRunTaskExecution(task.id) },
-                        onRetryAgent: { onRetryTaskExecution(task.id) },
-                        onManualAssign: { agentID in
-                            onManualAssignTask(task.id, agentID)
-                        },
-                        onReassign: { agentID in
-                            onReassignTask(task.id, agentID)
-                        },
-                        onUnassign: { onUnassignTask(task.id) },
-                        onDuplicate: { onDuplicateTask(task.id) },
-                        onDelete: { onDeleteTask(task.id) },
-                        onMoveToBoard: { boardID in
-                            onMoveTaskToBoard(task.id, boardID)
-                        },
-                        onCopyToBoard: { boardID in
-                            onCopyTaskToBoard(task.id, boardID)
-                        },
-                        onShowExecutionDetails: {
-                            onShowExecutionDetails(task)
-                        },
-                        onMoveBackward: { moveBackward(task) },
-                        onMoveForward: { moveForward(task) }
-                    )
+                    taskCard(for: task)
                 }
             }
 
@@ -2911,6 +2892,50 @@ private struct KanbanColumnView: View {
         }
     }
 
+    private func taskCard(for task: WorkTask) -> some View {
+        let blockedReason = dependencyBlockedReason(task)
+        return TaskCardView(
+            task: task,
+            assigneeName: assigneeName(task),
+            assignmentReason: assignmentReason(task),
+            dependencyBlockedReason: blockedReason,
+            canMoveBackward: status.previous != nil,
+            canMoveForward: status.next != nil,
+            canUnassign: task.assignedAgentID != nil && task.status != .done,
+            canAutoAssign: task.status == .todo && task.assignedAgentID == nil,
+            canRunAgent: task.assignedAgentID != nil && task.status != .done && blockedReason == nil,
+            canRetryAgent: task.assignedAgentID != nil && task.executionRecord?.status == .failed && task.status != .done,
+            executionRecord: task.executionRecord,
+            manualAssignableAgents: assignableAgents(task),
+            reassignableAgents: reassignableAgents(task),
+            moveToBoardTargets: moveToBoardTargets,
+            onEdit: { onEditTask(task) },
+            onAutoAssign: { onAutoAssignTask(task.id) },
+            onRunAgent: { onRunTaskExecution(task.id) },
+            onRetryAgent: { onRetryTaskExecution(task.id) },
+            onManualAssign: { agentID in
+                onManualAssignTask(task.id, agentID)
+            },
+            onReassign: { agentID in
+                onReassignTask(task.id, agentID)
+            },
+            onUnassign: { onUnassignTask(task.id) },
+            onDuplicate: { onDuplicateTask(task.id) },
+            onDelete: { onDeleteTask(task.id) },
+            onMoveToBoard: { boardID in
+                onMoveTaskToBoard(task.id, boardID)
+            },
+            onCopyToBoard: { boardID in
+                onCopyTaskToBoard(task.id, boardID)
+            },
+            onShowExecutionDetails: {
+                onShowExecutionDetails(task)
+            },
+            onMoveBackward: { moveBackward(task) },
+            onMoveForward: { moveForward(task) }
+        )
+    }
+
     private var columnColor: Color {
         BoardSurfacePalette.color(for: status, scheme: colorScheme)
     }
@@ -2933,6 +2958,7 @@ private struct TaskCardView: View {
     let task: WorkTask
     let assigneeName: String
     let assignmentReason: String?
+    let dependencyBlockedReason: String?
     let canMoveBackward: Bool
     let canMoveForward: Bool
     let canUnassign: Bool
@@ -2993,6 +3019,24 @@ private struct TaskCardView: View {
                     .font(.caption2)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
                     .lineLimit(3)
+            }
+
+            if let dependencyBlockedReason {
+                HStack(spacing: 6) {
+                    Text(L10n.string("Blocked"))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            BoardSemanticTextPalette.color(for: .error, scheme: colorScheme).opacity(0.14),
+                            in: Capsule()
+                        )
+                    Text(dependencyBlockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
+                        .lineLimit(2)
+                }
             }
 
             if let executionRecord {
@@ -5360,6 +5404,7 @@ enum ContentViewTestHooks {
             task: task,
             assigneeName: "Agent",
             assignmentReason: nil,
+            dependencyBlockedReason: nil,
             canMoveBackward: false,
             canMoveForward: true,
             canUnassign: false,
@@ -5404,6 +5449,7 @@ enum ContentViewTestHooks {
             task: task,
             assigneeName: "Agent",
             assignmentReason: nil,
+            dependencyBlockedReason: nil,
             canMoveBackward: false,
             canMoveForward: true,
             canUnassign: false,
@@ -6078,6 +6124,7 @@ enum ContentViewTestHooks {
             wipLimit: nil,
             assigneeName: { _ in "Unassigned" },
             assignmentReason: { _ in nil },
+            dependencyBlockedReason: { _ in nil },
             moveBackward: { _ in },
             moveForward: { _ in },
             onEditTask: { _ in },
@@ -6103,6 +6150,7 @@ enum ContentViewTestHooks {
             wipLimit: 2,
             assigneeName: { _ in "B" },
             assignmentReason: { _ in "skills[qa]" },
+            dependencyBlockedReason: { _ in nil },
             moveBackward: { _ in },
             moveForward: { _ in },
             onEditTask: { _ in },
@@ -6127,6 +6175,7 @@ enum ContentViewTestHooks {
             task: todoTask,
             assigneeName: "A",
             assignmentReason: "skills[swiftui]",
+            dependencyBlockedReason: nil,
             canMoveBackward: false,
             canMoveForward: true,
             canUnassign: true,
@@ -6156,6 +6205,7 @@ enum ContentViewTestHooks {
             task: reviewTask,
             assigneeName: "B",
             assignmentReason: nil,
+            dependencyBlockedReason: nil,
             canMoveBackward: true,
             canMoveForward: true,
             canUnassign: true,

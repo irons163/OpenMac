@@ -413,3 +413,6 @@
 "PM autopilot requires at least one planned ticket" = "PM autopilot requires at least one planned ticket";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.";
+"Blocked" = "Blocked";
+"Blocked by dependencies: %@" = "Blocked by dependencies: %@";
+"Task blocked by dependencies: %@" = "Task blocked by dependencies: %@";

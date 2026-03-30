@@ -7560,6 +7560,36 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("run task execution blocks when unresolved dependencies remain")
+    func runTaskExecutionBlocksOnUnresolvedDependencies() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let blockedTask = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: Missing Spec
+            Implement core feature.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blockedTask],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        let blockedReason = viewModel.dependencyBlockReason(for: blockedTask.id)
+        let executed = viewModel.runTaskExecution(blockedTask.id)
+
+        #expect(blockedReason == "Blocked by dependencies: Missing Spec")
+        #expect(!executed)
+        #expect(viewModel.tasks.first?.executionRecord == nil)
+        #expect(viewModel.lastBoardMessage == "Task blocked by dependencies: Missing Spec")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("batch run executes assigned runnable tasks and skips empty details")
     func batchRunAssignedExecutionsSkipsEmptyDetails() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)

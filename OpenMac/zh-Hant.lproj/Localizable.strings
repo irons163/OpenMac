@@ -413,3 +413,6 @@
 "PM autopilot requires at least one planned ticket" = "PM 自動駕駛至少需要一張已規劃票";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 自動駕駛完成 · %d 位代理 · %d 張票 · %d 次執行 · %d 輪";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d 個已分派%@受依賴阻塞。請先解決依賴後再批次執行。";
+"Blocked" = "阻塞";
+"Blocked by dependencies: %@" = "受依賴阻塞：%@";
+"Task blocked by dependencies: %@" = "任務受依賴阻塞：%@";

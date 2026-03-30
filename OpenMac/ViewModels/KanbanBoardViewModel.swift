@@ -2929,6 +2929,11 @@ final class KanbanBoardViewModel: ObservableObject {
         let dependencyBlockedCount: Int
     }
 
+    private struct DependencyReference {
+        let normalizedTitle: String
+        let displayTitle: String
+    }
+
     private static func normalizedDependencyTitle(_ raw: String) -> String {
         raw
             .trimmingCharacters(
@@ -2940,12 +2945,16 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private static func dependencyTitles(from details: String) -> [String] {
+        parsedDependencyReferences(from: details).map(\.normalizedTitle)
+    }
+
+    private static func parsedDependencyReferences(from details: String) -> [DependencyReference] {
         let lines = details
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        var dependencies: [String] = []
+        var dependencies: [DependencyReference] = []
         for line in lines {
             guard let separatorIndex = line.firstIndex(where: { $0 == ":" || $0 == "：" }) else {
                 continue
@@ -2965,13 +2974,36 @@ final class KanbanBoardViewModel: ObservableObject {
             let payload = line[line.index(after: separatorIndex)...]
             let parsed = payload
                 .split(separator: ",")
-                .map { normalizedDependencyTitle(String($0)) }
-                .filter { !$0.isEmpty && $0 != "none" && $0 != "無" && $0 != "无" }
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { rawDependency in
+                    let normalized = normalizedDependencyTitle(rawDependency)
+                    return DependencyReference(
+                        normalizedTitle: normalized,
+                        displayTitle: rawDependency.trimmingCharacters(
+                            in: CharacterSet.whitespacesAndNewlines.union(
+                                CharacterSet(charactersIn: "\"'`•-")
+                            )
+                        )
+                    )
+                }
+                .filter {
+                    !$0.normalizedTitle.isEmpty &&
+                        $0.normalizedTitle != "none" &&
+                        $0.normalizedTitle != "無" &&
+                        $0.normalizedTitle != "无"
+                }
 
             dependencies.append(contentsOf: parsed)
         }
 
-        return Array(Set(dependencies)).sorted()
+        var uniqueByNormalized: [String: String] = [:]
+        for dependency in dependencies where uniqueByNormalized[dependency.normalizedTitle] == nil {
+            uniqueByNormalized[dependency.normalizedTitle] = dependency.displayTitle
+        }
+        return uniqueByNormalized.keys.sorted().compactMap { normalizedTitle in
+            guard let displayTitle = uniqueByNormalized[normalizedTitle] else { return nil }
+            return DependencyReference(normalizedTitle: normalizedTitle, displayTitle: displayTitle)
+        }
     }
 
     private static func isDependencyCompleted(_ task: WorkTask) -> Bool {
@@ -2982,6 +3014,37 @@ final class KanbanBoardViewModel: ObservableObject {
             return true
         }
         return false
+    }
+
+    private func dependencyCompletionMap() -> [String: Bool] {
+        tasks.reduce(into: [String: Bool]()) { partialResult, task in
+            let normalizedTitle = Self.normalizedDependencyTitle(task.title)
+            guard !normalizedTitle.isEmpty else { return }
+            let existing = partialResult[normalizedTitle] ?? false
+            partialResult[normalizedTitle] = existing || Self.isDependencyCompleted(task)
+        }
+    }
+
+    func unresolvedDependencies(for taskID: UUID) -> [String] {
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return [] }
+        let dependencies = Self.parsedDependencyReferences(from: task.details)
+        guard !dependencies.isEmpty else { return [] }
+        let completionByTitle = dependencyCompletionMap()
+
+        return dependencies
+            .filter { dependency in
+                guard let isCompleted = completionByTitle[dependency.normalizedTitle] else {
+                    return true
+                }
+                return !isCompleted
+            }
+            .map(\.displayTitle)
+    }
+
+    func dependencyBlockReason(for taskID: UUID) -> String? {
+        let unresolved = unresolvedDependencies(for: taskID)
+        guard !unresolved.isEmpty else { return nil }
+        return message("Blocked by dependencies: %@", unresolved.joined(separator: ", "))
     }
 
     private func prepareAssignedBatchRunQueue() -> BatchRunPreparation {
@@ -3000,12 +3063,7 @@ final class KanbanBoardViewModel: ObservableObject {
             $0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.count
 
-        let completionByTitle = tasks.reduce(into: [String: Bool]()) { partialResult, task in
-            let normalizedTitle = Self.normalizedDependencyTitle(task.title)
-            guard !normalizedTitle.isEmpty else { return }
-            let existing = partialResult[normalizedTitle] ?? false
-            partialResult[normalizedTitle] = existing || Self.isDependencyCompleted(task)
-        }
+        let completionByTitle = dependencyCompletionMap()
 
         var runnableTaskIDs: [UUID] = []
         runnableTaskIDs.reserveCapacity(assignedQueue.count)
@@ -3016,14 +3074,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 continue
             }
 
-            let dependencies = Self.dependencyTitles(from: task.details)
+            let dependencies = Self.parsedDependencyReferences(from: task.details)
             guard !dependencies.isEmpty else {
                 runnableTaskIDs.append(task.id)
                 continue
             }
 
             let isBlocked = dependencies.contains { dependencyTitle in
-                guard let isCompleted = completionByTitle[dependencyTitle] else {
+                guard let isCompleted = completionByTitle[dependencyTitle.normalizedTitle] else {
                     return true
                 }
                 return !isCompleted
@@ -3648,6 +3706,12 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         guard !requiresTaskDetails || !tasks[taskIndex].details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             lastBoardMessage = message("Task details are required before running this task")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+        let unresolvedDependencies = unresolvedDependencies(for: taskID)
+        guard unresolvedDependencies.isEmpty else {
+            lastBoardMessage = message("Task blocked by dependencies: %@", unresolvedDependencies.joined(separator: ", "))
             lastBoardMessageSeverity = .warning
             return nil
         }
