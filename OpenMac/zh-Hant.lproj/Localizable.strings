@@ -345,3 +345,5 @@
 "Project brief is required" = "專案說明為必填";
 "PM planner could not generate actionable tickets" = "PM 規劃器無法產生可執行的 ticket";
 "PM planner created %d ticket(s)" = "PM 規劃器已建立 %d 個 ticket";
+"Create New Board for Plan" = "為此計畫建立新看板";
+"PM Project" = "PM 專案";

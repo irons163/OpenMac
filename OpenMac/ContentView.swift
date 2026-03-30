@@ -78,6 +78,7 @@ struct ContentView: View {
     @State private var pmProjectName = ""
     @State private var pmProjectBrief = ""
     @State private var pmAutoAssignAfterCreate = true
+    @State private var pmCreateNewBoardForPlan = true
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
@@ -611,6 +612,7 @@ struct ContentView: View {
                 projectName: $pmProjectName,
                 projectBrief: $pmProjectBrief,
                 autoAssignAfterCreate: $pmAutoAssignAfterCreate,
+                createNewBoardForPlan: $pmCreateNewBoardForPlan,
                 planSummary: pmPlanSummary,
                 plannedTickets: pmPlannedTickets,
                 boardMessage: viewModel.lastBoardMessage,
@@ -879,6 +881,7 @@ struct ContentView: View {
         pmProjectName = viewModel.selectedBoardName
         pmProjectBrief = ""
         pmAutoAssignAfterCreate = true
+        pmCreateNewBoardForPlan = true
         pmPlanSummary = ""
         pmPlannedTickets = []
         isShowingPMPlannerSheet = true
@@ -906,6 +909,16 @@ struct ContentView: View {
     }
 
     private func createPMTicketsFromSheet() {
+        if pmCreateNewBoardForPlan {
+            let resolvedBoardName = Self.uniquePMBoardName(
+                baseName: pmProjectName,
+                existingNames: viewModel.boards.map(\.name)
+            )
+            guard viewModel.createBoard(name: resolvedBoardName) else { return }
+            pmProjectName = resolvedBoardName
+            handleBoardContextChanged()
+        }
+
         let createdCount = viewModel.addPlannedTickets(pmPlannedTickets, autoAssign: pmAutoAssignAfterCreate)
         guard createdCount > 0 else { return }
         refreshTriageSelections()
@@ -1179,6 +1192,25 @@ struct ContentView: View {
         let slug = rawTokens.joined(separator: "-")
         let resolvedSlug = slug.isEmpty ? "board" : slug
         return "openmac-\(resolvedSlug)-board.json"
+    }
+
+    fileprivate static func uniquePMBoardName(baseName: String, existingNames: [String]) -> String {
+        let normalizedExisting = Set(existingNames.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let trimmedBase = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBase = trimmedBase.isEmpty ? L10n.string("PM Project") : trimmedBase
+        let normalizedBase = resolvedBase.lowercased()
+        if !normalizedExisting.contains(normalizedBase) {
+            return resolvedBase
+        }
+
+        var suffix = 2
+        while true {
+            let candidate = "\(resolvedBase) (\(suffix))"
+            if !normalizedExisting.contains(candidate.lowercased()) {
+                return candidate
+            }
+            suffix += 1
+        }
     }
 
     private func assignManually(taskID: UUID) {
@@ -2918,6 +2950,7 @@ private struct PMPlannerSheet: View {
     @Binding var projectName: String
     @Binding var projectBrief: String
     @Binding var autoAssignAfterCreate: Bool
+    @Binding var createNewBoardForPlan: Bool
     let planSummary: String
     let plannedTickets: [PMPlannedTicket]
     let boardMessage: String?
@@ -2956,6 +2989,7 @@ private struct PMPlannerSheet: View {
                 .foregroundStyle(.secondary)
 
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
+            Toggle(L10n.string("Create New Board for Plan"), isOn: $createNewBoardForPlan)
 
             if !planSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -4865,6 +4899,10 @@ enum ContentViewTestHooks {
 
     static func workspaceImportStrategy(for modalResponse: NSApplication.ModalResponse) -> WorkspaceImportStrategy? {
         ContentView.workspaceImportStrategy(for: modalResponse)
+    }
+
+    static func uniquePMBoardName(baseName: String, existingNames: [String]) -> String {
+        ContentView.uniquePMBoardName(baseName: baseName, existingNames: existingNames)
     }
 
     static func applyTaskEdits(

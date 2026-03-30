@@ -4179,6 +4179,27 @@ struct ContentViewLogicTests {
         #expect(buttonTitles == ["Merge", "Replace", "Cancel"])
     }
 
+    @Test("pm board naming helper resolves default and duplicate names")
+    func pmBoardNamingHelperCoverage() {
+        let fallback = ContentViewTestHooks.uniquePMBoardName(
+            baseName: "   ",
+            existingNames: []
+        )
+        #expect(fallback == "PM Project")
+
+        let direct = ContentViewTestHooks.uniquePMBoardName(
+            baseName: "Website Revamp",
+            existingNames: ["Default Board"]
+        )
+        #expect(direct == "Website Revamp")
+
+        let duplicated = ContentViewTestHooks.uniquePMBoardName(
+            baseName: "Website Revamp",
+            existingNames: ["website revamp", "Website Revamp (2)"]
+        )
+        #expect(duplicated == "Website Revamp (3)")
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
