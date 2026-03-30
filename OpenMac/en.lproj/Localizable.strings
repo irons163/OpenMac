@@ -409,6 +409,7 @@
 "Auto cycle finished · %d pass(es) · %d started" = "Auto cycle finished · %d pass(es) · %d started";
 "Auto cycle finished with no runnable assigned tasks" = "Auto cycle finished with no runnable assigned tasks";
 "Autopilot Create + Run" = "Autopilot Create + Run";
+"Autopilot Max Passes: %d" = "Autopilot Max Passes: %d";
 "PM autopilot requires at least one planned ticket" = "PM autopilot requires at least one planned ticket";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.";

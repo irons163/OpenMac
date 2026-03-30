@@ -32,6 +32,7 @@ struct ContentView: View {
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
     @AppStorage(AppLanguageSettings.userDefaultsKey) private var appLanguageOverrideRawValue = AppLanguageSettings.systemValue
     @AppStorage("developerModeEnabled") private var developerModeEnabled = false
+    @AppStorage("autoCycleMaxPasses") private var autoCycleMaxPasses = 3
     @AppStorage(CodexProjectsDirectorySettings.userDefaultsKey) private var codexProjectsDirectoryPath = ""
     @StateObject private var viewModel: KanbanBoardViewModel
 
@@ -644,6 +645,7 @@ struct ContentView: View {
                 projectBrief: $pmProjectBrief,
                 autoAssignAfterCreate: $pmAutoAssignAfterCreate,
                 createNewBoardForPlan: $pmCreateNewBoardForPlan,
+                autopilotMaxPasses: $autoCycleMaxPasses,
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
                 selectedTemplateID: $pmSelectedTemplateID,
@@ -1100,7 +1102,8 @@ struct ContentView: View {
         isAutoCycleRunning = true
         viewModel.runPMAutopilotInBackground(
             plannedTickets: pmPlannedTickets,
-            autoAssign: true
+            autoAssign: true,
+            maxAutoCyclePasses: autoCycleMaxPasses
         ) { _, createdTickets, _, _ in
             isAutoCycleRunning = false
             if createdTickets > 0 {
@@ -1241,7 +1244,7 @@ struct ContentView: View {
         guard !isAutoCycleRunning else { return }
         guard !isBatchRunning else { return }
         isAutoCycleRunning = true
-        viewModel.runAutoDispatchCycleInBackground { startedCount, _ in
+        viewModel.runAutoDispatchCycleInBackground(maxPasses: autoCycleMaxPasses) { startedCount, _ in
             isAutoCycleRunning = false
             if startedCount > 0 {
                 refreshTriageSelections()
@@ -3549,6 +3552,7 @@ private struct PMPlannerSheet: View {
     @Binding var projectBrief: String
     @Binding var autoAssignAfterCreate: Bool
     @Binding var createNewBoardForPlan: Bool
+    @Binding var autopilotMaxPasses: Int
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
     @Binding var selectedTemplateID: String
@@ -3679,6 +3683,11 @@ private struct PMPlannerSheet: View {
 
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
             Toggle(L10n.string("Create New Board for Plan"), isOn: $createNewBoardForPlan)
+            Stepper(
+                L10n.format("Autopilot Max Passes: %d", max(1, min(12, autopilotMaxPasses))),
+                value: $autopilotMaxPasses,
+                in: 1 ... 12
+            )
 
             if !planSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {

@@ -9038,6 +9038,40 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("auto cycle honors max pass limit")
+    func runAutoDispatchCycleInBackgroundHonorsMaxPasses() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Auto cycle limited",
+            details: "Run once",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "ok")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground(maxPasses: 1) { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 1)
+        #expect(passes == 1)
+    }
+
     @Test("auto cycle auto-assigns eligible todo work before executing")
     func runAutoDispatchCycleInBackgroundAutoAssignsBeforeRun() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -9148,6 +9182,37 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.count == 1)
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+    }
+
+    @Test("pm autopilot forwards max pass limit to auto cycle")
+    func runPMAutopilotInBackgroundHonorsMaxPasses() {
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Core UI",
+                details: "Implement views",
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var completedPasses: Int?
+        viewModel.runPMAutopilotInBackground(
+            plannedTickets: plannedTickets,
+            autoAssign: true,
+            maxAutoCyclePasses: 1
+        ) { _, _, _, passes in
+            completedPasses = passes
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { completedPasses != nil })
+        #expect(completedPasses == 1)
     }
 
     @Test("pm autopilot warns when no planned tickets are provided")
