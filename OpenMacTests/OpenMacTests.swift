@@ -9414,6 +9414,47 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
     }
 
+    @Test("auto cycle can auto-create missing dependency tasks and unblock execution")
+    func runAutoDispatchCycleInBackgroundAutoCreatesMissingDependencies() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: External API
+            Build implementation.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground(
+            autoCreateMissingDependencies: true
+        ) { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 2)
+        #expect(passes == 2)
+        let dependencyTask = viewModel.tasks.first(where: { $0.title == "External API" })
+        #expect(dependencyTask != nil)
+        #expect(dependencyTask?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.title == "Implementation" })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
     @Test("auto cycle preserves warning when no runnable assigned tasks exist")
     func runAutoDispatchCycleInBackgroundReportsNoRunnableTasks() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -9521,7 +9562,11 @@ struct KanbanPersistenceTests {
         )
 
         var startedExecutions: Int?
-        viewModel.runPMAutopilotInBackground(plannedTickets: plannedTickets) { _, _, executions, _ in
+        viewModel.runPMAutopilotInBackground(
+            plannedTickets: plannedTickets,
+            autoAssign: true,
+            autoCreateMissingDependenciesDuringCycle: false
+        ) { _, _, executions, _ in
             startedExecutions = executions
         }
 
@@ -9530,6 +9575,50 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
         #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm autopilot auto-creates missing dependencies to unblock chained tickets")
+    func runPMAutopilotInBackgroundAutoCreatesDependencies() {
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Design Spec",
+                details: "Finalize UI spec",
+                requiredSkills: ["swiftui"],
+                storyPoints: 2
+            ),
+            PMPlannedTicket(
+                title: "Implementation",
+                details: """
+                Depends on: External API
+                Build implementation.
+                """,
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedExecutions: Int?
+        viewModel.runPMAutopilotInBackground(
+            plannedTickets: plannedTickets,
+            autoAssign: true,
+            autoCreateMissingDependenciesDuringCycle: true
+        ) { _, _, executions, _ in
+            startedExecutions = executions
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedExecutions != nil })
+        #expect(startedExecutions == 3)
+        #expect(viewModel.tasks.contains(where: { $0.title == "External API" }))
+        #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("blocked by dependencies") == false)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
     @Test("pm autopilot forwards max pass limit to auto cycle")

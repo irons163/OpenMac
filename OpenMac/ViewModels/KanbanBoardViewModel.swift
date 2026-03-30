@@ -3463,6 +3463,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func runAutoDispatchCycleInBackground(
         maxPasses: Int = 3,
+        autoCreateMissingDependencies: Bool = false,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
         let cappedPasses = min(12, max(1, maxPasses))
@@ -3505,6 +3506,9 @@ final class KanbanBoardViewModel: ObservableObject {
             }
 
             completedPasses += 1
+            if autoCreateMissingDependencies {
+                _ = createMissingDependencyTasks()
+            }
             autoAssignTasks()
             runAssignedTaskExecutionsInBackground { started in
                 totalStarted += started
@@ -3529,6 +3533,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func runPMAutopilotInBackground(
         plannedTickets: [PMPlannedTicket],
         autoAssign: Bool = true,
+        autoCreateMissingDependenciesDuringCycle: Bool = true,
         maxAutoCyclePasses: Int = 3,
         completion: @escaping (_ createdAgents: Int, _ createdTickets: Int, _ startedExecutions: Int, _ completedPasses: Int) -> Void
     ) {
@@ -3547,7 +3552,10 @@ final class KanbanBoardViewModel: ObservableObject {
             return
         }
 
-        runAutoDispatchCycleInBackground(maxPasses: maxAutoCyclePasses) { startedExecutions, completedPasses in
+        runAutoDispatchCycleInBackground(
+            maxPasses: maxAutoCyclePasses,
+            autoCreateMissingDependencies: autoCreateMissingDependenciesDuringCycle
+        ) { startedExecutions, completedPasses in
             let cycleHadWarning = self.lastBoardMessageSeverity == .warning
             let remainingPreparation = self.prepareAssignedBatchRunQueue()
             let remainingDetailsMissing = remainingPreparation.detailsMissingCount
