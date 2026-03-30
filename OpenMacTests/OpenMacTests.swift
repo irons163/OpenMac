@@ -4250,6 +4250,56 @@ struct ContentViewLogicTests {
         #expect(untouchedBrief == "No Change")
     }
 
+    @Test("pm planner apply template reset clears prior generated plan state")
+    func pmPlannerApplyTemplateResetCoverage() {
+        var name = "Board A"
+        var brief = "Old brief"
+        var planSummary = "Old summary"
+        var tickets = [
+            PMPlannedTicket(
+                title: "Old Task",
+                details: "Old details",
+                requiredSkills: ["qa"],
+                storyPoints: 2
+            )
+        ]
+
+        let applied = ContentViewTestHooks.applyPMTemplateAndReset(
+            selectedTemplateID: "app",
+            projectName: &name,
+            projectBrief: &brief,
+            planSummary: &planSummary,
+            plannedTickets: &tickets
+        )
+        #expect(applied)
+        #expect(brief == L10n.string("PM Template Brief App"))
+        #expect(planSummary.isEmpty)
+        #expect(tickets.isEmpty)
+
+        var untouchedName = "Board B"
+        var untouchedBrief = "Keep brief"
+        var untouchedSummary = "Keep summary"
+        var untouchedTickets = [
+            PMPlannedTicket(
+                title: "Keep task",
+                details: "Keep details",
+                requiredSkills: ["swiftui"],
+                storyPoints: 1
+            )
+        ]
+        let notApplied = ContentViewTestHooks.applyPMTemplateAndReset(
+            selectedTemplateID: "custom",
+            projectName: &untouchedName,
+            projectBrief: &untouchedBrief,
+            planSummary: &untouchedSummary,
+            plannedTickets: &untouchedTickets
+        )
+        #expect(!notApplied)
+        #expect(untouchedBrief == "Keep brief")
+        #expect(untouchedSummary == "Keep summary")
+        #expect(untouchedTickets.count == 1)
+    }
+
     @Test("pm plan copy text helper includes summary and ticket breakdown")
     func pmPlanCopyTextCoverage() {
         let tickets = [

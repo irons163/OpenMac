@@ -341,6 +341,7 @@
 "Desktop App" = "桌面 App";
 "Developer API" = "开发者 API";
 "Apply Template" = "应用模板";
+"Apply + Generate" = "应用并生成";
 "Project Brief" = "项目说明";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "描述你的目标、范围与限制。PM 规划器会将其转成可执行的 ticket。";
 "PM templates prefill the project brief so you can generate tickets faster." = "PM 模板会预填项目说明，让你更快生成 tickets。";

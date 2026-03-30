@@ -341,6 +341,7 @@
 "Desktop App" = "Desktop App";
 "Developer API" = "Developer API";
 "Apply Template" = "Apply Template";
+"Apply + Generate" = "Apply + Generate";
 "Project Brief" = "Project Brief";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
 "PM templates prefill the project brief so you can generate tickets faster." = "PM templates prefill the project brief so you can generate tickets faster.";

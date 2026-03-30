@@ -634,6 +634,7 @@ struct ContentView: View {
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closePMPlannerSheet,
                 onApplyTemplate: applyPMTemplateFromSheet,
+                onApplyTemplateAndGenerate: applyAndGeneratePMTemplateFromSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onCreateTickets: createPMTicketsFromSheet,
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
@@ -914,14 +915,18 @@ struct ContentView: View {
     }
 
     private func applyPMTemplateFromSheet() {
-        let applied = Self.applyPMTemplate(
+        _ = Self.applyPMTemplateAndReset(
             selectedTemplateID: pmSelectedTemplateID,
             projectName: &pmProjectName,
-            projectBrief: &pmProjectBrief
+            projectBrief: &pmProjectBrief,
+            planSummary: &pmPlanSummary,
+            plannedTickets: &pmPlannedTickets
         )
-        guard applied else { return }
-        pmPlanSummary = ""
-        pmPlannedTickets = []
+    }
+
+    private func applyAndGeneratePMTemplateFromSheet() {
+        applyPMTemplateFromSheet()
+        generatePMPlanFromSheet()
     }
 
     private func generatePMPlanFromSheet() {
@@ -1281,6 +1286,24 @@ struct ContentView: View {
             projectName = L10n.string(definition.defaultProjectNameKey)
         }
         projectBrief = L10n.string(definition.briefKey)
+        return true
+    }
+
+    fileprivate static func applyPMTemplateAndReset(
+        selectedTemplateID: String,
+        projectName: inout String,
+        projectBrief: inout String,
+        planSummary: inout String,
+        plannedTickets: inout [PMPlannedTicket]
+    ) -> Bool {
+        let applied = applyPMTemplate(
+            selectedTemplateID: selectedTemplateID,
+            projectName: &projectName,
+            projectBrief: &projectBrief
+        )
+        guard applied else { return false }
+        planSummary = ""
+        plannedTickets = []
         return true
     }
 
@@ -3119,6 +3142,7 @@ private struct PMPlannerSheet: View {
     let boardMessageSeverity: BoardMessageSeverity?
     let onCancel: () -> Void
     let onApplyTemplate: () -> Void
+    let onApplyTemplateAndGenerate: () -> Void
     let onGeneratePlan: () -> Void
     let onCreateTickets: () -> Void
     let onCreateAndRun: () -> Void
@@ -3149,6 +3173,9 @@ private struct PMPlannerSheet: View {
                 .pickerStyle(.menu)
 
                 Button(L10n.string("Apply Template"), action: onApplyTemplate)
+                    .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
+
+                Button(L10n.string("Apply + Generate"), action: onApplyTemplateAndGenerate)
                     .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
             }
 
@@ -5179,6 +5206,22 @@ enum ContentViewTestHooks {
             selectedTemplateID: selectedTemplateID,
             projectName: &projectName,
             projectBrief: &projectBrief
+        )
+    }
+
+    static func applyPMTemplateAndReset(
+        selectedTemplateID: String,
+        projectName: inout String,
+        projectBrief: inout String,
+        planSummary: inout String,
+        plannedTickets: inout [PMPlannedTicket]
+    ) -> Bool {
+        ContentView.applyPMTemplateAndReset(
+            selectedTemplateID: selectedTemplateID,
+            projectName: &projectName,
+            projectBrief: &projectBrief,
+            planSummary: &planSummary,
+            plannedTickets: &plannedTickets
         )
     }
 
