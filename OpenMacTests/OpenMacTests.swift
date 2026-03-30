@@ -4208,6 +4208,38 @@ struct ContentViewLogicTests {
         #expect(normalized == ["backend", "qa", "swiftui"])
     }
 
+    @Test("pm plan copy text helper includes summary and ticket breakdown")
+    func pmPlanCopyTextCoverage() {
+        let tickets = [
+            PMPlannedTicket(
+                title: "Build MVP",
+                details: "Ship first milestone.",
+                requiredSkills: ["swiftui", "qa"],
+                storyPoints: 5
+            ),
+            PMPlannedTicket(
+                title: "Release Notes",
+                details: "",
+                requiredSkills: [],
+                storyPoints: 1
+            )
+        ]
+
+        let text = ContentViewTestHooks.pmPlanCopyText(
+            projectName: "OpenMac PM",
+            summary: "Plan generated for delivery.",
+            tickets: tickets
+        )
+
+        #expect(text.contains("# OpenMac PM"))
+        #expect(text.contains("Plan generated for delivery."))
+        #expect(text.contains("Total Tickets: 2"))
+        #expect(text.contains("Total Story Points: 6"))
+        #expect(text.contains("1. Build MVP (SP: 5)"))
+        #expect(text.contains("Skills: qa, swiftui") || text.contains("Skills: swiftui, qa"))
+        #expect(text.contains("2. Release Notes (SP: 1)"))
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()

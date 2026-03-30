@@ -620,7 +620,8 @@ struct ContentView: View {
                 onCancel: closePMPlannerSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onCreateTickets: createPMTicketsFromSheet,
-                onCreateAndRun: createAndRunPMTicketsFromSheet
+                onCreateAndRun: createAndRunPMTicketsFromSheet,
+                onCopyPlan: copyPMPlanFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -931,6 +932,16 @@ struct ContentView: View {
         runAssignedExecutionsFromToolbar()
     }
 
+    private func copyPMPlanFromSheet() {
+        copyToPasteboard(
+            Self.pmPlanCopyText(
+                projectName: pmProjectName,
+                summary: pmPlanSummary,
+                tickets: pmPlannedTickets
+            )
+        )
+    }
+
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
         let opened = viewModel.openTask(result.taskID, in: result.boardID)
         if opened {
@@ -1229,6 +1240,56 @@ struct ContentView: View {
             )
         )
         .sorted()
+    }
+
+    fileprivate static func pmPlanCopyText(
+        projectName: String,
+        summary: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        let trimmedProjectName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedProjectName = trimmedProjectName.isEmpty ? L10n.string("PM Project") : trimmedProjectName
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var lines: [String] = [
+            "# \(resolvedProjectName)",
+            ""
+        ]
+
+        if !trimmedSummary.isEmpty {
+            lines.append(trimmedSummary)
+            lines.append("")
+        }
+
+        lines.append(L10n.format("Total Tickets: %d", tickets.count))
+        let totalStoryPoints = tickets.reduce(0) { partialResult, ticket in
+            partialResult + max(1, ticket.storyPoints)
+        }
+        lines.append(L10n.format("Total Story Points: %d", totalStoryPoints))
+        lines.append("")
+
+        if tickets.isEmpty {
+            lines.append(L10n.string("No generated tickets yet. Click Generate Plan."))
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        for (index, ticket) in tickets.enumerated() {
+            let trimmedTitle = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTitle = trimmedTitle.isEmpty ? L10n.string("New Task") : trimmedTitle
+            lines.append("\(index + 1). \(resolvedTitle) (\(L10n.format("SP: %d", max(1, ticket.storyPoints))))")
+
+            if !ticket.requiredSkills.isEmpty {
+                lines.append("   \(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))")
+            }
+
+            let trimmedDetails = ticket.details.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedDetails.isEmpty {
+                lines.append("   \(trimmedDetails)")
+            }
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func assignManually(taskID: UUID) {
@@ -2977,6 +3038,7 @@ private struct PMPlannerSheet: View {
     let onGeneratePlan: () -> Void
     let onCreateTickets: () -> Void
     let onCreateAndRun: () -> Void
+    let onCopyPlan: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
@@ -3138,6 +3200,8 @@ private struct PMPlannerSheet: View {
 
             HStack {
                 Spacer()
+                Button(L10n.string("Copy"), action: onCopyPlan)
+                    .disabled(plannedTickets.isEmpty && planSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button(L10n.string("Cancel"), action: onCancel)
                 Button(L10n.string("Generate Plan"), action: onGeneratePlan)
                     .keyboardShortcut(.defaultAction)
@@ -5000,6 +5064,14 @@ enum ContentViewTestHooks {
 
     static func normalizedSkillList(from rawValue: String) -> [String] {
         ContentView.normalizedSkillList(from: rawValue)
+    }
+
+    static func pmPlanCopyText(
+        projectName: String,
+        summary: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        ContentView.pmPlanCopyText(projectName: projectName, summary: summary, tickets: tickets)
     }
 
     static func applyTaskEdits(
