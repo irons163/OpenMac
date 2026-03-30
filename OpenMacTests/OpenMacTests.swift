@@ -9677,7 +9677,9 @@ struct KanbanPersistenceTests {
                 title: "Core UI",
                 details: "Implement views",
                 requiredSkills: ["swiftui"],
-                storyPoints: 3
+                storyPoints: 3,
+                epic: "Core Product",
+                milestone: "M2 MVP Complete"
             )
         ]
         let executor = StubTaskExecutor()
@@ -9714,6 +9716,8 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.count == 1)
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Milestones: %d", 1)) == true)
+        #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Epics: %d", 1)) == true)
     }
 
     @Test("pm autopilot summary reports dependency blockers left in backlog")

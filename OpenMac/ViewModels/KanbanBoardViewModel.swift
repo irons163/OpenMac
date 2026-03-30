@@ -1371,6 +1371,23 @@ final class KanbanBoardViewModel: ObservableObject {
         return metadataLines.joined(separator: "\n") + "\n" + body
     }
 
+    nonisolated private static func plannedTicketMilestoneCount(_ tickets: [PMPlannedTicket]) -> Int {
+        Set(
+            tickets.map { ticket in
+                let milestone = ticket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+                return milestone.isEmpty ? "__unscheduled__" : milestone.lowercased()
+            }
+        ).count
+    }
+
+    nonisolated private static func plannedTicketEpicCount(_ tickets: [PMPlannedTicket]) -> Int {
+        Set(
+            tickets
+                .map { $0.epic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        ).count
+    }
+
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
     var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
@@ -3648,6 +3665,8 @@ final class KanbanBoardViewModel: ObservableObject {
             completion(createdAgents, 0, 0, 0)
             return
         }
+        let roadmapMilestoneCount = Self.plannedTicketMilestoneCount(normalizedTickets)
+        let roadmapEpicCount = Self.plannedTicketEpicCount(normalizedTickets)
 
         runAutoDispatchCycleInBackground(
             maxPasses: maxAutoCyclePasses,
@@ -3667,6 +3686,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 completedPasses
                 )
             ]
+            summaryParts.append(self.message("Total Milestones: %d", roadmapMilestoneCount))
+            summaryParts.append(self.message("Total Epics: %d", roadmapEpicCount))
             if self.lastAutoCycleCreatedDependencyTaskCount > 0 {
                 summaryParts.append(
                     self.message(
