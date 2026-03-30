@@ -619,7 +619,8 @@ struct ContentView: View {
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closePMPlannerSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
-                onCreateTickets: createPMTicketsFromSheet
+                onCreateTickets: createPMTicketsFromSheet,
+                onCreateAndRun: createAndRunPMTicketsFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -923,6 +924,11 @@ struct ContentView: View {
         guard createdCount > 0 else { return }
         refreshTriageSelections()
         closePMPlannerSheet()
+    }
+
+    private func createAndRunPMTicketsFromSheet() {
+        createPMTicketsFromSheet()
+        runAssignedExecutionsFromToolbar()
     }
 
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
@@ -2970,6 +2976,7 @@ private struct PMPlannerSheet: View {
     let onCancel: () -> Void
     let onGeneratePlan: () -> Void
     let onCreateTickets: () -> Void
+    let onCreateAndRun: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
@@ -3135,6 +3142,8 @@ private struct PMPlannerSheet: View {
                 Button(L10n.string("Generate Plan"), action: onGeneratePlan)
                     .keyboardShortcut(.defaultAction)
                 Button(L10n.format("Create Tickets (%d)", plannedTickets.count), action: onCreateTickets)
+                    .disabled(plannedTickets.isEmpty)
+                Button(L10n.string("Create + Run Assigned"), action: onCreateAndRun)
                     .disabled(plannedTickets.isEmpty)
             }
         }

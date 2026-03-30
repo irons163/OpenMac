@@ -351,3 +351,4 @@
 "Total Story Points: %d" = "总故事点数：%d";
 "Add Ticket" = "新增 Ticket";
 "Remove Ticket" = "移除 Ticket";
+"Create + Run Assigned" = "创建并执行已分配";
