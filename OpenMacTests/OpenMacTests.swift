@@ -2493,6 +2493,26 @@ struct KanbanFlowTests {
         #expect(storyPoints.allSatisfy { $0 >= 1 })
     }
 
+    @Test("pm planner injects dependency hints for sequential execution flow")
+    func pmPlannerInjectsDependencyHints() {
+        let planner = RuleBasedProjectPlanner()
+        let agent = AgentProfile(name: "Builder", skills: ["swiftui", "backend", "testing"], maxConcurrentTasks: 3)
+
+        guard let plan = planner.generatePlan(
+            projectName: "OpenMac Assistant",
+            projectBrief: "Build AI kanban assistant with testing and release flow.",
+            availableAgents: [agent]
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        #expect(plan.tickets.count >= 5)
+        #expect(plan.tickets[0].details.contains("Depends on: none"))
+        #expect(plan.tickets[1].details.contains("Depends on:"))
+        #expect(plan.tickets[2].details.contains("Depends on:"))
+    }
+
     @Test("pm planner preview requires non-empty project brief")
     func pmPlannerPreviewRequiresBrief() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
@@ -7605,6 +7625,79 @@ struct KanbanPersistenceTests {
 
         #expect(started == 1)
         #expect(viewModel.lastBoardMessage?.contains("1 skipped") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("batch run respects depends-on ordering before executing assigned tasks")
+    func batchRunAssignedExecutionsRespectsDependsOnOrdering() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let prerequisite = WorkTask(
+            title: "Design Spec",
+            details: "Finalize target UX flow",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let dependent = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: Design Spec
+            Implement feature based on approved spec.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                prerequisite.id: .success(summary: "spec done"),
+                dependent.id: .success(summary: "impl done")
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [dependent, prerequisite],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let startedFirstPass = viewModel.runAssignedTaskExecutions()
+
+        #expect(startedFirstPass == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == prerequisite.id })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord == nil)
+
+        let startedSecondPass = viewModel.runAssignedTaskExecutions()
+
+        #expect(startedSecondPass == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("batch run warns when assigned tasks are blocked by unresolved dependencies")
+    func batchRunAssignedExecutionsWarnsForDependencyBlockedTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: Missing Spec
+            Implement feature.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        let started = viewModel.runAssignedTaskExecutions()
+
+        #expect(started == 0)
+        #expect(viewModel.lastBoardMessage == "1 assigned task blocked by dependencies. Resolve dependencies before batch run.")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 

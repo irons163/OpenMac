@@ -74,6 +74,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 Clarify project scope and acceptance outcomes for "\(resolvedProjectName)".
                 Source brief: \(summarySnippet)
                 Acceptance:
+                Depends on: none
                 - Define in-scope/out-of-scope boundaries.
                 - List measurable success criteria.
                 - Confirm milestone sequence for execution tracking.
@@ -87,6 +88,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 Create an implementation blueprint for "\(resolvedProjectName)".
                 Source brief: \(summarySnippet)
                 Acceptance:
+                Depends on: \(resolvedProjectName) · Scope & Success Criteria
                 - Document core modules and integration points.
                 - Identify dependencies, risks, and fallback paths.
                 - Define execution order and ownership boundaries.
@@ -100,6 +102,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 Build the primary product capabilities described in the project brief.
                 Source brief: \(summarySnippet)
                 Acceptance:
+                Depends on: \(resolvedProjectName) · Architecture & Delivery Plan
                 - Implement end-to-end core user workflow.
                 - Handle expected edge cases and state transitions.
                 - Keep changes reviewable in incremental checkpoints.
@@ -113,6 +116,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 Stabilize behavior and verify expected outcomes.
                 Source brief: \(summarySnippet)
                 Acceptance:
+                Depends on: \(resolvedProjectName) · Core Implementation
                 - Add/extend automated tests for critical paths.
                 - Validate integration contracts and data flow.
                 - Record unresolved issues and mitigation plan.
@@ -126,6 +130,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 Prepare final release readiness and team handoff.
                 Source brief: \(summarySnippet)
                 Acceptance:
+                Depends on: \(resolvedProjectName) · Integration & Quality Gate
                 - Document setup, operations, and known limits.
                 - Define rollout/checklist and rollback notes.
                 - Provide concise next-step recommendations.
@@ -143,6 +148,7 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                     Run a focused spike on highest-uncertainty areas before full rollout.
                     Source brief: \(summarySnippet)
                     Acceptance:
+                    Depends on: \(resolvedProjectName) · Architecture & Delivery Plan
                     - Identify top technical and schedule risks.
                     - Produce mitigation tasks with owners and trigger conditions.
                     - Update plan assumptions based on spike results.

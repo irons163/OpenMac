@@ -2923,8 +2923,68 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
-    @discardableResult
-    func runAssignedTaskExecutions() -> Int {
+    private struct BatchRunPreparation {
+        let runnableTaskIDs: [UUID]
+        let detailsMissingCount: Int
+        let dependencyBlockedCount: Int
+    }
+
+    private static func normalizedDependencyTitle(_ raw: String) -> String {
+        raw
+            .trimmingCharacters(
+                in: CharacterSet.whitespacesAndNewlines.union(
+                    CharacterSet(charactersIn: "\"'`•-")
+                )
+            )
+            .lowercased()
+    }
+
+    private static func dependencyTitles(from details: String) -> [String] {
+        let lines = details
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var dependencies: [String] = []
+        for line in lines {
+            guard let separatorIndex = line.firstIndex(where: { $0 == ":" || $0 == "：" }) else {
+                continue
+            }
+
+            let prefix = line[..<separatorIndex]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let matchesPrefix =
+                prefix == "depends on" ||
+                prefix == "dependency" ||
+                prefix == "dependencies" ||
+                prefix == "依賴" ||
+                prefix == "依赖"
+            guard matchesPrefix else { continue }
+
+            let payload = line[line.index(after: separatorIndex)...]
+            let parsed = payload
+                .split(separator: ",")
+                .map { normalizedDependencyTitle(String($0)) }
+                .filter { !$0.isEmpty && $0 != "none" && $0 != "無" && $0 != "无" }
+
+            dependencies.append(contentsOf: parsed)
+        }
+
+        return Array(Set(dependencies)).sorted()
+    }
+
+    private static func isDependencyCompleted(_ task: WorkTask) -> Bool {
+        if task.status == .review || task.status == .done {
+            return true
+        }
+        if task.executionRecord?.status == .succeeded {
+            return true
+        }
+        return false
+    }
+
+    private func prepareAssignedBatchRunQueue() -> BatchRunPreparation {
         let assignedQueue = tasks
             .filter { task in
                 (task.status == .todo || task.status == .inProgress) && task.assignedAgentID != nil
@@ -2939,9 +2999,56 @@ final class KanbanBoardViewModel: ObservableObject {
         let detailsMissingCount = assignedQueue.filter {
             $0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.count
-        let runnableTaskIDs = assignedQueue
-            .filter { !$0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map(\.id)
+
+        let completionByTitle = tasks.reduce(into: [String: Bool]()) { partialResult, task in
+            let normalizedTitle = Self.normalizedDependencyTitle(task.title)
+            guard !normalizedTitle.isEmpty else { return }
+            let existing = partialResult[normalizedTitle] ?? false
+            partialResult[normalizedTitle] = existing || Self.isDependencyCompleted(task)
+        }
+
+        var runnableTaskIDs: [UUID] = []
+        runnableTaskIDs.reserveCapacity(assignedQueue.count)
+        var dependencyBlockedCount = 0
+
+        for task in assignedQueue {
+            guard !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+
+            let dependencies = Self.dependencyTitles(from: task.details)
+            guard !dependencies.isEmpty else {
+                runnableTaskIDs.append(task.id)
+                continue
+            }
+
+            let isBlocked = dependencies.contains { dependencyTitle in
+                guard let isCompleted = completionByTitle[dependencyTitle] else {
+                    return true
+                }
+                return !isCompleted
+            }
+
+            if isBlocked {
+                dependencyBlockedCount += 1
+            } else {
+                runnableTaskIDs.append(task.id)
+            }
+        }
+
+        return BatchRunPreparation(
+            runnableTaskIDs: runnableTaskIDs,
+            detailsMissingCount: detailsMissingCount,
+            dependencyBlockedCount: dependencyBlockedCount
+        )
+    }
+
+    @discardableResult
+    func runAssignedTaskExecutions() -> Int {
+        let batchPreparation = prepareAssignedBatchRunQueue()
+        let detailsMissingCount = batchPreparation.detailsMissingCount
+        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
+        let runnableTaskIDs = batchPreparation.runnableTaskIDs
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
@@ -2949,6 +3056,13 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastBoardMessage = message(
                     "%d assigned %@ with empty details. Fill details before batch run.",
                     detailsMissingCount,
+                    label
+                )
+            } else if dependencyBlockedCount > 0 {
+                let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
+                lastBoardMessage = message(
+                    "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
+                    dependencyBlockedCount,
                     label
                 )
             } else {
@@ -3002,23 +3116,10 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
-        let assignedQueue = tasks
-            .filter { task in
-                (task.status == .todo || task.status == .inProgress) && task.assignedAgentID != nil
-            }
-            .sorted { lhs, rhs in
-                if lhs.storyPoints != rhs.storyPoints {
-                    return lhs.storyPoints > rhs.storyPoints
-                }
-                return lhs.createdAt < rhs.createdAt
-            }
-
-        let detailsMissingCount = assignedQueue.filter {
-            $0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.count
-        let runnableTaskIDs = assignedQueue
-            .filter { !$0.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map(\.id)
+        let batchPreparation = prepareAssignedBatchRunQueue()
+        let detailsMissingCount = batchPreparation.detailsMissingCount
+        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
+        let runnableTaskIDs = batchPreparation.runnableTaskIDs
 
         guard !runnableTaskIDs.isEmpty else {
             if detailsMissingCount > 0 {
@@ -3026,6 +3127,13 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastBoardMessage = message(
                     "%d assigned %@ with empty details. Fill details before batch run.",
                     detailsMissingCount,
+                    label
+                )
+            } else if dependencyBlockedCount > 0 {
+                let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
+                lastBoardMessage = message(
+                    "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
+                    dependencyBlockedCount,
                     label
                 )
             } else {

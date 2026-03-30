@@ -410,3 +410,4 @@
 "Autopilot Create + Run" = "自動操縦で作成して実行";
 "PM autopilot requires at least one planned ticket" = "PM 自動操縦には少なくとも 1 件の計画チケットが必要です";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 自動操縦完了 · %d エージェント · %d チケット · %d 実行 · %d パス";
+"%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d 件の割り当て済み%@が依存関係でブロックされています。依存を解消してから一括実行してください。";
