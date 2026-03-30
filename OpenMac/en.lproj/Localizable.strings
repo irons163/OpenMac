@@ -397,3 +397,8 @@
 "Required skills integration is verified: %@." = "Required skills integration is verified: %@.";
 "Performance and reliability checks pass for MVP load expectations." = "Performance and reliability checks pass for MVP load expectations.";
 "Handoff notes include known limits, risks, and next actions." = "Handoff notes include known limits, risks, and next actions.";
+"Create Missing Agents" = "Create Missing Agents";
+"No required skills found in PM tickets" = "No required skills found in PM tickets";
+"All required PM skills are already covered by existing agents" = "All required PM skills are already covered by existing agents";
+"Created %d PM bootstrap agent(s) for missing skills" = "Created %d PM bootstrap agent(s) for missing skills";
+"Auto Agent %d" = "Auto Agent %d";

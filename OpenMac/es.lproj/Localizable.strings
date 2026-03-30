@@ -397,3 +397,8 @@
 "Required skills integration is verified: %@." = "Se verifica la integracion de habilidades requeridas: %@.";
 "Performance and reliability checks pass for MVP load expectations." = "Las verificaciones de rendimiento y confiabilidad cumplen la carga esperada del MVP.";
 "Handoff notes include known limits, risks, and next actions." = "Las notas de handoff incluyen limites conocidos, riesgos y siguientes acciones.";
+"Create Missing Agents" = "Crear agentes faltantes";
+"No required skills found in PM tickets" = "No se encontraron habilidades requeridas en los tickets PM";
+"All required PM skills are already covered by existing agents" = "Todas las habilidades PM requeridas ya estan cubiertas por los agentes existentes";
+"Created %d PM bootstrap agent(s) for missing skills" = "Se crearon %d agente(s) bootstrap PM para habilidades faltantes";
+"Auto Agent %d" = "Agente Auto %d";

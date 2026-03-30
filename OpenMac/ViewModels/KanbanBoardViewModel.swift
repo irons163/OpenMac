@@ -2159,6 +2159,89 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    func createMissingAgentsForPlannedTickets(
+        _ plannedTickets: [PMPlannedTicket],
+        maxSkillsPerAgent: Int = 3,
+        defaultMaxConcurrentTasks: Int = 3
+    ) -> Int {
+        let requiredSkills = Set(
+            plannedTickets
+                .flatMap(\.requiredSkills)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
+
+        guard !requiredSkills.isEmpty else {
+            lastBoardMessage = message("No required skills found in PM tickets")
+            lastBoardMessageSeverity = .warning
+            return 0
+        }
+
+        let coveredSkills = Set(agents.flatMap(\.skills))
+        let missingSkills = requiredSkills.subtracting(coveredSkills).sorted()
+
+        guard !missingSkills.isEmpty else {
+            lastBoardMessage = message("All required PM skills are already covered by existing agents")
+            lastBoardMessageSeverity = .info
+            return 0
+        }
+
+        let chunkSize = max(1, maxSkillsPerAgent)
+        let maxTasks = max(1, defaultMaxConcurrentTasks)
+        var createdCount = 0
+        var existingAgentNames = Set(agents.map { $0.name.lowercased() })
+        var nextAutoIndex = 1
+
+        for start in stride(from: 0, to: missingSkills.count, by: chunkSize) {
+            let end = min(missingSkills.count, start + chunkSize)
+            let skillsChunk = Array(missingSkills[start..<end])
+            let agentName = Self.uniqueAutoAgentName(
+                existingLowercasedNames: &existingAgentNames,
+                nextIndex: &nextAutoIndex
+            ) { index in
+                self.message("Auto Agent %d", index)
+            }
+
+            let created = addAgent(
+                name: agentName,
+                skillsText: skillsChunk.joined(separator: ", "),
+                maxConcurrentTasks: maxTasks
+            )
+            if created {
+                createdCount += 1
+            }
+        }
+
+        if createdCount > 0 {
+            lastBoardMessage = message("Created %d PM bootstrap agent(s) for missing skills", createdCount)
+            lastBoardMessageSeverity = .info
+        } else {
+            lastBoardMessage = message("No required skills found in PM tickets")
+            lastBoardMessageSeverity = .warning
+        }
+
+        return createdCount
+    }
+
+    private static func uniqueAutoAgentName(
+        existingLowercasedNames: inout Set<String>,
+        nextIndex: inout Int,
+        localizedName: (Int) -> String
+    ) -> String {
+        while true {
+            let currentIndex = nextIndex
+            nextIndex += 1
+            let rawCandidate = localizedName(currentIndex).trimmingCharacters(in: .whitespacesAndNewlines)
+            let candidate = rawCandidate.isEmpty ? "Auto Agent \(currentIndex)" : rawCandidate
+            let normalizedCandidate = candidate.lowercased()
+            if !existingLowercasedNames.contains(normalizedCandidate) {
+                existingLowercasedNames.insert(normalizedCandidate)
+                return candidate
+            }
+        }
+    }
+
+    @discardableResult
     func updateTask(
         _ taskID: UUID,
         title: String,

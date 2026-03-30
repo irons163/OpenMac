@@ -2528,6 +2528,90 @@ struct KanbanFlowTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("pm planner bootstrap creates agents for missing required skills")
+    func pmPlannerBootstrapCreatesMissingSkillAgents() {
+        let existingAgent = AgentProfile(name: "Existing UI", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [existingAgent])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "API",
+                details: "Build service layer",
+                requiredSkills: ["backend", "api", "swiftui"],
+                storyPoints: 5
+            ),
+            PMPlannedTicket(
+                title: "Quality",
+                details: "Add quality suite",
+                requiredSkills: ["qa", "testing", "security"],
+                storyPoints: 3
+            )
+        ]
+
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(plannedTickets)
+        let createdAgents = viewModel.agents.filter { $0.id != existingAgent.id }
+        let createdSkills = Set(createdAgents.flatMap(\.skills))
+
+        #expect(createdCount == 2)
+        #expect(viewModel.agents.count == 3)
+        #expect(createdSkills.contains("backend"))
+        #expect(createdSkills.contains("api"))
+        #expect(createdSkills.contains("qa"))
+        #expect(createdSkills.contains("testing"))
+        #expect(createdSkills.contains("security"))
+        #expect(viewModel.lastBoardMessage == "Created 2 PM bootstrap agent(s) for missing skills")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("pm planner bootstrap skips when all required skills are already covered")
+    func pmPlannerBootstrapSkipsWhenSkillsCovered() {
+        let fullStack = AgentProfile(
+            name: "Fullstack",
+            skills: ["swiftui", "backend", "qa"],
+            maxConcurrentTasks: 3
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [fullStack])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "UI",
+                details: "Build interface",
+                requiredSkills: ["swiftui"],
+                storyPoints: 2
+            ),
+            PMPlannedTicket(
+                title: "API",
+                details: "Build backend",
+                requiredSkills: ["backend", "qa"],
+                storyPoints: 3
+            )
+        ]
+
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(plannedTickets)
+
+        #expect(createdCount == 0)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.lastBoardMessage == "All required PM skills are already covered by existing agents")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("pm planner bootstrap warns when planned tickets have no required skills")
+    func pmPlannerBootstrapWarnsWhenNoSkillsFound() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "General Task",
+                details: "No skills",
+                requiredSkills: [],
+                storyPoints: 1
+            )
+        ]
+
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(plannedTickets)
+
+        #expect(createdCount == 0)
+        #expect(viewModel.lastBoardMessage == "No required skills found in PM tickets")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("reports perfect health score for stable board")
     func reportsPerfectHealthScoreForStableBoard() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)

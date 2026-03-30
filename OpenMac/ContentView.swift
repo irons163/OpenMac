@@ -653,6 +653,7 @@ struct ContentView: View {
                 onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
+                onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
                 onAutoACForAllTickets: applyPMAutoAcceptanceCriteriaForAllTickets,
                 onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
                 onCreateTickets: createPMTicketsFromSheet,
@@ -1024,6 +1025,13 @@ struct ContentView: View {
     private func applyPMAutoAcceptanceCriteriaForTicket(_ ticketIndex: Int) {
         guard pmPlannedTickets.indices.contains(ticketIndex) else { return }
         pmPlannedTickets[ticketIndex] = Self.applyingAutoAcceptanceCriteria(to: pmPlannedTickets[ticketIndex])
+    }
+
+    private func createMissingAgentsFromPMPlanFromSheet() {
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(pmPlannedTickets)
+        if createdCount > 0 {
+            refreshTriageSelections()
+        }
     }
 
     private func createPMTicketsFromSheet() {
@@ -3410,6 +3418,7 @@ private struct PMPlannerSheet: View {
     let onApplyBlueprintAndGenerate: () -> Void
     let onGeneratePlan: () -> Void
     let onGenerateTestPlan: () -> Void
+    let onCreateMissingAgents: () -> Void
     let onAutoACForAllTickets: () -> Void
     let onAutoACTicket: (Int) -> Void
     let onCreateTickets: () -> Void
@@ -3419,6 +3428,12 @@ private struct PMPlannerSheet: View {
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
+    }
+
+    private var hasPlannedSkills: Bool {
+        plannedTickets.contains { ticket in
+            !ticket.requiredSkills.isEmpty
+        }
     }
 
     private var hasBlueprintInput: Bool {
@@ -3529,6 +3544,10 @@ private struct PMPlannerSheet: View {
                     Text(L10n.format("Total Story Points: %d", totalStoryPoints))
                         .font(.caption.weight(.semibold))
                     Spacer()
+                    Button(L10n.string("Create Missing Agents"), action: onCreateMissingAgents)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!hasPlannedSkills)
                     Button(L10n.string("Auto AC for All Tickets"), action: onAutoACForAllTickets)
                         .buttonStyle(.bordered)
                         .controlSize(.small)

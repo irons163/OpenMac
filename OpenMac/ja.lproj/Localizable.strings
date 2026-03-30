@@ -397,3 +397,8 @@
 "Required skills integration is verified: %@." = "必要スキルの統合を検証: %@。";
 "Performance and reliability checks pass for MVP load expectations." = "MVP 想定負荷に対する性能・信頼性チェックを通過すること。";
 "Handoff notes include known limits, risks, and next actions." = "引き継ぎメモに既知の制限、リスク、次アクションを含めること。";
+"Create Missing Agents" = "不足スキルのエージェントを作成";
+"No required skills found in PM tickets" = "PM チケットに必要スキルが見つかりません";
+"All required PM skills are already covered by existing agents" = "必要な PM スキルは既存エージェントで既にカバーされています";
+"Created %d PM bootstrap agent(s) for missing skills" = "不足スキル向けに PM ブートストラップエージェントを %d 件作成しました";
+"Auto Agent %d" = "自動エージェント %d";
