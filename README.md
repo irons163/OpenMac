@@ -2,6 +2,16 @@
 
 OpenMac is a macOS-first AI agent Kanban app for planning, dispatching, and running task execution flows.
 
+## Languages
+
+- English (current)
+- [繁體中文](README.zh-Hant.md)
+- [简体中文](README.zh-Hans.md)
+- [Français](README.fr.md)
+- [Español](README.es.md)
+- [日本語](README.ja.md)
+- [한국어](README.ko.md)
+
 ## Screenshots
 
 ### Kanban Board
@@ -88,4 +98,3 @@ Run a specific test target:
 ```bash
 xcodebuild test -scheme OpenMac -destination 'platform=macOS' -only-testing:OpenMacTests
 ```
-
