@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM Plan Project";
 "Project Name (optional)" = "Project Name (optional)";
+"PM Template" = "PM テンプレート";
+"Custom Brief" = "カスタム概要";
+"SaaS Product" = "SaaS プロダクト";
+"Desktop App" = "デスクトップアプリ";
+"Developer API" = "開発者向け API";
+"Apply Template" = "テンプレートを適用";
 "Project Brief" = "Project Brief";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
+"PM templates prefill the project brief so you can generate tickets faster." = "PM テンプレートでプロジェクト概要を事前入力し、チケット生成を高速化できます。";
 "Auto Assign After Create" = "Auto Assign After Create";
 "Plan Summary" = "Plan Summary";
 "No generated tickets yet. Click Generate Plan." = "No generated tickets yet. Click Generate Plan.";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
 "Create New Board for Plan" = "Create New Board for Plan";
 "PM Project" = "PM Project";
+"SaaS MVP" = "SaaS MVP";
+"Desktop App MVP" = "デスクトップアプリ MVP";
+"API Platform MVP" = "API プラットフォーム MVP";
+"PM Template Brief SaaS" = "ユーザー認証、サブスク課金、管理ダッシュボード、分析を含むマルチテナント SaaS を構築する。オンボーディング、ロール権限、リリース準備も含める。";
+"PM Template Brief App" = "主要 UI フロー、ローカル永続化、アクセシビリティ、エラー処理、リリースチェックリストを備えたデスクトップアプリを構築する。MVP 範囲と受け入れ基準を明確化する。";
+"PM Template Brief API" = "OAuth、バージョニング、レート制限、可観測性、SDK/ドキュメント、統合テストを備えた開発者向け API プラットフォームを設計・実装する。";
 "Total Tickets: %d" = "Total Tickets: %d";
 "Total Story Points: %d" = "Total Story Points: %d";
 "Add Ticket" = "Add Ticket";

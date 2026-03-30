@@ -4208,6 +4208,48 @@ struct ContentViewLogicTests {
         #expect(normalized == ["backend", "qa", "swiftui"])
     }
 
+    @Test("pm planner template options expose expected quick-start ids")
+    func pmPlannerTemplateOptionIDsCoverage() {
+        let optionIDs = ContentViewTestHooks.pmBriefTemplateOptionIDs()
+        #expect(optionIDs == ["custom", "saas", "app", "api"])
+    }
+
+    @Test("pm planner apply template fills brief and handles project name defaults")
+    func pmPlannerApplyTemplateCoverage() {
+        var existingName = "Existing Board"
+        var existingBrief = "old brief"
+        let applied = ContentViewTestHooks.applyPMTemplate(
+            selectedTemplateID: "api",
+            projectName: &existingName,
+            projectBrief: &existingBrief
+        )
+        #expect(applied)
+        #expect(existingName == "Existing Board")
+        #expect(existingBrief == L10n.string("PM Template Brief API"))
+
+        var blankName = "   "
+        var blankBrief = ""
+        let appliedToBlank = ContentViewTestHooks.applyPMTemplate(
+            selectedTemplateID: "saas",
+            projectName: &blankName,
+            projectBrief: &blankBrief
+        )
+        #expect(appliedToBlank)
+        #expect(blankName == L10n.string("SaaS MVP"))
+        #expect(blankBrief == L10n.string("PM Template Brief SaaS"))
+
+        var untouchedName = "No Change"
+        var untouchedBrief = "No Change"
+        let notApplied = ContentViewTestHooks.applyPMTemplate(
+            selectedTemplateID: "custom",
+            projectName: &untouchedName,
+            projectBrief: &untouchedBrief
+        )
+        #expect(!notApplied)
+        #expect(untouchedName == "No Change")
+        #expect(untouchedBrief == "No Change")
+    }
+
     @Test("pm plan copy text helper includes summary and ticket breakdown")
     func pmPlanCopyTextCoverage() {
         let tickets = [

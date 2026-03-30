@@ -15,6 +15,18 @@ private extension UTType {
     static let openMACTaskDragPayload = UTType(importedAs: "com.irons.openmac.task-drag-payload")
 }
 
+private struct PMBriefTemplateOption: Identifiable, Equatable {
+    let id: String
+    let title: String
+}
+
+private struct PMBriefTemplateDefinition: Equatable {
+    let id: String
+    let optionTitleKey: String
+    let defaultProjectNameKey: String
+    let briefKey: String
+}
+
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
@@ -81,6 +93,7 @@ struct ContentView: View {
     @State private var pmCreateNewBoardForPlan = true
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
+    @State private var pmSelectedTemplateID = "custom"
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -615,9 +628,12 @@ struct ContentView: View {
                 createNewBoardForPlan: $pmCreateNewBoardForPlan,
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
+                selectedTemplateID: $pmSelectedTemplateID,
+                templateOptions: pmTemplateOptions,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closePMPlannerSheet,
+                onApplyTemplate: applyPMTemplateFromSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onCreateTickets: createPMTicketsFromSheet,
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
@@ -884,15 +900,28 @@ struct ContentView: View {
         pmProjectBrief = ""
         pmAutoAssignAfterCreate = true
         pmCreateNewBoardForPlan = true
+        pmSelectedTemplateID = Self.pmCustomTemplateID
         pmPlanSummary = ""
         pmPlannedTickets = []
         isShowingPMPlannerSheet = true
     }
 
     private func closePMPlannerSheet() {
+        pmSelectedTemplateID = Self.pmCustomTemplateID
         pmPlanSummary = ""
         pmPlannedTickets = []
         isShowingPMPlannerSheet = false
+    }
+
+    private func applyPMTemplateFromSheet() {
+        let applied = Self.applyPMTemplate(
+            selectedTemplateID: pmSelectedTemplateID,
+            projectName: &pmProjectName,
+            projectBrief: &pmProjectBrief
+        )
+        guard applied else { return }
+        pmPlanSummary = ""
+        pmPlannedTickets = []
     }
 
     private func generatePMPlanFromSheet() {
@@ -1230,6 +1259,54 @@ struct ContentView: View {
         }
     }
 
+    fileprivate static let pmCustomTemplateID = "custom"
+
+    fileprivate static func pmBriefTemplateOptions() -> [PMBriefTemplateOption] {
+        let options = pmBriefTemplateDefinitions().map { definition in
+            PMBriefTemplateOption(id: definition.id, title: L10n.string(definition.optionTitleKey))
+        }
+        return [PMBriefTemplateOption(id: pmCustomTemplateID, title: L10n.string("Custom Brief"))] + options
+    }
+
+    fileprivate static func applyPMTemplate(
+        selectedTemplateID: String,
+        projectName: inout String,
+        projectBrief: inout String
+    ) -> Bool {
+        guard let definition = pmBriefTemplateDefinitions().first(where: { $0.id == selectedTemplateID }) else {
+            return false
+        }
+
+        if projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            projectName = L10n.string(definition.defaultProjectNameKey)
+        }
+        projectBrief = L10n.string(definition.briefKey)
+        return true
+    }
+
+    private static func pmBriefTemplateDefinitions() -> [PMBriefTemplateDefinition] {
+        [
+            PMBriefTemplateDefinition(
+                id: "saas",
+                optionTitleKey: "SaaS Product",
+                defaultProjectNameKey: "SaaS MVP",
+                briefKey: "PM Template Brief SaaS"
+            ),
+            PMBriefTemplateDefinition(
+                id: "app",
+                optionTitleKey: "Desktop App",
+                defaultProjectNameKey: "Desktop App MVP",
+                briefKey: "PM Template Brief App"
+            ),
+            PMBriefTemplateDefinition(
+                id: "api",
+                optionTitleKey: "Developer API",
+                defaultProjectNameKey: "API Platform MVP",
+                briefKey: "PM Template Brief API"
+            )
+        ]
+    }
+
     fileprivate static func normalizedSkillList(from rawValue: String) -> [String] {
         Array(
             Set(
@@ -1521,6 +1598,10 @@ struct ContentView: View {
 
     private var globalTaskSearchResults: [GlobalTaskSearchResult] {
         viewModel.globalTaskSearchResults(query: globalTaskSearchQuery)
+    }
+
+    private var pmTemplateOptions: [PMBriefTemplateOption] {
+        Self.pmBriefTemplateOptions()
     }
 
     private func resetTaskFilters() {
@@ -3032,9 +3113,12 @@ private struct PMPlannerSheet: View {
     @Binding var createNewBoardForPlan: Bool
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
+    @Binding var selectedTemplateID: String
+    let templateOptions: [PMBriefTemplateOption]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
     let onCancel: () -> Void
+    let onApplyTemplate: () -> Void
     let onGeneratePlan: () -> Void
     let onCreateTickets: () -> Void
     let onCreateAndRun: () -> Void
@@ -3056,6 +3140,18 @@ private struct PMPlannerSheet: View {
             TextField(L10n.string("Project Name (optional)"), text: $projectName)
                 .textFieldStyle(.roundedBorder)
 
+            HStack(spacing: 10) {
+                Picker(L10n.string("PM Template"), selection: $selectedTemplateID) {
+                    ForEach(templateOptions) { option in
+                        Text(option.title).tag(option.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Button(L10n.string("Apply Template"), action: onApplyTemplate)
+                    .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.string("Project Brief"))
                     .font(.caption.weight(.semibold))
@@ -3071,6 +3167,10 @@ private struct PMPlannerSheet: View {
 
             Text(L10n.string("Describe your goal, scope, and constraints. PM planner will turn this into executable tickets."))
                 .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text(L10n.string("PM templates prefill the project brief so you can generate tickets faster."))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
 
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
@@ -5064,6 +5164,22 @@ enum ContentViewTestHooks {
 
     static func normalizedSkillList(from rawValue: String) -> [String] {
         ContentView.normalizedSkillList(from: rawValue)
+    }
+
+    static func pmBriefTemplateOptionIDs() -> [String] {
+        ContentView.pmBriefTemplateOptions().map(\.id)
+    }
+
+    static func applyPMTemplate(
+        selectedTemplateID: String,
+        projectName: inout String,
+        projectBrief: inout String
+    ) -> Bool {
+        ContentView.applyPMTemplate(
+            selectedTemplateID: selectedTemplateID,
+            projectName: &projectName,
+            projectBrief: &projectBrief
+        )
     }
 
     static func pmPlanCopyText(

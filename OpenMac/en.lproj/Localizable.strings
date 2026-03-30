@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM Plan Project";
 "Project Name (optional)" = "Project Name (optional)";
+"PM Template" = "PM Template";
+"Custom Brief" = "Custom Brief";
+"SaaS Product" = "SaaS Product";
+"Desktop App" = "Desktop App";
+"Developer API" = "Developer API";
+"Apply Template" = "Apply Template";
 "Project Brief" = "Project Brief";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
+"PM templates prefill the project brief so you can generate tickets faster." = "PM templates prefill the project brief so you can generate tickets faster.";
 "Auto Assign After Create" = "Auto Assign After Create";
 "Plan Summary" = "Plan Summary";
 "No generated tickets yet. Click Generate Plan." = "No generated tickets yet. Click Generate Plan.";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
 "Create New Board for Plan" = "Create New Board for Plan";
 "PM Project" = "PM Project";
+"SaaS MVP" = "SaaS MVP";
+"Desktop App MVP" = "Desktop App MVP";
+"API Platform MVP" = "API Platform MVP";
+"PM Template Brief SaaS" = "Build a multi-tenant SaaS product with user authentication, subscription billing, admin dashboard, and analytics. Include onboarding flow, role permissions, and release readiness.";
+"PM Template Brief App" = "Build a polished desktop app with core workflow UI, local persistence, accessibility support, error handling, and release checklist. Define MVP scope and acceptance criteria.";
+"PM Template Brief API" = "Design and implement a developer-facing API platform with OAuth authentication, versioning, rate limiting, observability, SDK/documentation, and integration tests.";
 "Total Tickets: %d" = "Total Tickets: %d";
 "Total Story Points: %d" = "Total Story Points: %d";
 "Add Ticket" = "Add Ticket";

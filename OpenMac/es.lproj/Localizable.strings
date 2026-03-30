@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM Plan Project";
 "Project Name (optional)" = "Project Name (optional)";
+"PM Template" = "Plantilla PM";
+"Custom Brief" = "Brief personalizado";
+"SaaS Product" = "Producto SaaS";
+"Desktop App" = "App de escritorio";
+"Developer API" = "API para desarrolladores";
+"Apply Template" = "Aplicar plantilla";
 "Project Brief" = "Project Brief";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
+"PM templates prefill the project brief so you can generate tickets faster." = "Las plantillas PM rellenan el brief del proyecto para generar tickets mas rapido.";
 "Auto Assign After Create" = "Auto Assign After Create";
 "Plan Summary" = "Plan Summary";
 "No generated tickets yet. Click Generate Plan." = "No generated tickets yet. Click Generate Plan.";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
 "Create New Board for Plan" = "Create New Board for Plan";
 "PM Project" = "PM Project";
+"SaaS MVP" = "MVP SaaS";
+"Desktop App MVP" = "MVP app de escritorio";
+"API Platform MVP" = "MVP plataforma API";
+"PM Template Brief SaaS" = "Construir un producto SaaS multi-tenant con autenticacion de usuarios, facturacion por suscripcion, panel de administracion y analitica. Incluir onboarding, permisos por rol y checklist de salida.";
+"PM Template Brief App" = "Construir una app de escritorio con flujo principal de UI, persistencia local, accesibilidad, manejo de errores y checklist de release. Definir alcance MVP y criterios de aceptacion.";
+"PM Template Brief API" = "Disenar e implementar una plataforma API para desarrolladores con OAuth, versionado, rate limiting, observabilidad, SDK/documentacion y pruebas de integracion.";
 "Total Tickets: %d" = "Total Tickets: %d";
 "Total Story Points: %d" = "Total Story Points: %d";
 "Add Ticket" = "Add Ticket";

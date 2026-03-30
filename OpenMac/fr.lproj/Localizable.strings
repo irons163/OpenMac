@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM Plan Project";
 "Project Name (optional)" = "Project Name (optional)";
+"PM Template" = "Modele PM";
+"Custom Brief" = "Brief personnalise";
+"SaaS Product" = "Produit SaaS";
+"Desktop App" = "Application bureau";
+"Developer API" = "API developpeur";
+"Apply Template" = "Appliquer le modele";
 "Project Brief" = "Project Brief";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
+"PM templates prefill the project brief so you can generate tickets faster." = "Les modeles PM pre-remplissent le brief projet pour generer des tickets plus vite.";
 "Auto Assign After Create" = "Auto Assign After Create";
 "Plan Summary" = "Plan Summary";
 "No generated tickets yet. Click Generate Plan." = "No generated tickets yet. Click Generate Plan.";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
 "Create New Board for Plan" = "Create New Board for Plan";
 "PM Project" = "PM Project";
+"SaaS MVP" = "MVP SaaS";
+"Desktop App MVP" = "MVP app bureau";
+"API Platform MVP" = "MVP plateforme API";
+"PM Template Brief SaaS" = "Construire un produit SaaS multi-tenant avec authentification utilisateur, abonnement/facturation, console admin et analytics. Inclure onboarding, permissions de roles et preparation de release.";
+"PM Template Brief App" = "Construire une application bureau avec UI principale, persistance locale, accessibilite, gestion d'erreurs et checklist de release. Definir clairement le scope MVP et les criteres d'acceptation.";
+"PM Template Brief API" = "Concevoir et implementer une plateforme API pour developpeurs avec OAuth, versioning, limitation de debit, observabilite, SDK/documentation et tests d'integration.";
 "Total Tickets: %d" = "Total Tickets: %d";
 "Total Story Points: %d" = "Total Story Points: %d";
 "Add Ticket" = "Add Ticket";

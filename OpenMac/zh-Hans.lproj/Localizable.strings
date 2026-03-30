@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM 项目规划";
 "Project Name (optional)" = "项目名称（可选）";
+"PM Template" = "PM 模板";
+"Custom Brief" = "自定义说明";
+"SaaS Product" = "SaaS 产品";
+"Desktop App" = "桌面 App";
+"Developer API" = "开发者 API";
+"Apply Template" = "应用模板";
 "Project Brief" = "项目说明";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "描述你的目标、范围与限制。PM 规划器会将其转成可执行的 ticket。";
+"PM templates prefill the project brief so you can generate tickets faster." = "PM 模板会预填项目说明，让你更快生成 tickets。";
 "Auto Assign After Create" = "创建后自动分配";
 "Plan Summary" = "计划摘要";
 "No generated tickets yet. Click Generate Plan." = "尚未生成 ticket。请先点击“生成计划”。";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM 规划器已创建 %d 个 ticket";
 "Create New Board for Plan" = "为此计划创建新看板";
 "PM Project" = "PM 项目";
+"SaaS MVP" = "SaaS MVP";
+"Desktop App MVP" = "桌面 App MVP";
+"API Platform MVP" = "API 平台 MVP";
+"PM Template Brief SaaS" = "构建多租户 SaaS 产品，包含用户认证、订阅计费、管理后台和分析仪表板。请纳入 onboarding 流程、角色权限与发版就绪检查。";
+"PM Template Brief App" = "构建体验完整的桌面 App，包含核心流程 UI、本地数据持久化、无障碍支持、错误处理与发版清单。请明确 MVP 范围与验收标准。";
+"PM Template Brief API" = "设计并实现面向开发者的 API 平台，包含 OAuth 认证、版本管理、限流、可观测性、SDK/文档与集成测试。";
 "Total Tickets: %d" = "总 Tickets：%d";
 "Total Story Points: %d" = "总故事点数：%d";
 "Add Ticket" = "新增 Ticket";

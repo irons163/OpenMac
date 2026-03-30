@@ -335,8 +335,15 @@
 
 "PM Plan Project" = "PM 專案規劃";
 "Project Name (optional)" = "專案名稱（可選）";
+"PM Template" = "PM 模板";
+"Custom Brief" = "自訂說明";
+"SaaS Product" = "SaaS 產品";
+"Desktop App" = "桌面 App";
+"Developer API" = "開發者 API";
+"Apply Template" = "套用模板";
 "Project Brief" = "專案說明";
 "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "描述你的目標、範圍與限制。PM 規劃器會將其轉成可執行的 ticket。";
+"PM templates prefill the project brief so you can generate tickets faster." = "PM 模板會先填好專案說明，讓你更快產生 tickets。";
 "Auto Assign After Create" = "建立後自動分配";
 "Plan Summary" = "計畫摘要";
 "No generated tickets yet. Click Generate Plan." = "尚未產生 ticket。請先按「產生計畫」。";
@@ -347,6 +354,12 @@
 "PM planner created %d ticket(s)" = "PM 規劃器已建立 %d 個 ticket";
 "Create New Board for Plan" = "為此計畫建立新看板";
 "PM Project" = "PM 專案";
+"SaaS MVP" = "SaaS MVP";
+"Desktop App MVP" = "桌面 App MVP";
+"API Platform MVP" = "API 平台 MVP";
+"PM Template Brief SaaS" = "打造多租戶 SaaS 產品，包含使用者登入驗證、訂閱計費、管理後台與分析儀表板。請納入 onboarding 流程、角色權限與發版就緒檢查。";
+"PM Template Brief App" = "打造體驗完整的桌面 App，包含核心流程 UI、本地資料持久化、無障礙支援、錯誤處理與發版清單。請明確定義 MVP 範圍與驗收標準。";
+"PM Template Brief API" = "規劃並實作開發者 API 平台，包含 OAuth 驗證、版本管理、流量限制、可觀測性、SDK/文件與整合測試。";
 "Total Tickets: %d" = "總 Tickets：%d";
 "Total Story Points: %d" = "總故事點數：%d";
 "Add Ticket" = "新增 Ticket";
