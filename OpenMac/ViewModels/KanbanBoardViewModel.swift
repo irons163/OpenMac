@@ -3140,6 +3140,41 @@ final class KanbanBoardViewModel: ObservableObject {
         runPass(0)
     }
 
+    func runPMAutopilotInBackground(
+        plannedTickets: [PMPlannedTicket],
+        autoAssign: Bool = true,
+        maxAutoCyclePasses: Int = 3,
+        completion: @escaping (_ createdAgents: Int, _ createdTickets: Int, _ startedExecutions: Int, _ completedPasses: Int) -> Void
+    ) {
+        let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
+        guard !normalizedTickets.isEmpty else {
+            lastBoardMessage = message("PM autopilot requires at least one planned ticket")
+            lastBoardMessageSeverity = .warning
+            completion(0, 0, 0, 0)
+            return
+        }
+
+        let createdAgents = createMissingAgentsForPlannedTickets(normalizedTickets)
+        let createdTickets = addPlannedTickets(normalizedTickets, autoAssign: autoAssign)
+        guard createdTickets > 0 else {
+            completion(createdAgents, 0, 0, 0)
+            return
+        }
+
+        runAutoDispatchCycleInBackground(maxPasses: maxAutoCyclePasses) { startedExecutions, completedPasses in
+            let cycleHadWarning = self.lastBoardMessageSeverity == .warning
+            self.lastBoardMessage = self.message(
+                "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)",
+                createdAgents,
+                createdTickets,
+                startedExecutions,
+                completedPasses
+            )
+            self.lastBoardMessageSeverity = (cycleHadWarning || startedExecutions == 0) ? .warning : .info
+            completion(createdAgents, createdTickets, startedExecutions, completedPasses)
+        }
+    }
+
     func triageCandidates() -> [WorkTask] {
         tasks
             .filter { $0.status == .todo && $0.assignedAgentID == nil }

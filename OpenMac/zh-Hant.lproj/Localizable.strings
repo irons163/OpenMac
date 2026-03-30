@@ -407,3 +407,6 @@
 "Auto-assign then batch-run in repeated passes until queue is stable" = "先自動分派，再多輪批次執行直到佇列穩定";
 "Auto cycle finished · %d pass(es) · %d started" = "自動循環完成 · %d 輪 · 啟動 %d 項";
 "Auto cycle finished with no runnable assigned tasks" = "自動循環完成，沒有可執行的已分派任務";
+"Autopilot Create + Run" = "自動駕駛建立並執行";
+"PM autopilot requires at least one planned ticket" = "PM 自動駕駛至少需要一張已規劃票";
+"PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 自動駕駛完成 · %d 位代理 · %d 張票 · %d 次執行 · %d 輪";

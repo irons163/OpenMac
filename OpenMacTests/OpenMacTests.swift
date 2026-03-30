@@ -8975,6 +8975,87 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
+    @Test("pm autopilot bootstraps agents, creates tickets, and runs auto cycle")
+    func runPMAutopilotInBackgroundEndToEnd() {
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Core UI",
+                details: "Implement views",
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let executor = StubTaskExecutor()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var createdAgents: Int?
+        var createdTickets: Int?
+        var startedExecutions: Int?
+        var completedPasses: Int?
+        viewModel.runPMAutopilotInBackground(plannedTickets: plannedTickets) { agents, tickets, executions, passes in
+            createdAgents = agents
+            createdTickets = tickets
+            startedExecutions = executions
+            completedPasses = passes
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) {
+            createdAgents != nil &&
+                createdTickets != nil &&
+                startedExecutions != nil &&
+                completedPasses != nil
+        })
+        #expect(createdAgents == 1)
+        #expect(createdTickets == 1)
+        #expect(startedExecutions == 1)
+        #expect(completedPasses == 2)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
+        #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+    }
+
+    @Test("pm autopilot warns when no planned tickets are provided")
+    func runPMAutopilotInBackgroundRequiresTickets() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var createdAgents: Int?
+        var createdTickets: Int?
+        var startedExecutions: Int?
+        var completedPasses: Int?
+        viewModel.runPMAutopilotInBackground(plannedTickets: []) { agents, tickets, executions, passes in
+            createdAgents = agents
+            createdTickets = tickets
+            startedExecutions = executions
+            completedPasses = passes
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) {
+            createdAgents != nil &&
+                createdTickets != nil &&
+                startedExecutions != nil &&
+                completedPasses != nil
+        })
+        #expect(createdAgents == 0)
+        #expect(createdTickets == 0)
+        #expect(startedExecutions == 0)
+        #expect(completedPasses == 0)
+        #expect(viewModel.lastBoardMessage == "PM autopilot requires at least one planned ticket")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("workspace import preview from file URL supports success and read failure")
     func workspaceImportPreviewFromURL() throws {
         let task = WorkTask(

@@ -669,6 +669,7 @@ struct ContentView: View {
                 onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
                 onCreateTickets: createPMTicketsFromSheet,
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
+                onRunAutopilot: runPMAutopilotFromSheet,
                 onCopyPlan: copyPMPlanFromSheet,
                 onCopyTestPlan: copyPMTestPlanFromSheet
             )
@@ -1065,6 +1066,43 @@ struct ContentView: View {
     private func createAndRunPMTicketsFromSheet() {
         createPMTicketsFromSheet()
         runAssignedExecutionsFromToolbar()
+    }
+
+    private func runPMAutopilotFromSheet() {
+        guard !isAutoCycleRunning else { return }
+        guard !isBatchRunning else { return }
+
+        if pmPlannedTickets.isEmpty {
+            generatePMPlanFromSheet()
+        }
+        guard !pmPlannedTickets.isEmpty else { return }
+
+        applyPMAutoAcceptanceCriteriaForAllTickets()
+        if pmTestPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            generatePMTestPlanFromSheet()
+        }
+
+        if pmCreateNewBoardForPlan {
+            let resolvedBoardName = Self.uniquePMBoardName(
+                baseName: pmProjectName,
+                existingNames: viewModel.boards.map(\.name)
+            )
+            guard viewModel.createBoard(name: resolvedBoardName) else { return }
+            pmProjectName = resolvedBoardName
+            handleBoardContextChanged()
+        }
+
+        isAutoCycleRunning = true
+        viewModel.runPMAutopilotInBackground(
+            plannedTickets: pmPlannedTickets,
+            autoAssign: true
+        ) { _, createdTickets, _, _ in
+            isAutoCycleRunning = false
+            if createdTickets > 0 {
+                refreshTriageSelections()
+                closePMPlannerSheet()
+            }
+        }
     }
 
     private func copyPMPlanFromSheet() {
@@ -3471,6 +3509,7 @@ private struct PMPlannerSheet: View {
     let onAutoACTicket: (Int) -> Void
     let onCreateTickets: () -> Void
     let onCreateAndRun: () -> Void
+    let onRunAutopilot: () -> Void
     let onCopyPlan: () -> Void
     let onCopyTestPlan: () -> Void
 
@@ -3482,6 +3521,10 @@ private struct PMPlannerSheet: View {
         plannedTickets.contains { ticket in
             !ticket.requiredSkills.isEmpty
         }
+    }
+
+    private var hasAutopilotInput: Bool {
+        !plannedTickets.isEmpty || !projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasBlueprintInput: Bool {
@@ -3748,6 +3791,8 @@ private struct PMPlannerSheet: View {
                     .disabled(plannedTickets.isEmpty)
                 Button(L10n.string("Create + Run Assigned"), action: onCreateAndRun)
                     .disabled(plannedTickets.isEmpty)
+                Button(L10n.string("Autopilot Create + Run"), action: onRunAutopilot)
+                    .disabled(!hasAutopilotInput)
             }
         }
         .padding(18)

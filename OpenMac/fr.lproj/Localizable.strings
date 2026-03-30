@@ -407,3 +407,6 @@
 "Auto-assign then batch-run in repeated passes until queue is stable" = "Auto-assigner puis executer en batch sur plusieurs passes jusqu'a stabilisation de la file.";
 "Auto cycle finished · %d pass(es) · %d started" = "Cycle auto termine · %d passe(s) · %d demarre(s)";
 "Auto cycle finished with no runnable assigned tasks" = "Cycle auto termine sans taches assignees executables";
+"Autopilot Create + Run" = "Autopilot creer + executer";
+"PM autopilot requires at least one planned ticket" = "Le mode autopilot PM requiert au moins un ticket planifie";
+"PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "Autopilot PM termine · %d agent(s) · %d ticket(s) · %d execution(s) · %d passe(s)";

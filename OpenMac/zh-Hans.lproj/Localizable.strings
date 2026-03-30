@@ -407,3 +407,6 @@
 "Auto-assign then batch-run in repeated passes until queue is stable" = "先自动分派，再多轮批量执行直到队列稳定";
 "Auto cycle finished · %d pass(es) · %d started" = "自动循环完成 · %d 轮 · 启动 %d 项";
 "Auto cycle finished with no runnable assigned tasks" = "自动循环完成，没有可执行的已分派任务";
+"Autopilot Create + Run" = "自动驾驶创建并执行";
+"PM autopilot requires at least one planned ticket" = "PM 自动驾驶至少需要一张已规划票";
+"PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 自动驾驶完成 · %d 位代理 · %d 张票 · %d 次执行 · %d 轮";
