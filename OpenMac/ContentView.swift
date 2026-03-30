@@ -33,6 +33,7 @@ struct ContentView: View {
     @AppStorage(AppLanguageSettings.userDefaultsKey) private var appLanguageOverrideRawValue = AppLanguageSettings.systemValue
     @AppStorage("developerModeEnabled") private var developerModeEnabled = false
     @AppStorage("autoCycleMaxPasses") private var autoCycleMaxPasses = 3
+    @AppStorage("autoCycleAutoCreateMissingDependencies") private var autoCycleAutoCreateMissingDependencies = true
     @AppStorage(CodexProjectsDirectorySettings.userDefaultsKey) private var codexProjectsDirectoryPath = ""
     @StateObject private var viewModel: KanbanBoardViewModel
 
@@ -328,6 +329,11 @@ struct ContentView: View {
                         }
                         .disabled(!canRunAutoCycle)
 
+                        Toggle(
+                            L10n.string("Auto Create Missing Dependencies During Cycle"),
+                            isOn: $autoCycleAutoCreateMissingDependencies
+                        )
+
                         Divider()
 
                         Button(L10n.string("Archive Done")) {
@@ -483,6 +489,7 @@ struct ContentView: View {
                 autoAssignAfterCreate: $pmAutoAssignAfterCreate,
                 createNewBoardForPlan: $pmCreateNewBoardForPlan,
                 autopilotMaxPasses: $autoCycleMaxPasses,
+                autoCreateMissingDependenciesDuringCycle: $autoCycleAutoCreateMissingDependencies,
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
                 selectedTemplateID: $pmSelectedTemplateID,
@@ -940,6 +947,7 @@ struct ContentView: View {
         viewModel.runPMAutopilotInBackground(
             plannedTickets: pmPlannedTickets,
             autoAssign: true,
+            autoCreateMissingDependenciesDuringCycle: autoCycleAutoCreateMissingDependencies,
             maxAutoCyclePasses: autoCycleMaxPasses
         ) { _, createdTickets, _, _ in
             isAutoCycleRunning = false
@@ -1081,7 +1089,10 @@ struct ContentView: View {
         guard !isAutoCycleRunning else { return }
         guard !isBatchRunning else { return }
         isAutoCycleRunning = true
-        viewModel.runAutoDispatchCycleInBackground(maxPasses: autoCycleMaxPasses) { startedCount, _ in
+        viewModel.runAutoDispatchCycleInBackground(
+            maxPasses: autoCycleMaxPasses,
+            autoCreateMissingDependencies: autoCycleAutoCreateMissingDependencies
+        ) { startedCount, _ in
             isAutoCycleRunning = false
             if startedCount > 0 {
                 refreshTriageSelections()
@@ -3597,6 +3608,7 @@ private struct PMPlannerSheet: View {
     @Binding var autoAssignAfterCreate: Bool
     @Binding var createNewBoardForPlan: Bool
     @Binding var autopilotMaxPasses: Int
+    @Binding var autoCreateMissingDependenciesDuringCycle: Bool
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
     @Binding var selectedTemplateID: String
@@ -3727,6 +3739,10 @@ private struct PMPlannerSheet: View {
 
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
             Toggle(L10n.string("Create New Board for Plan"), isOn: $createNewBoardForPlan)
+            Toggle(
+                L10n.string("Auto Create Missing Dependencies During Cycle"),
+                isOn: $autoCreateMissingDependenciesDuringCycle
+            )
             Stepper(
                 L10n.format("Autopilot Max Passes: %d", max(1, min(12, autopilotMaxPasses))),
                 value: $autopilotMaxPasses,

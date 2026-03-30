@@ -411,6 +411,7 @@
 "Auto cycle finished with no runnable assigned tasks" = "自动循环完成，没有可执行的已分派任务";
 "Autopilot Create + Run" = "自动驾驶创建并执行";
 "Autopilot Max Passes: %d" = "自动驾驶最大循环轮数：%d";
+"Auto Create Missing Dependencies During Cycle" = "在循环中自动创建缺失依赖";
 "PM autopilot requires at least one planned ticket" = "PM 自动驾驶至少需要一张已规划票";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 自动驾驶完成 · %d 位代理 · %d 张票 · %d 次执行 · %d 轮";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d 个已分派%@受依赖阻塞。请先解决依赖后再批量执行。";

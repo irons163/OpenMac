@@ -9452,6 +9452,8 @@ struct KanbanPersistenceTests {
         #expect(dependencyTask != nil)
         #expect(dependencyTask?.executionRecord?.status == .succeeded)
         #expect(viewModel.tasks.first(where: { $0.title == "Implementation" })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.lastAutoCycleCreatedDependencyTaskCount == 1)
+        #expect(viewModel.lastBoardMessage?.contains("Created 1 dependency placeholder task(s)") == true)
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
@@ -9617,7 +9619,9 @@ struct KanbanPersistenceTests {
         #expect(startedExecutions == 3)
         #expect(viewModel.tasks.contains(where: { $0.title == "External API" }))
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("Created 1 dependency placeholder task(s)") == true)
         #expect(viewModel.lastBoardMessage?.contains("blocked by dependencies") == false)
+        #expect(viewModel.lastAutoCycleCreatedDependencyTaskCount == 1)
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 

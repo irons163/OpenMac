@@ -411,6 +411,7 @@
 "Auto cycle finished with no runnable assigned tasks" = "자동 사이클 완료, 실행 가능한 할당 작업이 없습니다";
 "Autopilot Create + Run" = "오토파일럿 생성 + 실행";
 "Autopilot Max Passes: %d" = "오토파일럿 최대 패스 수: %d";
+"Auto Create Missing Dependencies During Cycle" = "사이클 중 누락 의존성 자동 생성";
 "PM autopilot requires at least one planned ticket" = "PM 오토파일럿은 최소 1개의 계획 티켓이 필요합니다";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "PM 오토파일럿 완료 · %d 에이전트 · %d 티켓 · %d 실행 · %d 패스";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d개의 할당된 %@이(가) 의존성으로 막혀 있습니다. 배치 실행 전에 의존성을 해결하세요.";

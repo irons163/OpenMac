@@ -1303,6 +1303,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var lastBoardMessageSeverity: BoardMessageSeverity?
     @Published private(set) var lastExecutionDebugLog: String?
     @Published private(set) var lastCodexLoginCommand: String?
+    @Published private(set) var lastAutoCycleCreatedDependencyTaskCount = 0
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
@@ -3470,8 +3471,11 @@ final class KanbanBoardViewModel: ObservableObject {
         var totalStarted = 0
         var completedPasses = 0
         var hadWarning = false
+        var createdDependencyTaskCount = 0
+        lastAutoCycleCreatedDependencyTaskCount = 0
 
         func finish() {
+            self.lastAutoCycleCreatedDependencyTaskCount = createdDependencyTaskCount
             if totalStarted > 0 {
                 let remainingPreparation = prepareAssignedBatchRunQueue()
                 let remainingDetailsMissing = remainingPreparation.detailsMissingCount
@@ -3480,6 +3484,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 var summaryParts: [String] = [
                     message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
                 ]
+                if createdDependencyTaskCount > 0 {
+                    summaryParts.append(message("Created %d dependency placeholder task(s)", createdDependencyTaskCount))
+                }
                 if remainingDetailsMissing > 0 {
                     summaryParts.append(message("%d missing details", remainingDetailsMissing))
                 }
@@ -3507,7 +3514,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
             completedPasses += 1
             if autoCreateMissingDependencies {
-                _ = createMissingDependencyTasks()
+                createdDependencyTaskCount += createMissingDependencyTasks()
             }
             autoAssignTasks()
             runAssignedTaskExecutionsInBackground { started in
@@ -3570,6 +3577,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 completedPasses
                 )
             ]
+            if self.lastAutoCycleCreatedDependencyTaskCount > 0 {
+                summaryParts.append(
+                    self.message(
+                        "Created %d dependency placeholder task(s)",
+                        self.lastAutoCycleCreatedDependencyTaskCount
+                    )
+                )
+            }
             if remainingDetailsMissing > 0 {
                 summaryParts.append(self.message("%d missing details", remainingDetailsMissing))
             }

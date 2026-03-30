@@ -411,6 +411,7 @@
 "Auto cycle finished with no runnable assigned tasks" = "Cycle auto termine sans taches assignees executables";
 "Autopilot Create + Run" = "Autopilot creer + executer";
 "Autopilot Max Passes: %d" = "Nombre max de passes autopilot : %d";
+"Auto Create Missing Dependencies During Cycle" = "Auto-creer les dependances manquantes pendant le cycle";
 "PM autopilot requires at least one planned ticket" = "Le mode autopilot PM requiert au moins un ticket planifie";
 "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)" = "Autopilot PM termine · %d agent(s) · %d ticket(s) · %d execution(s) · %d passe(s)";
 "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run." = "%d %@ assignee(s) bloques par des dependances. Resolvez les dependances avant le batch run.";
