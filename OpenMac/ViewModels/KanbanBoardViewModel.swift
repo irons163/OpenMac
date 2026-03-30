@@ -1288,6 +1288,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private struct PMCreatedTaskDescriptor {
         let taskID: UUID
         let milestone: String
+        let epic: String
     }
 
     @Published private(set) var boards: [KanbanBoardRecord]
@@ -2194,10 +2195,12 @@ final class KanbanBoardViewModel: ObservableObject {
             tasks.append(task)
             let milestone = plannedTicket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedMilestone = milestone.isEmpty ? message("Unscheduled") : milestone
+            let epic = plannedTicket.epic.trimmingCharacters(in: .whitespacesAndNewlines)
             createdTasks.append(
                 PMCreatedTaskDescriptor(
                     taskID: task.id,
-                    milestone: resolvedMilestone
+                    milestone: resolvedMilestone,
+                    epic: epic
                 )
             )
             lastUnassignedTaskIDs.insert(task.id)
@@ -2259,7 +2262,43 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         guard !segments.isEmpty else { return nil }
-        return "\(message("Roadmap")): \(segments.joined(separator: " | "))"
+        return "\(message("Roadmap")) [\(message("Milestone"))]: \(segments.joined(separator: " | "))"
+    }
+
+    private func pmAutopilotEpicProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
+        let tasksWithEpic = createdTasks.filter {
+            !$0.epic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !tasksWithEpic.isEmpty else { return nil }
+
+        let groupedByEpic = Dictionary(grouping: tasksWithEpic) { descriptor in
+            descriptor.epic.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !groupedByEpic.isEmpty else { return nil }
+
+        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
+        let sortedEpics = groupedByEpic.keys.sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+
+        var segments: [String] = []
+        segments.reserveCapacity(sortedEpics.count)
+
+        for epic in sortedEpics {
+            let entries = groupedByEpic[epic] ?? []
+            let total = entries.count
+            guard total > 0 else { continue }
+            let advanced = entries.reduce(0) { partialResult, entry in
+                guard let status = statusByTaskID[entry.taskID] else {
+                    return partialResult
+                }
+                return partialResult + (status == .todo ? 0 : 1)
+            }
+            segments.append("\(message("Epic: %@", epic)) \(advanced)/\(total)")
+        }
+
+        guard !segments.isEmpty else { return nil }
+        return "\(message("Roadmap")) [\(message("Epic"))]: \(segments.joined(separator: " | "))"
     }
 
     @discardableResult
@@ -3742,6 +3781,9 @@ final class KanbanBoardViewModel: ObservableObject {
             summaryParts.append(self.message("Total Epics: %d", roadmapEpicCount))
             if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(createdTaskDescriptors) {
                 summaryParts.append(milestoneProgress)
+            }
+            if let epicProgress = self.pmAutopilotEpicProgressSummary(createdTaskDescriptors) {
+                summaryParts.append(epicProgress)
             }
             if self.lastAutoCycleCreatedDependencyTaskCount > 0 {
                 summaryParts.append(
