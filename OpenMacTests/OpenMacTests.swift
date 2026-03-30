@@ -4300,6 +4300,126 @@ struct ContentViewLogicTests {
         #expect(untouchedTickets.count == 1)
     }
 
+    @Test("pm blueprint wizard composes brief sections from non-empty fields")
+    func pmBlueprintBriefCompositionCoverage() {
+        let composed = ContentViewTestHooks.pmBlueprintBriefText(
+            vision: "Build a privacy-first dating app",
+            targetUsers: "Young professionals in cities",
+            coreFeatures: "profiles, matching, chat",
+            techScope: "",
+            constraints: "ship MVP in 8 weeks",
+            qualityBar: "crash-free > 99.5%"
+        )
+
+        #expect(composed.contains("Product Vision:"))
+        #expect(composed.contains("Build a privacy-first dating app"))
+        #expect(composed.contains("Target Users:"))
+        #expect(composed.contains("Core Features:"))
+        #expect(!composed.contains("Tech Scope:"))
+        #expect(composed.contains("Constraints:"))
+        #expect(composed.contains("Quality Bar:"))
+    }
+
+    @Test("pm blueprint wizard updates project brief and preserves existing project name")
+    func pmBlueprintApplyCoverage() {
+        var existingProjectName = "OpenMac Board"
+        var projectBrief = ""
+
+        let applied = ContentViewTestHooks.applyPMBlueprint(
+            vision: "Dating app MVP",
+            targetUsers: "Gen Z",
+            coreFeatures: "match, chat",
+            techScope: "iOS + backend API",
+            constraints: "",
+            qualityBar: "",
+            projectName: &existingProjectName,
+            projectBrief: &projectBrief
+        )
+        #expect(applied)
+        #expect(existingProjectName == "OpenMac Board")
+        #expect(projectBrief.contains("Product Vision:"))
+        #expect(projectBrief.contains("Dating app MVP"))
+
+        var blankName = "   "
+        var blankBrief = "old"
+        let appliedWithBlankName = ContentViewTestHooks.applyPMBlueprint(
+            vision: "New Product Name",
+            targetUsers: "",
+            coreFeatures: "",
+            techScope: "",
+            constraints: "",
+            qualityBar: "",
+            projectName: &blankName,
+            projectBrief: &blankBrief
+        )
+        #expect(appliedWithBlankName)
+        #expect(blankName == "New Product Name")
+        #expect(blankBrief.contains("Product Vision:"))
+
+        var untouchedName = "Keep Name"
+        var untouchedBrief = "Keep Brief"
+        let notApplied = ContentViewTestHooks.applyPMBlueprint(
+            vision: "   ",
+            targetUsers: "",
+            coreFeatures: "",
+            techScope: "",
+            constraints: "",
+            qualityBar: "",
+            projectName: &untouchedName,
+            projectBrief: &untouchedBrief
+        )
+        #expect(!notApplied)
+        #expect(untouchedName == "Keep Name")
+        #expect(untouchedBrief == "Keep Brief")
+    }
+
+    @Test("pm auto acceptance criteria appends checklist and avoids duplication")
+    func pmAutoAcceptanceCriteriaCoverage() {
+        let base = PMPlannedTicket(
+            title: "Core Chat Flow",
+            details: "Implement message sending.",
+            requiredSkills: ["swiftui", "backend"],
+            storyPoints: 8
+        )
+        let withAC = ContentViewTestHooks.applyingAutoAcceptanceCriteria(to: base)
+        #expect(withAC.details.contains("Acceptance Criteria:"))
+        #expect(withAC.details.contains("Automated tests are added or updated"))
+        #expect(withAC.details.contains("Performance and reliability checks"))
+
+        let duplicateAttempt = ContentViewTestHooks.applyingAutoAcceptanceCriteria(to: withAC)
+        #expect(duplicateAttempt.details == withAC.details)
+    }
+
+    @Test("pm test plan helper generates core test sections")
+    func pmTestPlanTextCoverage() {
+        let tickets = [
+            PMPlannedTicket(
+                title: "Matching Engine",
+                details: "Build candidate ranking",
+                requiredSkills: ["backend"],
+                storyPoints: 5
+            ),
+            PMPlannedTicket(
+                title: "Chat UI",
+                details: "Build chat thread view",
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+
+        let text = ContentViewTestHooks.pmTestPlanText(
+            projectName: "Dating App",
+            projectBrief: "Ship MVP for matching and chat",
+            tickets: tickets
+        )
+        #expect(text.contains("Test Plan"))
+        #expect(text.contains("Total Tickets: 2"))
+        #expect(text.contains("Unit Test Coverage"))
+        #expect(text.contains("Integration Test Flows"))
+        #expect(text.contains("End-to-End Scenarios"))
+        #expect(text.contains("Quality Gates"))
+    }
+
     @Test("pm plan copy text helper includes summary and ticket breakdown")
     func pmPlanCopyTextCoverage() {
         let tickets = [
@@ -4330,6 +4450,19 @@ struct ContentViewLogicTests {
         #expect(text.contains("1. Build MVP (SP: 5)"))
         #expect(text.contains("Skills: qa, swiftui") || text.contains("Skills: swiftui, qa"))
         #expect(text.contains("2. Release Notes (SP: 1)"))
+    }
+
+    @Test("pm plan copy text helper appends test plan block when provided")
+    func pmPlanCopyTextIncludesTestPlanCoverage() {
+        let text = ContentViewTestHooks.pmPlanCopyText(
+            projectName: "OpenMac PM",
+            summary: "Plan generated.",
+            tickets: [],
+            testPlan: "# Test Plan\nUnit and integration checks."
+        )
+
+        #expect(text.contains("## Test Plan"))
+        #expect(text.contains("Unit and integration checks."))
     }
 
     @Test("content subviews can render representative body states")

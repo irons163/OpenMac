@@ -94,6 +94,13 @@ struct ContentView: View {
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
     @State private var pmSelectedTemplateID = "custom"
+    @State private var pmBlueprintVision = ""
+    @State private var pmBlueprintTargetUsers = ""
+    @State private var pmBlueprintCoreFeatures = ""
+    @State private var pmBlueprintTechScope = ""
+    @State private var pmBlueprintConstraints = ""
+    @State private var pmBlueprintQualityBar = ""
+    @State private var pmTestPlanText = ""
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -630,15 +637,28 @@ struct ContentView: View {
                 plannedTickets: $pmPlannedTickets,
                 selectedTemplateID: $pmSelectedTemplateID,
                 templateOptions: pmTemplateOptions,
+                blueprintVision: $pmBlueprintVision,
+                blueprintTargetUsers: $pmBlueprintTargetUsers,
+                blueprintCoreFeatures: $pmBlueprintCoreFeatures,
+                blueprintTechScope: $pmBlueprintTechScope,
+                blueprintConstraints: $pmBlueprintConstraints,
+                blueprintQualityBar: $pmBlueprintQualityBar,
+                testPlanText: pmTestPlanText,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closePMPlannerSheet,
                 onApplyTemplate: applyPMTemplateFromSheet,
                 onApplyTemplateAndGenerate: applyAndGeneratePMTemplateFromSheet,
+                onApplyBlueprint: applyPMBlueprintFromSheet,
+                onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
+                onGenerateTestPlan: generatePMTestPlanFromSheet,
+                onAutoACForAllTickets: applyPMAutoAcceptanceCriteriaForAllTickets,
+                onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
                 onCreateTickets: createPMTicketsFromSheet,
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
-                onCopyPlan: copyPMPlanFromSheet
+                onCopyPlan: copyPMPlanFromSheet,
+                onCopyTestPlan: copyPMTestPlanFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -902,15 +922,29 @@ struct ContentView: View {
         pmAutoAssignAfterCreate = true
         pmCreateNewBoardForPlan = true
         pmSelectedTemplateID = Self.pmCustomTemplateID
+        pmBlueprintVision = ""
+        pmBlueprintTargetUsers = ""
+        pmBlueprintCoreFeatures = ""
+        pmBlueprintTechScope = ""
+        pmBlueprintConstraints = ""
+        pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmTestPlanText = ""
         isShowingPMPlannerSheet = true
     }
 
     private func closePMPlannerSheet() {
         pmSelectedTemplateID = Self.pmCustomTemplateID
+        pmBlueprintVision = ""
+        pmBlueprintTargetUsers = ""
+        pmBlueprintCoreFeatures = ""
+        pmBlueprintTechScope = ""
+        pmBlueprintConstraints = ""
+        pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmTestPlanText = ""
         isShowingPMPlannerSheet = false
     }
 
@@ -922,10 +956,33 @@ struct ContentView: View {
             planSummary: &pmPlanSummary,
             plannedTickets: &pmPlannedTickets
         )
+        pmTestPlanText = ""
     }
 
     private func applyAndGeneratePMTemplateFromSheet() {
         applyPMTemplateFromSheet()
+        generatePMPlanFromSheet()
+    }
+
+    private func applyPMBlueprintFromSheet() {
+        let applied = Self.applyPMBlueprint(
+            vision: pmBlueprintVision,
+            targetUsers: pmBlueprintTargetUsers,
+            coreFeatures: pmBlueprintCoreFeatures,
+            techScope: pmBlueprintTechScope,
+            constraints: pmBlueprintConstraints,
+            qualityBar: pmBlueprintQualityBar,
+            projectName: &pmProjectName,
+            projectBrief: &pmProjectBrief
+        )
+        guard applied else { return }
+        pmPlanSummary = ""
+        pmPlannedTickets = []
+        pmTestPlanText = ""
+    }
+
+    private func applyAndGeneratePMBlueprintFromSheet() {
+        applyPMBlueprintFromSheet()
         generatePMPlanFromSheet()
     }
 
@@ -942,6 +999,31 @@ struct ContentView: View {
         pmProjectName = plan.projectName
         pmPlanSummary = plan.summary
         pmPlannedTickets = plan.tickets
+        pmTestPlanText = Self.pmTestPlanText(
+            projectName: pmProjectName,
+            projectBrief: pmProjectBrief,
+            tickets: pmPlannedTickets
+        )
+    }
+
+    private func generatePMTestPlanFromSheet() {
+        pmTestPlanText = Self.pmTestPlanText(
+            projectName: pmProjectName,
+            projectBrief: pmProjectBrief,
+            tickets: pmPlannedTickets
+        )
+    }
+
+    private func applyPMAutoAcceptanceCriteriaForAllTickets() {
+        guard !pmPlannedTickets.isEmpty else { return }
+        pmPlannedTickets = pmPlannedTickets.map { ticket in
+            Self.applyingAutoAcceptanceCriteria(to: ticket)
+        }
+    }
+
+    private func applyPMAutoAcceptanceCriteriaForTicket(_ ticketIndex: Int) {
+        guard pmPlannedTickets.indices.contains(ticketIndex) else { return }
+        pmPlannedTickets[ticketIndex] = Self.applyingAutoAcceptanceCriteria(to: pmPlannedTickets[ticketIndex])
     }
 
     private func createPMTicketsFromSheet() {
@@ -971,9 +1053,14 @@ struct ContentView: View {
             Self.pmPlanCopyText(
                 projectName: pmProjectName,
                 summary: pmPlanSummary,
-                tickets: pmPlannedTickets
+                tickets: pmPlannedTickets,
+                testPlan: pmTestPlanText
             )
         )
+    }
+
+    private func copyPMTestPlanFromSheet() {
+        copyToPasteboard(pmTestPlanText)
     }
 
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
@@ -1307,6 +1394,62 @@ struct ContentView: View {
         return true
     }
 
+    fileprivate static func applyPMBlueprint(
+        vision: String,
+        targetUsers: String,
+        coreFeatures: String,
+        techScope: String,
+        constraints: String,
+        qualityBar: String,
+        projectName: inout String,
+        projectBrief: inout String
+    ) -> Bool {
+        let composedBrief = pmBlueprintBriefText(
+            vision: vision,
+            targetUsers: targetUsers,
+            coreFeatures: coreFeatures,
+            techScope: techScope,
+            constraints: constraints,
+            qualityBar: qualityBar
+        )
+        guard !composedBrief.isEmpty else { return false }
+
+        if projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let trimmedVision = vision.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedVision.isEmpty {
+                projectName = trimmedVision
+            }
+        }
+        projectBrief = composedBrief
+        return true
+    }
+
+    fileprivate static func pmBlueprintBriefText(
+        vision: String,
+        targetUsers: String,
+        coreFeatures: String,
+        techScope: String,
+        constraints: String,
+        qualityBar: String
+    ) -> String {
+        let sections: [(String, String)] = [
+            (L10n.string("Product Vision"), vision),
+            (L10n.string("Target Users"), targetUsers),
+            (L10n.string("Core Features"), coreFeatures),
+            (L10n.string("Tech Scope"), techScope),
+            (L10n.string("Constraints"), constraints),
+            (L10n.string("Quality Bar"), qualityBar)
+        ]
+
+        let renderedSections = sections.compactMap { heading, value -> String? in
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedValue.isEmpty else { return nil }
+            return "\(heading):\n\(trimmedValue)"
+        }
+
+        return renderedSections.joined(separator: "\n\n")
+    }
+
     private static func pmBriefTemplateDefinitions() -> [PMBriefTemplateDefinition] {
         [
             PMBriefTemplateDefinition(
@@ -1345,11 +1488,13 @@ struct ContentView: View {
     fileprivate static func pmPlanCopyText(
         projectName: String,
         summary: String,
-        tickets: [PMPlannedTicket]
+        tickets: [PMPlannedTicket],
+        testPlan: String = ""
     ) -> String {
         let trimmedProjectName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedProjectName = trimmedProjectName.isEmpty ? L10n.string("PM Project") : trimmedProjectName
         let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTestPlan = testPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var lines: [String] = [
             "# \(resolvedProjectName)",
@@ -1370,26 +1515,137 @@ struct ContentView: View {
 
         if tickets.isEmpty {
             lines.append(L10n.string("No generated tickets yet. Click Generate Plan."))
-            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            for (index, ticket) in tickets.enumerated() {
+                let trimmedTitle = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedTitle = trimmedTitle.isEmpty ? L10n.string("New Task") : trimmedTitle
+                lines.append("\(index + 1). \(resolvedTitle) (\(L10n.format("SP: %d", max(1, ticket.storyPoints))))")
+
+                if !ticket.requiredSkills.isEmpty {
+                    lines.append("   \(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))")
+                }
+
+                let trimmedDetails = ticket.details.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedDetails.isEmpty {
+                    lines.append("   \(trimmedDetails)")
+                }
+                lines.append("")
+            }
         }
 
-        for (index, ticket) in tickets.enumerated() {
-            let trimmedTitle = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let resolvedTitle = trimmedTitle.isEmpty ? L10n.string("New Task") : trimmedTitle
-            lines.append("\(index + 1). \(resolvedTitle) (\(L10n.format("SP: %d", max(1, ticket.storyPoints))))")
-
-            if !ticket.requiredSkills.isEmpty {
-                lines.append("   \(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))")
-            }
-
-            let trimmedDetails = ticket.details.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedDetails.isEmpty {
-                lines.append("   \(trimmedDetails)")
-            }
-            lines.append("")
+        if !trimmedTestPlan.isEmpty {
+            lines.append("## \(L10n.string("Test Plan"))")
+            lines.append(trimmedTestPlan)
         }
 
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func pmTestPlanText(
+        projectName: String,
+        projectBrief: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        let trimmedProjectName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedProjectName = trimmedProjectName.isEmpty ? L10n.string("PM Project") : trimmedProjectName
+        let briefSnippet = projectBrief
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+
+        let totalStoryPoints = tickets.reduce(0) { partialResult, ticket in
+            partialResult + max(1, ticket.storyPoints)
+        }
+        let criticalFlowTickets = tickets.filter { ticket in
+            ticket.storyPoints >= 5 || ticket.title.lowercased().contains("core")
+        }
+
+        var lines: [String] = [
+            "# \(L10n.string("Test Plan")) · \(resolvedProjectName)",
+            "",
+            L10n.format("Total Tickets: %d", tickets.count),
+            L10n.format("Total Story Points: %d", totalStoryPoints),
+            ""
+        ]
+
+        if !briefSnippet.isEmpty {
+            lines.append("\(L10n.string("Project Brief")): \(briefSnippet)")
+            lines.append("")
+        }
+
+        lines.append("1. \(L10n.string("Unit Test Coverage"))")
+        if tickets.isEmpty {
+            lines.append("- \(L10n.string("No generated tickets yet. Click Generate Plan."))")
+        } else {
+            for ticket in tickets.prefix(5) {
+                lines.append("- \(ticket.title)")
+            }
+        }
+        lines.append("")
+
+        lines.append("2. \(L10n.string("Integration Test Flows"))")
+        lines.append("- \(L10n.string("Validate cross-module contracts and data flow consistency."))")
+        lines.append("- \(L10n.string("Verify assignment, state transitions, and persisted workspace behavior."))")
+        lines.append("")
+
+        lines.append("3. \(L10n.string("End-to-End Scenarios"))")
+        if criticalFlowTickets.isEmpty {
+            lines.append("- \(L10n.string("Run an end-to-end happy path from To Do to Done with review handoff."))")
+        } else {
+            for ticket in criticalFlowTickets.prefix(3) {
+                lines.append("- \(L10n.format("Critical path: %@", ticket.title))")
+            }
+        }
+        lines.append("")
+
+        lines.append("4. \(L10n.string("Quality Gates"))")
+        lines.append("- \(L10n.string("No blocker defects in critical paths."))")
+        lines.append("- \(L10n.string("All acceptance criteria are covered by automated or manual checks."))")
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func applyingAutoAcceptanceCriteria(to ticket: PMPlannedTicket) -> PMPlannedTicket {
+        let existingDetails = ticket.details.trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingDetails.localizedCaseInsensitiveContains("Acceptance Criteria:") ||
+            existingDetails.localizedCaseInsensitiveContains("Acceptance:") {
+            return ticket
+        }
+
+        let criteriaLines = pmAutoAcceptanceCriteriaLines(for: ticket)
+        guard !criteriaLines.isEmpty else { return ticket }
+
+        let criteriaBlock = ([L10n.string("Acceptance Criteria:")] + criteriaLines.map { "- \($0)" })
+            .joined(separator: "\n")
+        let combinedDetails = existingDetails.isEmpty
+            ? criteriaBlock
+            : "\(existingDetails)\n\n\(criteriaBlock)"
+
+        return PMPlannedTicket(
+            title: ticket.title,
+            details: combinedDetails,
+            requiredSkills: ticket.requiredSkills,
+            storyPoints: ticket.storyPoints
+        )
+    }
+
+    private static func pmAutoAcceptanceCriteriaLines(for ticket: PMPlannedTicket) -> [String] {
+        let resolvedTitle = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? L10n.string("New Task")
+            : ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines = [
+            L10n.format("Implement and verify the scope for \"%@\".", resolvedTitle),
+            L10n.string("Primary happy path and key edge cases are validated."),
+            L10n.string("Automated tests are added or updated for critical behavior.")
+        ]
+
+        if !ticket.requiredSkills.isEmpty {
+            lines.append(L10n.format("Required skills integration is verified: %@.", ticket.requiredSkills.joined(separator: ", ")))
+        }
+        if ticket.storyPoints >= 5 {
+            lines.append(L10n.string("Performance and reliability checks pass for MVP load expectations."))
+        }
+        lines.append(L10n.string("Handoff notes include known limits, risks, and next actions."))
+        return lines
     }
 
     private func assignManually(taskID: UUID) {
@@ -3138,18 +3394,43 @@ private struct PMPlannerSheet: View {
     @Binding var plannedTickets: [PMPlannedTicket]
     @Binding var selectedTemplateID: String
     let templateOptions: [PMBriefTemplateOption]
+    @Binding var blueprintVision: String
+    @Binding var blueprintTargetUsers: String
+    @Binding var blueprintCoreFeatures: String
+    @Binding var blueprintTechScope: String
+    @Binding var blueprintConstraints: String
+    @Binding var blueprintQualityBar: String
+    let testPlanText: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
     let onCancel: () -> Void
     let onApplyTemplate: () -> Void
     let onApplyTemplateAndGenerate: () -> Void
+    let onApplyBlueprint: () -> Void
+    let onApplyBlueprintAndGenerate: () -> Void
     let onGeneratePlan: () -> Void
+    let onGenerateTestPlan: () -> Void
+    let onAutoACForAllTickets: () -> Void
+    let onAutoACTicket: (Int) -> Void
     let onCreateTickets: () -> Void
     let onCreateAndRun: () -> Void
     let onCopyPlan: () -> Void
+    let onCopyTestPlan: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
+    }
+
+    private var hasBlueprintInput: Bool {
+        let fields = [
+            blueprintVision,
+            blueprintTargetUsers,
+            blueprintCoreFeatures,
+            blueprintTechScope,
+            blueprintConstraints,
+            blueprintQualityBar
+        ]
+        return fields.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     var body: some View {
@@ -3178,6 +3459,30 @@ private struct PMPlannerSheet: View {
                 Button(L10n.string("Apply + Generate"), action: onApplyTemplateAndGenerate)
                     .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.string("Blueprint Wizard"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField(L10n.string("Product Vision"), text: $blueprintVision)
+                TextField(L10n.string("Target Users"), text: $blueprintTargetUsers)
+                TextField(L10n.string("Core Features"), text: $blueprintCoreFeatures)
+                TextField(L10n.string("Tech Scope"), text: $blueprintTechScope)
+                TextField(L10n.string("Constraints"), text: $blueprintConstraints)
+                TextField(L10n.string("Quality Bar"), text: $blueprintQualityBar)
+
+                HStack {
+                    Button(L10n.string("Build Brief from Blueprint"), action: onApplyBlueprint)
+                        .disabled(!hasBlueprintInput)
+                    Button(L10n.string("Build + Generate"), action: onApplyBlueprintAndGenerate)
+                        .disabled(!hasBlueprintInput)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(10)
+            .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.string("Project Brief"))
@@ -3223,6 +3528,13 @@ private struct PMPlannerSheet: View {
                         .font(.caption.weight(.semibold))
                     Text(L10n.format("Total Story Points: %d", totalStoryPoints))
                         .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button(L10n.string("Auto AC for All Tickets"), action: onAutoACForAllTickets)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button(L10n.string("Generate Test Plan"), action: onGenerateTestPlan)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
                 .foregroundStyle(.secondary)
             }
@@ -3291,6 +3603,11 @@ private struct PMPlannerSheet: View {
                                 )
 
                                 HStack {
+                                    Button(L10n.string("Auto AC")) {
+                                        onAutoACTicket(index)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                     Spacer()
                                     Button(L10n.string("Remove Ticket")) {
                                         plannedTickets.remove(at: index)
@@ -3325,10 +3642,38 @@ private struct PMPlannerSheet: View {
                 .frame(maxHeight: 280)
             }
 
+            if !testPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(L10n.string("Test Plan"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L10n.string("Copy Test Plan"), action: onCopyTestPlan)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+
+                    ScrollView {
+                        Text(testPlanText)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 130)
+                    .padding(8)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
             HStack {
                 Spacer()
                 Button(L10n.string("Copy"), action: onCopyPlan)
-                    .disabled(plannedTickets.isEmpty && planSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        plannedTickets.isEmpty &&
+                            planSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                            testPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 Button(L10n.string("Cancel"), action: onCancel)
                 Button(L10n.string("Generate Plan"), action: onGeneratePlan)
                     .keyboardShortcut(.defaultAction)
@@ -3339,7 +3684,7 @@ private struct PMPlannerSheet: View {
             }
         }
         .padding(18)
-        .frame(width: 640, height: 680)
+        .frame(width: 680, height: 820)
     }
 }
 
@@ -5225,12 +5570,82 @@ enum ContentViewTestHooks {
         )
     }
 
+    static func pmBlueprintBriefText(
+        vision: String,
+        targetUsers: String,
+        coreFeatures: String,
+        techScope: String,
+        constraints: String,
+        qualityBar: String
+    ) -> String {
+        ContentView.pmBlueprintBriefText(
+            vision: vision,
+            targetUsers: targetUsers,
+            coreFeatures: coreFeatures,
+            techScope: techScope,
+            constraints: constraints,
+            qualityBar: qualityBar
+        )
+    }
+
+    static func applyPMBlueprint(
+        vision: String,
+        targetUsers: String,
+        coreFeatures: String,
+        techScope: String,
+        constraints: String,
+        qualityBar: String,
+        projectName: inout String,
+        projectBrief: inout String
+    ) -> Bool {
+        ContentView.applyPMBlueprint(
+            vision: vision,
+            targetUsers: targetUsers,
+            coreFeatures: coreFeatures,
+            techScope: techScope,
+            constraints: constraints,
+            qualityBar: qualityBar,
+            projectName: &projectName,
+            projectBrief: &projectBrief
+        )
+    }
+
+    static func pmTestPlanText(
+        projectName: String,
+        projectBrief: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        ContentView.pmTestPlanText(
+            projectName: projectName,
+            projectBrief: projectBrief,
+            tickets: tickets
+        )
+    }
+
+    static func applyingAutoAcceptanceCriteria(to ticket: PMPlannedTicket) -> PMPlannedTicket {
+        ContentView.applyingAutoAcceptanceCriteria(to: ticket)
+    }
+
     static func pmPlanCopyText(
         projectName: String,
         summary: String,
         tickets: [PMPlannedTicket]
     ) -> String {
         ContentView.pmPlanCopyText(projectName: projectName, summary: summary, tickets: tickets)
+    }
+
+    static func pmPlanCopyText(
+        projectName: String,
+        summary: String,
+        tickets: [PMPlannedTicket],
+        testPlan: String
+    ) -> String {
+        ContentView.pmPlanCopyText(
+            projectName: projectName,
+            summary: summary,
+            tickets: tickets,
+            testPlan: testPlan
+        )
     }
 
     static func applyTaskEdits(
