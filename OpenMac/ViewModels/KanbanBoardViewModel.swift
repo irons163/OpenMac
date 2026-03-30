@@ -1327,15 +1327,48 @@ final class KanbanBoardViewModel: ObservableObject {
         L10n.format(key, locale: nil, arguments: arguments)
     }
 
-    private static func normalizedPlannedTicket(from ticket: PMPlannedTicket) -> PMPlannedTicket? {
+    nonisolated private static func normalizedPlannedTicket(from ticket: PMPlannedTicket) -> PMPlannedTicket? {
         let normalized = PMPlannedTicket(
             title: ticket.title,
             details: ticket.details,
             requiredSkills: ticket.requiredSkills,
-            storyPoints: ticket.storyPoints
+            storyPoints: ticket.storyPoints,
+            epic: ticket.epic,
+            milestone: ticket.milestone
         )
         guard !normalized.title.isEmpty else { return nil }
         return normalized
+    }
+
+    nonisolated private static func planningMetadataAugmentedDetails(for ticket: PMPlannedTicket) -> String {
+        let existingLines = ticket.details
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return !trimmed.hasPrefix("milestone:") && !trimmed.hasPrefix("epic:")
+            }
+
+        var metadataLines: [String] = []
+        let milestone = ticket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let epic = ticket.epic.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !milestone.isEmpty {
+            metadataLines.append("Milestone: \(milestone)")
+        }
+        if !epic.isEmpty {
+            metadataLines.append("Epic: \(epic)")
+        }
+
+        let body = existingLines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !metadataLines.isEmpty else {
+            return body
+        }
+        guard !body.isEmpty else {
+            return metadataLines.joined(separator: "\n")
+        }
+        return metadataLines.joined(separator: "\n") + "\n" + body
     }
 
     var totalTaskCount: Int { tasks.count }
@@ -2125,7 +2158,7 @@ final class KanbanBoardViewModel: ObservableObject {
         for plannedTicket in normalizedTickets {
             let task = WorkTask(
                 title: plannedTicket.title,
-                details: plannedTicket.details,
+                details: Self.planningMetadataAugmentedDetails(for: plannedTicket),
                 requiredSkills: plannedTicket.requiredSkills,
                 storyPoints: plannedTicket.storyPoints,
                 status: .todo,

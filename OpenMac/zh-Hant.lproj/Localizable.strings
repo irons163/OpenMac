@@ -427,3 +427,13 @@
 "Inferred required skills: %@" = "推斷所需技能：%@";
 
 "Cancelled" = "已取消";
+
+"Roadmap" = "路線圖";
+"Milestone" = "里程碑";
+"Epic" = "史詩";
+"Total Milestones: %d" = "里程碑總數：%d";
+"Total Epics: %d" = "史詩總數：%d";
+"Milestone: %@" = "里程碑：%@";
+"Epic: %@" = "史詩：%@";
+"Unscheduled" = "未排程";
+"Project: %@" = "專案：%@";

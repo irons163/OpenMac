@@ -427,3 +427,13 @@
 "Inferred required skills: %@" = "Habilidades requeridas inferidas: %@";
 
 "Cancelled" = "Cancelado";
+
+"Roadmap" = "Hoja de ruta";
+"Milestone" = "Hito";
+"Epic" = "Épica";
+"Total Milestones: %d" = "Hitos totales: %d";
+"Total Epics: %d" = "Épicas totales: %d";
+"Milestone: %@" = "Hito: %@";
+"Epic: %@" = "Épica: %@";
+"Unscheduled" = "Sin programar";
+"Project: %@" = "Proyecto: %@";

@@ -2491,6 +2491,10 @@ struct KanbanFlowTests {
 
         let storyPoints = plan?.tickets.map(\.storyPoints) ?? []
         #expect(storyPoints.allSatisfy { $0 >= 1 })
+        let milestones = Set(plan?.tickets.map(\.milestone).filter { !$0.isEmpty } ?? [])
+        let epics = Set(plan?.tickets.map(\.epic).filter { !$0.isEmpty } ?? [])
+        #expect(!milestones.isEmpty)
+        #expect(!epics.isEmpty)
     }
 
     @Test("pm planner injects dependency hints for sequential execution flow")
@@ -2546,6 +2550,29 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks.contains { $0.assignedAgentID == implementationAgent.id })
         #expect(viewModel.lastBoardMessage == "PM planner created \(plan.tickets.count) ticket(s)")
         #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("planned ticket creation preserves milestone and epic metadata in task details")
+    func pmPlannerPlannedTicketDetailsIncludeRoadmapMetadata() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Foundation",
+                details: "Initial scope alignment.",
+                requiredSkills: ["planning"],
+                storyPoints: 2,
+                epic: "Planning",
+                milestone: "M1 Scope Locked"
+            )
+        ]
+
+        let createdCount = viewModel.addPlannedTickets(plannedTickets, autoAssign: false)
+
+        #expect(createdCount == 1)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].details.contains("Milestone: M1 Scope Locked"))
+        #expect(viewModel.tasks[0].details.contains("Epic: Planning"))
+        #expect(viewModel.tasks[0].details.contains("Initial scope alignment."))
     }
 
     @Test("pm planner bootstrap creates agents for missing required skills")
@@ -4787,13 +4814,17 @@ struct ContentViewLogicTests {
                 title: "Build MVP",
                 details: "Ship first milestone.",
                 requiredSkills: ["swiftui", "qa"],
-                storyPoints: 5
+                storyPoints: 5,
+                epic: "Core Product",
+                milestone: "M2 MVP Complete"
             ),
             PMPlannedTicket(
                 title: "Release Notes",
                 details: "",
                 requiredSkills: [],
-                storyPoints: 1
+                storyPoints: 1,
+                epic: "Release",
+                milestone: "M4 Release Ready"
             )
         ]
 
@@ -4807,9 +4838,47 @@ struct ContentViewLogicTests {
         #expect(text.contains("Plan generated for delivery."))
         #expect(text.contains("Total Tickets: 2"))
         #expect(text.contains("Total Story Points: 6"))
+        #expect(text.contains("Total Milestones: 2"))
+        #expect(text.contains("Total Epics: 2"))
+        #expect(text.contains("## Roadmap"))
         #expect(text.contains("1. Build MVP (SP: 5)"))
         #expect(text.contains("Skills: qa, swiftui") || text.contains("Skills: swiftui, qa"))
+        #expect(text.contains("Milestone: M2 MVP Complete"))
+        #expect(text.contains("Epic: Core Product"))
         #expect(text.contains("2. Release Notes (SP: 1)"))
+    }
+
+    @Test("pm roadmap helper groups tickets by milestone and includes epic tags")
+    func pmRoadmapTextCoverage() {
+        let tickets = [
+            PMPlannedTicket(
+                title: "Scope",
+                details: "",
+                requiredSkills: ["planning"],
+                storyPoints: 2,
+                epic: "Planning",
+                milestone: "M1 Scope Locked"
+            ),
+            PMPlannedTicket(
+                title: "Ship",
+                details: "",
+                requiredSkills: ["release"],
+                storyPoints: 3,
+                epic: "Release",
+                milestone: "M4 Release Ready"
+            )
+        ]
+
+        let roadmap = ContentViewTestHooks.pmRoadmapText(
+            projectName: "OpenMac PM",
+            tickets: tickets
+        )
+
+        #expect(roadmap.contains("Project: OpenMac PM"))
+        #expect(roadmap.contains("Milestone: M1 Scope Locked"))
+        #expect(roadmap.contains("[Planning] Scope"))
+        #expect(roadmap.contains("Milestone: M4 Release Ready"))
+        #expect(roadmap.contains("[Release] Ship"))
     }
 
     @Test("pm plan copy text helper appends test plan block when provided")

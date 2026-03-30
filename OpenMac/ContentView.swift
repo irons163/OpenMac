@@ -1463,7 +1463,16 @@ struct ContentView: View {
             partialResult + max(1, ticket.storyPoints)
         }
         lines.append(L10n.format("Total Story Points: %d", totalStoryPoints))
+        lines.append(L10n.format("Total Milestones: %d", pmUniqueMilestoneCount(in: tickets)))
+        lines.append(L10n.format("Total Epics: %d", pmUniqueEpicCount(in: tickets)))
         lines.append("")
+
+        let roadmapText = pmRoadmapText(projectName: resolvedProjectName, tickets: tickets)
+        if !roadmapText.isEmpty {
+            lines.append("## \(L10n.string("Roadmap"))")
+            lines.append(roadmapText)
+            lines.append("")
+        }
 
         if tickets.isEmpty {
             lines.append(L10n.string("No generated tickets yet. Click Generate Plan."))
@@ -1475,6 +1484,14 @@ struct ContentView: View {
 
                 if !ticket.requiredSkills.isEmpty {
                     lines.append("   \(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))")
+                }
+                let milestone = ticket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !milestone.isEmpty {
+                    lines.append("   \(L10n.format("Milestone: %@", milestone))")
+                }
+                let epic = ticket.epic.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !epic.isEmpty {
+                    lines.append("   \(L10n.format("Epic: %@", epic))")
                 }
 
                 let trimmedDetails = ticket.details.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1556,6 +1573,69 @@ struct ContentView: View {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    fileprivate static func pmRoadmapText(
+        projectName: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        guard !tickets.isEmpty else { return "" }
+
+        let grouped = Dictionary(grouping: tickets) { ticket -> String in
+            let milestone = ticket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+            return milestone.isEmpty ? L10n.string("Unscheduled") : milestone
+        }
+
+        let sortedMilestones = grouped.keys.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+
+        var lines: [String] = []
+        lines.append(L10n.format("Project: %@", projectName))
+        lines.append(L10n.format("Total Milestones: %d", pmUniqueMilestoneCount(in: tickets)))
+        lines.append(L10n.format("Total Epics: %d", pmUniqueEpicCount(in: tickets)))
+        lines.append("")
+
+        for milestone in sortedMilestones {
+            let milestoneTickets = grouped[milestone] ?? []
+            let uniqueEpics = Set(
+                milestoneTickets
+                    .map { $0.epic.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+            lines.append(
+                "- \(L10n.format("Milestone: %@", milestone)) · \(L10n.format("Total Tickets: %d", milestoneTickets.count)) · \(L10n.format("Total Epics: %d", uniqueEpics.count))"
+            )
+            for ticket in milestoneTickets {
+                let title = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? L10n.string("New Task")
+                    : ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let epic = ticket.epic.trimmingCharacters(in: .whitespacesAndNewlines)
+                if epic.isEmpty {
+                    lines.append("  - \(title) (\(L10n.format("SP: %d", max(1, ticket.storyPoints))))")
+                } else {
+                    lines.append("  - [\(epic)] \(title) (\(L10n.format("SP: %d", max(1, ticket.storyPoints))))")
+                }
+            }
+        }
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func pmUniqueMilestoneCount(in tickets: [PMPlannedTicket]) -> Int {
+        Set(
+            tickets
+                .map { $0.milestone.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { $0.isEmpty ? L10n.string("Unscheduled") : $0 }
+        ).count
+    }
+
+    private static func pmUniqueEpicCount(in tickets: [PMPlannedTicket]) -> Int {
+        Set(
+            tickets
+                .map { $0.epic.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        ).count
+    }
+
     fileprivate static func applyingDependencyChain(to tickets: [PMPlannedTicket]) -> [PMPlannedTicket] {
         guard !tickets.isEmpty else { return tickets }
 
@@ -1579,7 +1659,9 @@ struct ContentView: View {
                     title: ticket.title,
                     details: details,
                     requiredSkills: ticket.requiredSkills,
-                    storyPoints: ticket.storyPoints
+                    storyPoints: ticket.storyPoints,
+                    epic: ticket.epic,
+                    milestone: ticket.milestone
                 )
             )
         }
@@ -1636,7 +1718,9 @@ struct ContentView: View {
             title: ticket.title,
             details: combinedDetails,
             requiredSkills: ticket.requiredSkills,
-            storyPoints: ticket.storyPoints
+            storyPoints: ticket.storyPoints,
+            epic: ticket.epic,
+            milestone: ticket.milestone
         )
     }
 
@@ -3669,6 +3753,26 @@ private struct PMPlannerSheet: View {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
     }
 
+    private var totalMilestones: Int {
+        Set(
+            plannedTickets
+                .map { $0.milestone.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { $0.isEmpty ? L10n.string("Unscheduled") : $0 }
+        ).count
+    }
+
+    private var totalEpics: Int {
+        Set(
+            plannedTickets
+                .map { $0.epic.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        ).count
+    }
+
+    private var roadmapText: String {
+        ContentView.pmRoadmapText(projectName: projectName, tickets: plannedTickets)
+    }
+
     private var hasPlannedSkills: Bool {
         plannedTickets.contains { ticket in
             !ticket.requiredSkills.isEmpty
@@ -3795,6 +3899,10 @@ private struct PMPlannerSheet: View {
                         .font(.caption.weight(.semibold))
                     Text(L10n.format("Total Story Points: %d", totalStoryPoints))
                         .font(.caption.weight(.semibold))
+                    Text(L10n.format("Total Milestones: %d", totalMilestones))
+                        .font(.caption.weight(.semibold))
+                    Text(L10n.format("Total Epics: %d", totalEpics))
+                        .font(.caption.weight(.semibold))
                     Spacer()
                     Button(L10n.string("Create Missing Agents"), action: onCreateMissingAgents)
                         .buttonStyle(.bordered)
@@ -3812,6 +3920,23 @@ private struct PMPlannerSheet: View {
                         .controlSize(.small)
                 }
                 .foregroundStyle(.secondary)
+            }
+
+            if !roadmapText.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.string("Roadmap"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(roadmapText)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 120)
+                    .padding(8)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                }
             }
 
             if plannedTickets.isEmpty {
@@ -3853,6 +3978,26 @@ private struct PMPlannerSheet: View {
                                     )
                                 )
                                 .font(.caption)
+
+                                HStack(spacing: 8) {
+                                    TextField(
+                                        L10n.string("Milestone"),
+                                        text: Binding(
+                                            get: { plannedTickets[index].milestone },
+                                            set: { plannedTickets[index].milestone = $0 }
+                                        )
+                                    )
+                                    .font(.caption)
+
+                                    TextField(
+                                        L10n.string("Epic"),
+                                        text: Binding(
+                                            get: { plannedTickets[index].epic },
+                                            set: { plannedTickets[index].epic = $0 }
+                                        )
+                                    )
+                                    .font(.caption)
+                                }
 
                                 Stepper(
                                     L10n.format("Story Points: %d", max(1, plannedTickets[index].storyPoints)),
@@ -3904,7 +4049,9 @@ private struct PMPlannerSheet: View {
                                         title: L10n.string("New Task"),
                                         details: "",
                                         requiredSkills: [],
-                                        storyPoints: 1
+                                        storyPoints: 1,
+                                        epic: "",
+                                        milestone: ""
                                     )
                                 )
                             }
@@ -5964,6 +6111,13 @@ enum ContentViewTestHooks {
             tickets: tickets,
             testPlan: testPlan
         )
+    }
+
+    static func pmRoadmapText(
+        projectName: String,
+        tickets: [PMPlannedTicket]
+    ) -> String {
+        ContentView.pmRoadmapText(projectName: projectName, tickets: tickets)
     }
 
     static func applyTaskEdits(

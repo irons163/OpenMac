@@ -5,12 +5,16 @@ struct PMPlannedTicket: Equatable {
     var details: String
     var requiredSkills: [String]
     var storyPoints: Int
+    var epic: String
+    var milestone: String
 
-    init(
+    nonisolated init(
         title: String,
         details: String,
         requiredSkills: [String],
-        storyPoints: Int
+        storyPoints: Int,
+        epic: String = "",
+        milestone: String = ""
     ) {
         self.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         self.details = details.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -22,6 +26,8 @@ struct PMPlannedTicket: Equatable {
             )
         ).sorted()
         self.storyPoints = max(1, min(13, storyPoints))
+        self.epic = epic.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.milestone = milestone.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -80,7 +86,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 - Confirm milestone sequence for execution tracking.
                 """,
                 requiredSkills: scopedSkills + ["planning"],
-                storyPoints: 2 + (complexity / 2)
+                storyPoints: 2 + (complexity / 2),
+                epic: "Planning",
+                milestone: "M1 Scope Locked"
             ),
             PMPlannedTicket(
                 title: "\(resolvedProjectName) · Architecture & Delivery Plan",
@@ -94,7 +102,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 - Define execution order and ownership boundaries.
                 """,
                 requiredSkills: scopedSkills + ["architecture"],
-                storyPoints: 3 + (complexity / 2)
+                storyPoints: 3 + (complexity / 2),
+                epic: "Planning",
+                milestone: "M1 Scope Locked"
             ),
             PMPlannedTicket(
                 title: "\(resolvedProjectName) · Core Implementation",
@@ -108,7 +118,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 - Keep changes reviewable in incremental checkpoints.
                 """,
                 requiredSkills: scopedSkills,
-                storyPoints: 5 + complexity
+                storyPoints: 5 + complexity,
+                epic: "Core Product",
+                milestone: "M2 MVP Complete"
             ),
             PMPlannedTicket(
                 title: "\(resolvedProjectName) · Integration & Quality Gate",
@@ -122,7 +134,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 - Record unresolved issues and mitigation plan.
                 """,
                 requiredSkills: scopedSkills + ["testing", "tdd"],
-                storyPoints: 3 + (complexity / 2)
+                storyPoints: 3 + (complexity / 2),
+                epic: "Quality",
+                milestone: "M3 Quality Gate"
             ),
             PMPlannedTicket(
                 title: "\(resolvedProjectName) · Release, Docs, and Handoff",
@@ -136,7 +150,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                 - Provide concise next-step recommendations.
                 """,
                 requiredSkills: ["documentation", "release"] + scopedSkills,
-                storyPoints: 2 + (complexity / 2)
+                storyPoints: 2 + (complexity / 2),
+                epic: "Release",
+                milestone: "M4 Release Ready"
             )
         ]
 
@@ -154,7 +170,9 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
                     - Update plan assumptions based on spike results.
                     """,
                     requiredSkills: scopedSkills + ["planning"],
-                    storyPoints: 2
+                    storyPoints: 2,
+                    epic: "Risk",
+                    milestone: "M1 Scope Locked"
                 )
             )
         }

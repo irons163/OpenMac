@@ -427,3 +427,13 @@
 "Inferred required skills: %@" = "추론된 필수 스킬: %@";
 
 "Cancelled" = "취소됨";
+
+"Roadmap" = "로드맵";
+"Milestone" = "마일스톤";
+"Epic" = "에픽";
+"Total Milestones: %d" = "총 마일스톤: %d";
+"Total Epics: %d" = "총 에픽: %d";
+"Milestone: %@" = "마일스톤: %@";
+"Epic: %@" = "에픽: %@";
+"Unscheduled" = "미정";
+"Project: %@" = "프로젝트: %@";

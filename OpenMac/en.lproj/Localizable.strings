@@ -427,3 +427,13 @@
 "Inferred required skills: %@" = "Inferred required skills: %@";
 
 "Cancelled" = "Cancelled";
+
+"Roadmap" = "Roadmap";
+"Milestone" = "Milestone";
+"Epic" = "Epic";
+"Total Milestones: %d" = "Total Milestones: %d";
+"Total Epics: %d" = "Total Epics: %d";
+"Milestone: %@" = "Milestone: %@";
+"Epic: %@" = "Epic: %@";
+"Unscheduled" = "Unscheduled";
+"Project: %@" = "Project: %@";
