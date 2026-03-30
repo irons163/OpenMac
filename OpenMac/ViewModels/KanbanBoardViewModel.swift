@@ -2808,19 +2808,48 @@ final class KanbanBoardViewModel: ObservableObject {
 
     @discardableResult
     func applyAllHealthRecommendations() -> Int {
-        let actions = healthRecommendations().map(\.action)
         var appliedCount = 0
+        let maxPassCount = 5
+        var pass = 0
 
-        for action in actions where action.isAutoFixable {
-            if applyHealthRecommendation(action) {
-                appliedCount += 1
+        while pass < maxPassCount {
+            pass += 1
+            let actions = healthRecommendations().map(\.action).filter(\.isAutoFixable)
+            guard !actions.isEmpty else { break }
+
+            var advancedThisPass = false
+            for action in actions {
+                let before = HealthAutoFixSnapshot(
+                    tasks: tasks,
+                    agents: agents,
+                    wipLimits: wipLimits,
+                    unassignedTaskIDs: lastUnassignedTaskIDs,
+                    assignmentReasons: lastAssignmentReasons
+                )
+                let applied = applyHealthRecommendation(action)
+                let after = HealthAutoFixSnapshot(
+                    tasks: tasks,
+                    agents: agents,
+                    wipLimits: wipLimits,
+                    unassignedTaskIDs: lastUnassignedTaskIDs,
+                    assignmentReasons: lastAssignmentReasons
+                )
+                let changed = before != after
+                if applied && changed {
+                    appliedCount += 1
+                    advancedThisPass = true
+                }
+            }
+
+            if !advancedThisPass {
+                break
             }
         }
 
         if appliedCount > 0 {
             lastBoardMessage = message("Applied %d health recommendation(s)", appliedCount)
             lastBoardMessageSeverity = .info
-        } else if !actions.isEmpty {
+        } else if !healthRecommendations().isEmpty {
             lastBoardMessage = message("No automatic fixes available for current recommendations")
             lastBoardMessageSeverity = .warning
         } else {
@@ -3009,6 +3038,14 @@ final class KanbanBoardViewModel: ObservableObject {
         let reference: DependencyReference
         let dependentTaskTitles: [String]
         let inferredSkills: [String]
+    }
+
+    private struct HealthAutoFixSnapshot: Equatable {
+        let tasks: [WorkTask]
+        let agents: [AgentProfile]
+        let wipLimits: [KanbanStatus: Int]
+        let unassignedTaskIDs: Set<UUID>
+        let assignmentReasons: [UUID: String]
     }
 
     private static func normalizedDependencyTitle(_ raw: String) -> String {

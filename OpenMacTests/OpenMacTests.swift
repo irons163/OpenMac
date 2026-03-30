@@ -3336,9 +3336,11 @@ struct KanbanFlowTests {
 
         let appliedCount = viewModel.applyAllHealthRecommendations()
 
-        #expect(appliedCount == 1)
-        #expect(viewModel.tasks.contains(where: { $0.title == "External API Contract" }))
-        #expect(viewModel.lastBoardMessage == "Applied 1 health recommendation(s)")
+        #expect(appliedCount == 2)
+        let generatedTask = viewModel.tasks.first(where: { $0.title == "External API Contract" })
+        #expect(generatedTask != nil)
+        #expect(generatedTask?.assignedAgentID == agent.id)
+        #expect(viewModel.lastBoardMessage == "Applied 2 health recommendation(s)")
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
