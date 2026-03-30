@@ -2950,6 +2950,34 @@ struct KanbanFlowTests {
         #expect(!applied)
     }
 
+    @Test("create-missing-dependency recommendation generates placeholder tasks")
+    func applyCreateMissingDependencyTasksRecommendationCreatesTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: External API Contract
+            Build feature code.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        let applied = viewModel.applyHealthRecommendation(.createMissingDependencyTasks)
+
+        #expect(applied)
+        #expect(viewModel.tasks.contains(where: { $0.title == "External API Contract" }))
+        #expect(viewModel.lastBoardMessage == "Created 1 dependency placeholder task(s)")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
     @Test("health recommendations include review WIP increase when review reaches limit")
     func includesReviewWIPIncreaseRecommendationWhenReviewAtLimit() {
         let reviewTask = WorkTask(
@@ -2969,6 +2997,35 @@ struct KanbanFlowTests {
         let actions = viewModel.healthRecommendations().map(\.action)
 
         #expect(actions.contains(.increaseWIPLimit(.review)))
+    }
+
+    @Test("includes create-missing-dependency-tasks recommendation when blockers reference unknown tickets")
+    func includesCreateMissingDependencyTasksRecommendation() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: External API Contract
+            Build feature code.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        let recommendations = viewModel.healthRecommendations()
+        let actions = recommendations.map(\.action)
+        let missingDependencyRecommendation = recommendations.first(where: { $0.id == "create-missing-dependency-tasks" })
+
+        #expect(actions.contains(.createMissingDependencyTasks))
+        #expect(missingDependencyRecommendation?.title == "Create Missing Dependency Tasks")
+        #expect(missingDependencyRecommendation?.detail.contains("1 missing dependency task(s)") == true)
     }
 
     @Test("includes manual triage recommendation when unassigned todo exists")
@@ -3212,6 +3269,34 @@ struct KanbanFlowTests {
         #expect(viewModel.lastBoardMessageSeverity?.rawValue == "info")
     }
 
+    @Test("apply-all includes create-missing-dependency auto-fix")
+    func applyAllIncludesCreateMissingDependencyTasksRecommendation() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let blocked = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: External API Contract
+            Build feature code.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+
+        let appliedCount = viewModel.applyAllHealthRecommendations()
+
+        #expect(appliedCount == 1)
+        #expect(viewModel.tasks.contains(where: { $0.title == "External API Contract" }))
+        #expect(viewModel.lastBoardMessage == "Applied 1 health recommendation(s)")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
     @Test("returns no health recommendations when board is healthy")
     func returnsNoHealthRecommendationsWhenHealthy() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
@@ -3248,6 +3333,10 @@ struct KanbanSupportTypeTests {
         #expect(
             BoardHealthRecommendation(action: .autoAssignUnassignedTodo, title: "", detail: "").id
                 == "auto-assign-unassigned-todo"
+        )
+        #expect(
+            BoardHealthRecommendation(action: .createMissingDependencyTasks, title: "", detail: "").id
+                == "create-missing-dependency-tasks"
         )
         #expect(
             BoardHealthRecommendation(action: .openManualTriage, title: "", detail: "").id
@@ -4005,6 +4094,14 @@ struct ContentViewLogicTests {
             openNewAgent: { newAgentSheetCount += 1 }
         )
         ContentViewTestHooks.postHealthRecommendation(
+            action: .createMissingDependencyTasks,
+            applied: true,
+            hasPendingManualTriage: false,
+            refresh: { refreshCount += 1 },
+            openManualTriage: { manualTriageCount += 1 },
+            openNewAgent: { newAgentSheetCount += 1 }
+        )
+        ContentViewTestHooks.postHealthRecommendation(
             action: .openManualTriage,
             applied: true,
             hasPendingManualTriage: false,
@@ -4029,7 +4126,7 @@ struct ContentViewLogicTests {
             openNewAgent: { newAgentSheetCount += 1 }
         )
 
-        #expect(refreshCount == 4)
+        #expect(refreshCount == 5)
         #expect(manualTriageCount == 2)
         #expect(newAgentSheetCount == 1)
     }

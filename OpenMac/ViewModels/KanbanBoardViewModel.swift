@@ -9,6 +9,7 @@ enum TaskAssigneeFilter: Equatable {
 
 enum BoardHealthAction: Equatable {
     case autoAssignUnassignedTodo
+    case createMissingDependencyTasks
     case openManualTriage
     case openNewAgent
     case rebalanceTodoLoad
@@ -19,7 +20,7 @@ enum BoardHealthAction: Equatable {
         switch self {
         case .openManualTriage, .openNewAgent:
             return false
-        case .autoAssignUnassignedTodo, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
+        case .autoAssignUnassignedTodo, .createMissingDependencyTasks, .rebalanceTodoLoad, .increaseWIPLimit, .archiveDone:
             return true
         }
     }
@@ -91,6 +92,8 @@ struct BoardHealthRecommendation: Identifiable, Equatable {
         switch action {
         case .autoAssignUnassignedTodo:
             return "auto-assign-unassigned-todo"
+        case .createMissingDependencyTasks:
+            return "create-missing-dependency-tasks"
         case .openManualTriage:
             return "open-manual-triage"
         case .openNewAgent:
@@ -2635,6 +2638,20 @@ final class KanbanBoardViewModel: ObservableObject {
     func healthRecommendations() -> [BoardHealthRecommendation] {
         var recommendations: [BoardHealthRecommendation] = []
 
+        let missingDependencyReferences = missingDependencyReferences()
+        if !missingDependencyReferences.isEmpty {
+            recommendations.append(
+                BoardHealthRecommendation(
+                    action: .createMissingDependencyTasks,
+                    title: message("Create Missing Dependency Tasks"),
+                    detail: message(
+                        "%d missing dependency task(s) can be generated from blockers",
+                        missingDependencyReferences.count
+                    )
+                )
+            )
+        }
+
         if unassignedTodoTaskCount > 0 {
             if !agents.isEmpty {
                 recommendations.append(
@@ -2714,6 +2731,9 @@ final class KanbanBoardViewModel: ObservableObject {
             autoAssignTasks()
             return tasks != beforeTasks || hasPendingManualTriage
 
+        case .createMissingDependencyTasks:
+            return createMissingDependencyTasks() > 0
+
         case .rebalanceTodoLoad:
             return rebalanceTodoAssignments() > 0
 
@@ -2733,6 +2753,43 @@ final class KanbanBoardViewModel: ObservableObject {
         case .archiveDone:
             return clearDoneTasks() > 0
         }
+    }
+
+    @discardableResult
+    func createMissingDependencyTasks(storyPoints: Int = 1) -> Int {
+        let missingDependencies = missingDependencyReferences()
+        guard !missingDependencies.isEmpty else {
+            lastBoardMessage = message("No missing dependency tasks were found")
+            lastBoardMessageSeverity = .warning
+            return 0
+        }
+
+        let normalizedStoryPoints = max(1, storyPoints)
+        var createdTaskIDs: [UUID] = []
+        createdTaskIDs.reserveCapacity(missingDependencies.count)
+
+        for dependency in missingDependencies {
+            let task = WorkTask(
+                title: dependency.displayTitle,
+                details: message(
+                    "Auto-generated dependency task. Created because other tasks reference this dependency: %@",
+                    dependency.displayTitle
+                ),
+                requiredSkills: [],
+                storyPoints: normalizedStoryPoints,
+                status: .todo,
+                assignedAgentID: nil
+            )
+            tasks.append(task)
+            createdTaskIDs.append(task.id)
+            lastUnassignedTaskIDs.insert(task.id)
+            lastAssignmentReasons[task.id] = nil
+        }
+
+        persistBoardState()
+        lastBoardMessage = message("Created %d dependency placeholder task(s)", createdTaskIDs.count)
+        lastBoardMessageSeverity = .info
+        return createdTaskIDs.count
     }
 
     @discardableResult
@@ -3039,6 +3096,34 @@ final class KanbanBoardViewModel: ObservableObject {
                 return !isCompleted
             }
             .map(\.displayTitle)
+    }
+
+    private func missingDependencyReferences() -> [DependencyReference] {
+        let existingDependencyTitles = Set(
+            tasks.compactMap { task in
+                let normalized = Self.normalizedDependencyTitle(task.title)
+                return normalized.isEmpty ? nil : normalized
+            }
+        )
+
+        var uniqueMissingDependenciesByNormalizedTitle: [String: String] = [:]
+
+        for task in tasks where task.status == .todo || task.status == .inProgress {
+            let dependencies = Self.parsedDependencyReferences(from: task.details)
+            for dependency in dependencies {
+                guard !existingDependencyTitles.contains(dependency.normalizedTitle) else { continue }
+                if uniqueMissingDependenciesByNormalizedTitle[dependency.normalizedTitle] == nil {
+                    uniqueMissingDependenciesByNormalizedTitle[dependency.normalizedTitle] = dependency.displayTitle
+                }
+            }
+        }
+
+        return uniqueMissingDependenciesByNormalizedTitle.keys.sorted().compactMap { normalizedTitle in
+            guard let displayTitle = uniqueMissingDependenciesByNormalizedTitle[normalizedTitle] else {
+                return nil
+            }
+            return DependencyReference(normalizedTitle: normalizedTitle, displayTitle: displayTitle)
+        }
     }
 
     func dependencyBlockReason(for taskID: UUID) -> String? {

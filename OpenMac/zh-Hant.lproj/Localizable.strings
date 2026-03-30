@@ -417,3 +417,8 @@
 "Blocked" = "阻塞";
 "Blocked by dependencies: %@" = "受依賴阻塞：%@";
 "Task blocked by dependencies: %@" = "任務受依賴阻塞：%@";
+"%d missing dependency task(s) can be generated from blockers" = "%d 個缺失依賴任務可由阻塞項目自動建立";
+"Create Missing Dependency Tasks" = "建立缺失依賴任務";
+"Created %d dependency placeholder task(s)" = "已建立 %d 個依賴占位任務";
+"No missing dependency tasks were found" = "找不到缺失的依賴任務";
+"Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "自動產生的依賴任務。由於其他任務參照此依賴而建立：%@";

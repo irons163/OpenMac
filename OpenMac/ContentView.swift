@@ -2504,7 +2504,7 @@ struct ContentView: View {
             if hasPendingManualTriage {
                 openManualTriage()
             }
-        case .rebalanceTodoLoad, .archiveDone:
+        case .createMissingDependencyTasks, .rebalanceTodoLoad, .archiveDone:
             refresh()
         case .openManualTriage:
             refresh()
@@ -4999,6 +4999,7 @@ private extension ContentView {
         hit { view.runAssignedExecutionsFromToolbar() }
         hit { view.applyHealthRecommendation(.openManualTriage) }
         hit { view.applyHealthRecommendation(.autoAssignUnassignedTodo) }
+        hit { view.applyHealthRecommendation(.createMissingDependencyTasks) }
         hit { view.applyHealthRecommendation(.rebalanceTodoLoad) }
         hit { view.applyHealthRecommendation(.archiveDone) }
         hit { view.applyHealthRecommendation(.openNewAgent) }

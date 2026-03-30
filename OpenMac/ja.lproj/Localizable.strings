@@ -417,3 +417,8 @@
 "Blocked" = "ブロック中";
 "Blocked by dependencies: %@" = "依存関係でブロック: %@";
 "Task blocked by dependencies: %@" = "タスクは依存関係でブロックされています: %@";
+"%d missing dependency task(s) can be generated from blockers" = "%d 件の不足している依存タスクをブロッカーから生成できます";
+"Create Missing Dependency Tasks" = "不足している依存タスクを作成";
+"Created %d dependency placeholder task(s)" = "依存プレースホルダータスクを %d 件作成しました";
+"No missing dependency tasks were found" = "不足している依存タスクは見つかりませんでした";
+"Auto-generated dependency task. Created because other tasks reference this dependency: %@" = "自動生成された依存タスクです。ほかのタスクがこの依存を参照しているため作成されました: %@";
