@@ -614,7 +614,7 @@ struct ContentView: View {
                 autoAssignAfterCreate: $pmAutoAssignAfterCreate,
                 createNewBoardForPlan: $pmCreateNewBoardForPlan,
                 planSummary: pmPlanSummary,
-                plannedTickets: pmPlannedTickets,
+                plannedTickets: $pmPlannedTickets,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closePMPlannerSheet,
@@ -1211,6 +1211,18 @@ struct ContentView: View {
             }
             suffix += 1
         }
+    }
+
+    fileprivate static func normalizedSkillList(from rawValue: String) -> [String] {
+        Array(
+            Set(
+                rawValue
+                    .split(separator: ",")
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        .sorted()
     }
 
     private func assignManually(taskID: UUID) {
@@ -2952,12 +2964,16 @@ private struct PMPlannerSheet: View {
     @Binding var autoAssignAfterCreate: Bool
     @Binding var createNewBoardForPlan: Bool
     let planSummary: String
-    let plannedTickets: [PMPlannedTicket]
+    @Binding var plannedTickets: [PMPlannedTicket]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
     let onCancel: () -> Void
     let onGeneratePlan: () -> Void
     let onCreateTickets: () -> Void
+
+    private var totalStoryPoints: Int {
+        plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -3005,6 +3021,16 @@ private struct PMPlannerSheet: View {
                 .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
             }
 
+            if !plannedTickets.isEmpty {
+                HStack(spacing: 12) {
+                    Text(L10n.format("Total Tickets: %d", plannedTickets.count))
+                        .font(.caption.weight(.semibold))
+                    Text(L10n.format("Total Story Points: %d", totalStoryPoints))
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.secondary)
+            }
+
             if plannedTickets.isEmpty {
                 Text(L10n.string("No generated tickets yet. Click Generate Plan."))
                     .font(.caption)
@@ -3014,35 +3040,93 @@ private struct PMPlannerSheet: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(plannedTickets.enumerated()), id: \.offset) { index, ticket in
+                        ForEach(plannedTickets.indices, id: \.self) { index in
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(alignment: .top) {
-                                    Text(L10n.format("%d. %@", index + 1, ticket.title))
-                                        .font(.subheadline.weight(.semibold))
+                                    Text("#\(index + 1)")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
                                     Spacer()
-                                    Text(L10n.format("SP: %d", ticket.storyPoints))
+                                    Text(L10n.format("SP: %d", max(1, plannedTickets[index].storyPoints)))
                                         .font(.caption.weight(.semibold))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 3)
                                         .background(.quaternary, in: Capsule())
                                 }
-                                if !ticket.requiredSkills.isEmpty {
-                                    Text(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+
+                                TextField(
+                                    L10n.string("Title"),
+                                    text: Binding(
+                                        get: { plannedTickets[index].title },
+                                        set: { plannedTickets[index].title = $0 }
+                                    )
+                                )
+
+                                TextField(
+                                    L10n.string("Skills (comma separated)"),
+                                    text: Binding(
+                                        get: { plannedTickets[index].requiredSkills.joined(separator: ", ") },
+                                        set: { plannedTickets[index].requiredSkills = ContentView.normalizedSkillList(from: $0) }
+                                    )
+                                )
+                                .font(.caption)
+
+                                Stepper(
+                                    L10n.format("Story Points: %d", max(1, plannedTickets[index].storyPoints)),
+                                    value: Binding(
+                                        get: { max(1, plannedTickets[index].storyPoints) },
+                                        set: { plannedTickets[index].storyPoints = max(1, min(13, $0)) }
+                                    ),
+                                    in: 1 ... 13
+                                )
+                                .font(.caption)
+
+                                TextEditor(
+                                    text: Binding(
+                                        get: { plannedTickets[index].details },
+                                        set: { plannedTickets[index].details = $0 }
+                                    )
+                                )
+                                .font(.caption)
+                                .frame(minHeight: 72, maxHeight: 92)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                )
+
+                                HStack {
+                                    Spacer()
+                                    Button(L10n.string("Remove Ticket")) {
+                                        plannedTickets.remove(at: index)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                 }
-                                Text(ticket.details)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
                         }
+
+                        HStack {
+                            Spacer()
+                            Button(L10n.string("Add Ticket")) {
+                                plannedTickets.append(
+                                    PMPlannedTicket(
+                                        title: L10n.string("New Task"),
+                                        details: "",
+                                        requiredSkills: [],
+                                        storyPoints: 1
+                                    )
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
                     .padding(.vertical, 2)
                 }
-                .frame(maxHeight: 240)
+                .frame(maxHeight: 280)
             }
 
             HStack {
@@ -3055,7 +3139,7 @@ private struct PMPlannerSheet: View {
             }
         }
         .padding(18)
-        .frame(width: 640, height: 620)
+        .frame(width: 640, height: 680)
     }
 }
 
@@ -4903,6 +4987,10 @@ enum ContentViewTestHooks {
 
     static func uniquePMBoardName(baseName: String, existingNames: [String]) -> String {
         ContentView.uniquePMBoardName(baseName: baseName, existingNames: existingNames)
+    }
+
+    static func normalizedSkillList(from rawValue: String) -> [String] {
+        ContentView.normalizedSkillList(from: rawValue)
     }
 
     static func applyTaskEdits(

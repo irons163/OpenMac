@@ -4200,6 +4200,14 @@ struct ContentViewLogicTests {
         #expect(duplicated == "Website Revamp (3)")
     }
 
+    @Test("pm planner skill list normalization trims deduplicates and lowercases")
+    func pmPlannerSkillListNormalizationCoverage() {
+        let normalized = ContentViewTestHooks.normalizedSkillList(
+            from: " SwiftUI,  QA ,swiftui, , Backend , qa "
+        )
+        #expect(normalized == ["backend", "qa", "swiftui"])
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()

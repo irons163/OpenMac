@@ -347,3 +347,7 @@
 "PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
 "Create New Board for Plan" = "Create New Board for Plan";
 "PM Project" = "PM Project";
+"Total Tickets: %d" = "Total Tickets: %d";
+"Total Story Points: %d" = "Total Story Points: %d";
+"Add Ticket" = "Add Ticket";
+"Remove Ticket" = "Remove Ticket";

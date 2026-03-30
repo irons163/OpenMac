@@ -347,3 +347,7 @@
 "PM planner created %d ticket(s)" = "PM 规划器已创建 %d 个 ticket";
 "Create New Board for Plan" = "为此计划创建新看板";
 "PM Project" = "PM 项目";
+"Total Tickets: %d" = "总 Tickets：%d";
+"Total Story Points: %d" = "总故事点数：%d";
+"Add Ticket" = "新增 Ticket";
+"Remove Ticket" = "移除 Ticket";
