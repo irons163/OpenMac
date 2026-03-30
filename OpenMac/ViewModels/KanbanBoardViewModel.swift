@@ -2334,6 +2334,39 @@ final class KanbanBoardViewModel: ObservableObject {
         return "\(message("Roadmap")) [\(message("To Do"))/\(message("In Progress"))/\(message("Review"))/\(message("Done"))]: \(todo)/\(inProgress)/\(review)/\(done)"
     }
 
+    private func pmAutopilotExecutionOutcomeSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
+        guard !createdTasks.isEmpty else { return nil }
+        let executionByTaskID: [UUID: TaskExecutionStatus] = Dictionary(
+            uniqueKeysWithValues: tasks.compactMap { task in
+                guard let executionStatus = task.executionRecord?.status else {
+                    return nil
+                }
+                return (task.id, executionStatus)
+            }
+        )
+
+        var succeeded = 0
+        var failed = 0
+        var running = 0
+
+        for descriptor in createdTasks {
+            guard let status = executionByTaskID[descriptor.taskID] else {
+                continue
+            }
+            switch status {
+            case .succeeded:
+                succeeded += 1
+            case .failed:
+                failed += 1
+            case .running:
+                running += 1
+            }
+        }
+
+        guard (succeeded + failed + running) > 0 else { return nil }
+        return "\(message("Roadmap")) [\(message("Succeeded"))/\(message("Failed"))/\(message("Running"))]: \(succeeded)/\(failed)/\(running)"
+    }
+
     @discardableResult
     func createMissingAgentsForPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
@@ -3817,6 +3850,9 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let statusDistribution = self.pmAutopilotStatusDistributionSummary(createdTaskDescriptors) {
                 summaryParts.append(statusDistribution)
+            }
+            if let executionOutcomes = self.pmAutopilotExecutionOutcomeSummary(createdTaskDescriptors) {
+                summaryParts.append(executionOutcomes)
             }
             if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(createdTaskDescriptors) {
                 summaryParts.append(milestoneProgress)
