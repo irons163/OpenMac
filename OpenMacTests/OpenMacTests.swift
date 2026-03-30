@@ -2474,6 +2474,60 @@ struct KanbanFlowTests {
         #expect(viewModel.overloadedAgentCount == 1)
     }
 
+    @Test("pm planner generates a multi-step plan with normalized story points")
+    func pmPlannerGeneratesMultiStepPlan() {
+        let planner = RuleBasedProjectPlanner()
+        let agent = AgentProfile(name: "Builder", skills: ["swiftui", "testing", "documentation"], maxConcurrentTasks: 3)
+
+        let plan = planner.generatePlan(
+            projectName: "OpenMac Assistant",
+            projectBrief: "Build a macOS AI assistant app with kanban workflow, testing, and release checklist.",
+            availableAgents: [agent]
+        )
+
+        #expect(plan != nil)
+        #expect((plan?.tickets.count ?? 0) >= 5)
+        #expect(!(plan?.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true))
+
+        let storyPoints = plan?.tickets.map(\.storyPoints) ?? []
+        #expect(storyPoints.allSatisfy { $0 >= 1 })
+    }
+
+    @Test("pm planner preview requires non-empty project brief")
+    func pmPlannerPreviewRequiresBrief() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plan = viewModel.previewProjectPlan(projectName: "Any", projectBrief: "   ")
+
+        #expect(plan == nil)
+        #expect(viewModel.lastBoardMessage == "Project brief is required")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm planner creates tickets and auto-assigns eligible work")
+    func pmPlannerCreatesTicketsAndAutoAssigns() {
+        let implementationAgent = AgentProfile(name: "Implementation", skills: ["swiftui", "backend", "testing"], maxConcurrentTasks: 8)
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [implementationAgent])
+        let planner = RuleBasedProjectPlanner()
+
+        guard let plan = planner.generatePlan(
+            projectName: "Automation Board",
+            projectBrief: "Create a kanban automation project with backend APIs and test coverage.",
+            availableAgents: [implementationAgent]
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        let createdCount = viewModel.addPlannedTickets(plan.tickets, autoAssign: true)
+
+        #expect(createdCount == plan.tickets.count)
+        #expect(viewModel.tasks.count == plan.tickets.count)
+        #expect(viewModel.tasks.allSatisfy { $0.status == .todo })
+        #expect(viewModel.tasks.contains { $0.assignedAgentID == implementationAgent.id })
+        #expect(viewModel.lastBoardMessage == "PM planner created \(plan.tickets.count) ticket(s)")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
     @Test("reports perfect health score for stable board")
     func reportsPerfectHealthScoreForStableBoard() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)

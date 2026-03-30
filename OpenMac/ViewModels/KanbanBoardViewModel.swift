@@ -1305,6 +1305,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
 
     private let assignmentEngine: AutoAssignmentEngine
+    private let projectPlanner: any ProjectPlanning
     private let taskExecutor: any AgentTaskExecuting
     private let boardStore: KanbanBoardStore?
     private let runOnBackground: ExecutionDispatcher
@@ -1318,6 +1319,17 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private func message(_ key: String, _ arguments: CVarArg...) -> String {
         L10n.format(key, locale: nil, arguments: arguments)
+    }
+
+    private static func normalizedPlannedTicket(from ticket: PMPlannedTicket) -> PMPlannedTicket? {
+        let normalized = PMPlannedTicket(
+            title: ticket.title,
+            details: ticket.details,
+            requiredSkills: ticket.requiredSkills,
+            storyPoints: ticket.storyPoints
+        )
+        guard !normalized.title.isEmpty else { return nil }
+        return normalized
     }
 
     var totalTaskCount: Int { tasks.count }
@@ -1369,6 +1381,7 @@ final class KanbanBoardViewModel: ObservableObject {
         agents: [AgentProfile],
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
         runOnBackground: @escaping ExecutionDispatcher = { work in
@@ -1393,6 +1406,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.agents = agents
         self.wipLimits = normalizedLimits
         self.assignmentEngine = assignmentEngine
+        self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
         self.runOnBackground = runOnBackground
@@ -1403,6 +1417,7 @@ final class KanbanBoardViewModel: ObservableObject {
         boards: [KanbanBoardRecord],
         selectedBoardID: UUID,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
         runOnBackground: @escaping ExecutionDispatcher = { work in
@@ -1427,6 +1442,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.agents = resolvedBoard.agents
         self.wipLimits = resolvedBoard.wipLimits
         self.assignmentEngine = assignmentEngine
+        self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
         self.runOnBackground = runOnBackground
@@ -2057,6 +2073,89 @@ final class KanbanBoardViewModel: ObservableObject {
         persistBoardState()
         lastBoardMessage = nil
         return true
+    }
+
+    func previewProjectPlan(
+        projectName: String,
+        projectBrief: String
+    ) -> PMProjectPlan? {
+        let trimmedBrief = projectBrief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBrief.isEmpty else {
+            lastBoardMessage = message("Project brief is required")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        guard let plan = projectPlanner.generatePlan(
+            projectName: projectName,
+            projectBrief: trimmedBrief,
+            availableAgents: agents
+        ),
+            !plan.tickets.isEmpty else {
+            lastBoardMessage = message("PM planner could not generate actionable tickets")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        lastBoardMessage = nil
+        return plan
+    }
+
+    @discardableResult
+    func addPlannedTickets(
+        _ plannedTickets: [PMPlannedTicket],
+        autoAssign: Bool
+    ) -> Int {
+        let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
+        guard !normalizedTickets.isEmpty else {
+            lastBoardMessage = message("PM planner could not generate actionable tickets")
+            lastBoardMessageSeverity = .warning
+            return 0
+        }
+
+        var createdTaskIDs: [UUID] = []
+        createdTaskIDs.reserveCapacity(normalizedTickets.count)
+
+        for plannedTicket in normalizedTickets {
+            let task = WorkTask(
+                title: plannedTicket.title,
+                details: plannedTicket.details,
+                requiredSkills: plannedTicket.requiredSkills,
+                storyPoints: plannedTicket.storyPoints,
+                status: .todo,
+                assignedAgentID: nil
+            )
+            tasks.append(task)
+            createdTaskIDs.append(task.id)
+            lastUnassignedTaskIDs.insert(task.id)
+            lastAssignmentReasons[task.id] = nil
+        }
+
+        if autoAssign {
+            for taskID in createdTaskIDs {
+                guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else {
+                    continue
+                }
+                guard tasks[taskIndex].assignedAgentID == nil else {
+                    continue
+                }
+
+                if let decision = assignmentEngine.bestAgent(
+                    for: tasks[taskIndex],
+                    among: tasks,
+                    agents: agents
+                ) {
+                    tasks[taskIndex].assignedAgentID = decision.agentID
+                    lastAssignmentReasons[taskID] = decision.reason
+                    lastUnassignedTaskIDs.remove(taskID)
+                }
+            }
+        }
+
+        persistBoardState()
+        lastBoardMessage = message("PM planner created %d ticket(s)", createdTaskIDs.count)
+        lastBoardMessageSeverity = .info
+        return createdTaskIDs.count
     }
 
     @discardableResult

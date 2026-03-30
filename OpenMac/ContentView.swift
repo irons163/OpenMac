@@ -32,6 +32,7 @@ struct ContentView: View {
     @State private var isShowingGlobalTaskFinder = false
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
+    @State private var isShowingPMPlannerSheet = false
     @State private var isShowingDeleteBoardAlert = false
     @State private var newBoardName = ""
     @State private var renameBoardName = ""
@@ -74,6 +75,11 @@ struct ContentView: View {
     @State private var selectedExecutionDetails: ExecutionDetailsPresentation?
     @State private var isBatchRunning = false
     @State private var selectedAgentConsoleAgentID: UUID?
+    @State private var pmProjectName = ""
+    @State private var pmProjectBrief = ""
+    @State private var pmAutoAssignAfterCreate = true
+    @State private var pmPlanSummary = ""
+    @State private var pmPlannedTickets: [PMPlannedTicket] = []
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -440,6 +446,13 @@ struct ContentView: View {
                     }
 
                     Section(L10n.string("Board")) {
+                        Button(L10n.string("PM Plan Project")) {
+                            openPMPlannerSheet()
+                        }
+                        .keyboardShortcut("p", modifiers: [.command, .shift])
+
+                        Divider()
+
                         Button(isBatchRunning ? L10n.string("Running Assigned Tasks...") : L10n.string("Run Assigned Tasks")) {
                             runAssignedExecutionsFromToolbar()
                         }
@@ -591,6 +604,20 @@ struct ContentView: View {
                 results: globalTaskSearchResults,
                 onOpenResult: openGlobalTaskSearchResult,
                 onClose: closeGlobalTaskFinder
+            )
+        }
+        .sheet(isPresented: $isShowingPMPlannerSheet) {
+            PMPlannerSheet(
+                projectName: $pmProjectName,
+                projectBrief: $pmProjectBrief,
+                autoAssignAfterCreate: $pmAutoAssignAfterCreate,
+                planSummary: pmPlanSummary,
+                plannedTickets: pmPlannedTickets,
+                boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+                onCancel: closePMPlannerSheet,
+                onGeneratePlan: generatePMPlanFromSheet,
+                onCreateTickets: createPMTicketsFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -846,6 +873,43 @@ struct ContentView: View {
     private func closeGlobalTaskFinder() {
         globalTaskSearchQuery = ""
         isShowingGlobalTaskFinder = false
+    }
+
+    private func openPMPlannerSheet() {
+        pmProjectName = viewModel.selectedBoardName
+        pmProjectBrief = ""
+        pmAutoAssignAfterCreate = true
+        pmPlanSummary = ""
+        pmPlannedTickets = []
+        isShowingPMPlannerSheet = true
+    }
+
+    private func closePMPlannerSheet() {
+        pmPlanSummary = ""
+        pmPlannedTickets = []
+        isShowingPMPlannerSheet = false
+    }
+
+    private func generatePMPlanFromSheet() {
+        guard let plan = viewModel.previewProjectPlan(
+            projectName: pmProjectName,
+            projectBrief: pmProjectBrief
+        ) else {
+            pmPlanSummary = ""
+            pmPlannedTickets = []
+            return
+        }
+
+        pmProjectName = plan.projectName
+        pmPlanSummary = plan.summary
+        pmPlannedTickets = plan.tickets
+    }
+
+    private func createPMTicketsFromSheet() {
+        let createdCount = viewModel.addPlannedTickets(pmPlannedTickets, autoAssign: pmAutoAssignAfterCreate)
+        guard createdCount > 0 else { return }
+        refreshTriageSelections()
+        closePMPlannerSheet()
     }
 
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
@@ -2847,6 +2911,117 @@ private struct GlobalTaskSearchSheet: View {
         }
         .padding(18)
         .frame(width: 560, height: 420)
+    }
+}
+
+private struct PMPlannerSheet: View {
+    @Binding var projectName: String
+    @Binding var projectBrief: String
+    @Binding var autoAssignAfterCreate: Bool
+    let planSummary: String
+    let plannedTickets: [PMPlannedTicket]
+    let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
+    let onCancel: () -> Void
+    let onGeneratePlan: () -> Void
+    let onCreateTickets: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.string("PM Plan Project"))
+                .font(.title3.weight(.semibold))
+
+            if let boardMessage, !boardMessage.isEmpty {
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
+            }
+
+            TextField(L10n.string("Project Name (optional)"), text: $projectName)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Project Brief"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $projectBrief)
+                    .font(.body)
+                    .frame(minHeight: 96, maxHeight: 120)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                    )
+            }
+
+            Text(L10n.string("Describe your goal, scope, and constraints. PM planner will turn this into executable tickets."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
+
+            if !planSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("Plan Summary"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(planSummary)
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .padding(10)
+                .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if plannedTickets.isEmpty {
+                Text(L10n.string("No generated tickets yet. Click Generate Plan."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(plannedTickets.enumerated()), id: \.offset) { index, ticket in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .top) {
+                                    Text(L10n.format("%d. %@", index + 1, ticket.title))
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(L10n.format("SP: %d", ticket.storyPoints))
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(.quaternary, in: Capsule())
+                                }
+                                if !ticket.requiredSkills.isEmpty {
+                                    Text(L10n.format("Skills: %@", ticket.requiredSkills.joined(separator: ", ")))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(ticket.details)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 240)
+            }
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Cancel"), action: onCancel)
+                Button(L10n.string("Generate Plan"), action: onGeneratePlan)
+                    .keyboardShortcut(.defaultAction)
+                Button(L10n.format("Create Tickets (%d)", plannedTickets.count), action: onCreateTickets)
+                    .disabled(plannedTickets.isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 640, height: 620)
     }
 }
 

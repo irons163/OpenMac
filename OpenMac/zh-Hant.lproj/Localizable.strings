@@ -332,3 +332,16 @@
 "Spanish" = "西班牙文";
 "Japanese" = "日文";
 "Korean" = "韓文";
+
+"PM Plan Project" = "PM 專案規劃";
+"Project Name (optional)" = "專案名稱（可選）";
+"Project Brief" = "專案說明";
+"Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "描述你的目標、範圍與限制。PM 規劃器會將其轉成可執行的 ticket。";
+"Auto Assign After Create" = "建立後自動分配";
+"Plan Summary" = "計畫摘要";
+"No generated tickets yet. Click Generate Plan." = "尚未產生 ticket。請先按「產生計畫」。";
+"Generate Plan" = "產生計畫";
+"Create Tickets (%d)" = "建立 Tickets（%d）";
+"Project brief is required" = "專案說明為必填";
+"PM planner could not generate actionable tickets" = "PM 規劃器無法產生可執行的 ticket";
+"PM planner created %d ticket(s)" = "PM 規劃器已建立 %d 個 ticket";

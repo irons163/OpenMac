@@ -332,3 +332,16 @@
 "Spanish" = "スペイン語";
 "Japanese" = "日本語";
 "Korean" = "韓国語";
+
+"PM Plan Project" = "PM Plan Project";
+"Project Name (optional)" = "Project Name (optional)";
+"Project Brief" = "Project Brief";
+"Describe your goal, scope, and constraints. PM planner will turn this into executable tickets." = "Describe your goal, scope, and constraints. PM planner will turn this into executable tickets.";
+"Auto Assign After Create" = "Auto Assign After Create";
+"Plan Summary" = "Plan Summary";
+"No generated tickets yet. Click Generate Plan." = "No generated tickets yet. Click Generate Plan.";
+"Generate Plan" = "Generate Plan";
+"Create Tickets (%d)" = "Create Tickets (%d)";
+"Project brief is required" = "Project brief is required";
+"PM planner could not generate actionable tickets" = "PM planner could not generate actionable tickets";
+"PM planner created %d ticket(s)" = "PM planner created %d ticket(s)";
