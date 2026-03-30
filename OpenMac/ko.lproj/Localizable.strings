@@ -398,6 +398,7 @@
 "Performance and reliability checks pass for MVP load expectations." = "MVP 예상 부하에 대해 성능/신뢰성 검증을 통과합니다.";
 "Handoff notes include known limits, risks, and next actions." = "핸드오프 노트에 알려진 한계, 리스크, 다음 액션을 포함합니다.";
 "Create Missing Agents" = "누락 스킬 에이전트 생성";
+"Chain Dependencies" = "의존성 연결";
 "No required skills found in PM tickets" = "PM 티켓에서 필요한 스킬을 찾지 못했습니다";
 "All required PM skills are already covered by existing agents" = "필요한 PM 스킬은 이미 기존 에이전트가 모두 커버하고 있습니다";
 "Created %d PM bootstrap agent(s) for missing skills" = "누락 스킬을 위해 PM 부트스트랩 에이전트 %d개를 생성했습니다";

@@ -4570,6 +4570,42 @@ struct ContentViewLogicTests {
         #expect(duplicateAttempt.details == withAC.details)
     }
 
+    @Test("pm dependency chain injects and updates depends-on lines")
+    func pmDependencyChainCoverage() {
+        let tickets = [
+            PMPlannedTicket(
+                title: "Scope",
+                details: "Clarify scope and deliverables.",
+                requiredSkills: ["planning"],
+                storyPoints: 2
+            ),
+            PMPlannedTicket(
+                title: "Architecture",
+                details: """
+                Depends on: OLD
+                Build architecture.
+                """,
+                requiredSkills: ["backend"],
+                storyPoints: 3
+            ),
+            PMPlannedTicket(
+                title: "Implementation",
+                details: "",
+                requiredSkills: ["swiftui"],
+                storyPoints: 5
+            )
+        ]
+
+        let chained = ContentViewTestHooks.applyingDependencyChain(to: tickets)
+
+        #expect(chained.count == 3)
+        #expect(chained[0].details.hasPrefix("Depends on: none"))
+        #expect(chained[1].details.hasPrefix("Depends on: Scope"))
+        #expect(chained[1].details.contains("Build architecture."))
+        #expect(chained[1].details.contains("Depends on: OLD") == false)
+        #expect(chained[2].details == "Depends on: Architecture")
+    }
+
     @Test("pm test plan helper generates core test sections")
     func pmTestPlanTextCoverage() {
         let tickets = [

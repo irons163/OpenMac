@@ -665,6 +665,7 @@ struct ContentView: View {
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
                 onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
+                onChainDependencies: applyPMDependencyChainFromSheet,
                 onAutoACForAllTickets: applyPMAutoAcceptanceCriteriaForAllTickets,
                 onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
                 onCreateTickets: createPMTicketsFromSheet,
@@ -1044,6 +1045,10 @@ struct ContentView: View {
         if createdCount > 0 {
             refreshTriageSelections()
         }
+    }
+
+    private func applyPMDependencyChainFromSheet() {
+        pmPlannedTickets = Self.applyingDependencyChain(to: pmPlannedTickets)
     }
 
     private func createPMTicketsFromSheet() {
@@ -1672,6 +1677,66 @@ struct ContentView: View {
         lines.append("- \(L10n.string("All acceptance criteria are covered by automated or manual checks."))")
 
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func applyingDependencyChain(to tickets: [PMPlannedTicket]) -> [PMPlannedTicket] {
+        guard !tickets.isEmpty else { return tickets }
+
+        var chainedTickets: [PMPlannedTicket] = []
+        chainedTickets.reserveCapacity(tickets.count)
+
+        for index in tickets.indices {
+            let ticket = tickets[index]
+            let dependencyTitle: String
+            if index == 0 {
+                dependencyTitle = "none"
+            } else {
+                let previousTitle = tickets[index - 1].title.trimmingCharacters(in: .whitespacesAndNewlines)
+                dependencyTitle = previousTitle.isEmpty ? L10n.string("New Task") : previousTitle
+            }
+
+            let dependencyLine = "Depends on: \(dependencyTitle)"
+            let details = applyingDependencyLine(dependencyLine, to: ticket.details)
+            chainedTickets.append(
+                PMPlannedTicket(
+                    title: ticket.title,
+                    details: details,
+                    requiredSkills: ticket.requiredSkills,
+                    storyPoints: ticket.storyPoints
+                )
+            )
+        }
+
+        return chainedTickets
+    }
+
+    private static func applyingDependencyLine(_ dependencyLine: String, to details: String) -> String {
+        let lines = details.components(separatedBy: .newlines)
+        let retainedLines = lines.filter { !isDependencyLine($0) }
+        let retainedBody = retainedLines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if retainedBody.isEmpty {
+            return dependencyLine
+        }
+        return "\(dependencyLine)\n\(retainedBody)"
+    }
+
+    private static func isDependencyLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let separatorIndex = trimmed.firstIndex(where: { $0 == ":" || $0 == "：" }) else {
+            return false
+        }
+
+        let prefix = trimmed[..<separatorIndex]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return
+            prefix == "depends on" ||
+            prefix == "dependency" ||
+            prefix == "dependencies" ||
+            prefix == "依賴" ||
+            prefix == "依赖"
     }
 
     fileprivate static func applyingAutoAcceptanceCriteria(to ticket: PMPlannedTicket) -> PMPlannedTicket {
@@ -3505,6 +3570,7 @@ private struct PMPlannerSheet: View {
     let onGeneratePlan: () -> Void
     let onGenerateTestPlan: () -> Void
     let onCreateMissingAgents: () -> Void
+    let onChainDependencies: () -> Void
     let onAutoACForAllTickets: () -> Void
     let onAutoACTicket: (Int) -> Void
     let onCreateTickets: () -> Void
@@ -3639,6 +3705,10 @@ private struct PMPlannerSheet: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled(!hasPlannedSkills)
+                    Button(L10n.string("Chain Dependencies"), action: onChainDependencies)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(plannedTickets.count < 2)
                     Button(L10n.string("Auto AC for All Tickets"), action: onAutoACForAllTickets)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -5770,6 +5840,10 @@ enum ContentViewTestHooks {
 
     static func applyingAutoAcceptanceCriteria(to ticket: PMPlannedTicket) -> PMPlannedTicket {
         ContentView.applyingAutoAcceptanceCriteria(to: ticket)
+    }
+
+    static func applyingDependencyChain(to tickets: [PMPlannedTicket]) -> [PMPlannedTicket] {
+        ContentView.applyingDependencyChain(to: tickets)
     }
 
     static func pmPlanCopyText(

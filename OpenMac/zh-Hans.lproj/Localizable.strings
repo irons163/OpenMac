@@ -398,6 +398,7 @@
 "Performance and reliability checks pass for MVP load expectations." = "性能与稳定性检查符合 MVP 负载预期。";
 "Handoff notes include known limits, risks, and next actions." = "交接说明包含已知限制、风险与下一步行动。";
 "Create Missing Agents" = "创建缺技能代理";
+"Chain Dependencies" = "串接依赖";
 "No required skills found in PM tickets" = "PM Tickets 中未找到所需技能";
 "All required PM skills are already covered by existing agents" = "所有 PM 所需技能都已由现有代理覆盖";
 "Created %d PM bootstrap agent(s) for missing skills" = "已创建 %d 位 PM 补齐代理以覆盖缺失技能";

@@ -398,6 +398,7 @@
 "Performance and reliability checks pass for MVP load expectations." = "Les controles de performance et de fiabilite passent pour la charge cible MVP.";
 "Handoff notes include known limits, risks, and next actions." = "Les notes de handoff incluent limites connues, risques et prochaines actions.";
 "Create Missing Agents" = "Creer les agents manquants";
+"Chain Dependencies" = "Chainer les dependances";
 "No required skills found in PM tickets" = "Aucune competence requise trouvee dans les tickets PM";
 "All required PM skills are already covered by existing agents" = "Toutes les competences PM requises sont deja couvertes par les agents existants";
 "Created %d PM bootstrap agent(s) for missing skills" = "Creation de %d agent(s) PM bootstrap pour les competences manquantes";
