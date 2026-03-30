@@ -9718,6 +9718,8 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
         #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Milestones: %d", 1)) == true)
         #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Epics: %d", 1)) == true)
+        #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")):") == true)
+        #expect(viewModel.lastBoardMessage?.contains("\(L10n.format("Milestone: %@", "M2 MVP Complete")) 1/1") == true)
     }
 
     @Test("pm autopilot summary reports dependency blockers left in backlog")
@@ -9761,6 +9763,7 @@ struct KanbanPersistenceTests {
         #expect(startedExecutions == 1)
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
         #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
+        #expect(viewModel.lastBoardMessage?.contains(L10n.format("Milestone: %@", L10n.string("Unscheduled"))) == true)
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 

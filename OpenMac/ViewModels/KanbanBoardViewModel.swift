@@ -1285,6 +1285,10 @@ struct AgentExecutionEvent: Identifiable, Equatable {
 
 final class KanbanBoardViewModel: ObservableObject {
     typealias ExecutionDispatcher = (@escaping () -> Void) -> Void
+    private struct PMCreatedTaskDescriptor {
+        let taskID: UUID
+        let milestone: String
+    }
 
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
@@ -2168,9 +2172,15 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return 0
         }
+        return addNormalizedPlannedTickets(normalizedTickets, autoAssign: autoAssign).count
+    }
 
-        var createdTaskIDs: [UUID] = []
-        createdTaskIDs.reserveCapacity(normalizedTickets.count)
+    private func addNormalizedPlannedTickets(
+        _ normalizedTickets: [PMPlannedTicket],
+        autoAssign: Bool
+    ) -> [PMCreatedTaskDescriptor] {
+        var createdTasks: [PMCreatedTaskDescriptor] = []
+        createdTasks.reserveCapacity(normalizedTickets.count)
 
         for plannedTicket in normalizedTickets {
             let task = WorkTask(
@@ -2182,13 +2192,21 @@ final class KanbanBoardViewModel: ObservableObject {
                 assignedAgentID: nil
             )
             tasks.append(task)
-            createdTaskIDs.append(task.id)
+            let milestone = plannedTicket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedMilestone = milestone.isEmpty ? message("Unscheduled") : milestone
+            createdTasks.append(
+                PMCreatedTaskDescriptor(
+                    taskID: task.id,
+                    milestone: resolvedMilestone
+                )
+            )
             lastUnassignedTaskIDs.insert(task.id)
             lastAssignmentReasons[task.id] = nil
         }
 
         if autoAssign {
-            for taskID in createdTaskIDs {
+            for createdTask in createdTasks {
+                let taskID = createdTask.taskID
                 guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else {
                     continue
                 }
@@ -2209,9 +2227,39 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         persistBoardState()
-        lastBoardMessage = message("PM planner created %d ticket(s)", createdTaskIDs.count)
+        lastBoardMessage = message("PM planner created %d ticket(s)", createdTasks.count)
         lastBoardMessageSeverity = .info
-        return createdTaskIDs.count
+        return createdTasks
+    }
+
+    private func pmAutopilotMilestoneProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
+        guard !createdTasks.isEmpty else { return nil }
+        let groupedByMilestone = Dictionary(grouping: createdTasks, by: \.milestone)
+        guard !groupedByMilestone.isEmpty else { return nil }
+
+        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
+        let sortedMilestones = groupedByMilestone.keys.sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+
+        var segments: [String] = []
+        segments.reserveCapacity(sortedMilestones.count)
+
+        for milestone in sortedMilestones {
+            let entries = groupedByMilestone[milestone] ?? []
+            let total = entries.count
+            guard total > 0 else { continue }
+            let advanced = entries.reduce(0) { partialResult, entry in
+                guard let status = statusByTaskID[entry.taskID] else {
+                    return partialResult
+                }
+                return partialResult + (status == .todo ? 0 : 1)
+            }
+            segments.append("\(message("Milestone: %@", milestone)) \(advanced)/\(total)")
+        }
+
+        guard !segments.isEmpty else { return nil }
+        return "\(message("Roadmap")): \(segments.joined(separator: " | "))"
     }
 
     @discardableResult
@@ -3660,7 +3708,11 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         let createdAgents = createMissingAgentsForPlannedTickets(normalizedTickets)
-        let createdTickets = addPlannedTickets(normalizedTickets, autoAssign: autoAssign)
+        let createdTaskDescriptors = addNormalizedPlannedTickets(
+            normalizedTickets,
+            autoAssign: autoAssign
+        )
+        let createdTickets = createdTaskDescriptors.count
         guard createdTickets > 0 else {
             completion(createdAgents, 0, 0, 0)
             return
@@ -3688,6 +3740,9 @@ final class KanbanBoardViewModel: ObservableObject {
             ]
             summaryParts.append(self.message("Total Milestones: %d", roadmapMilestoneCount))
             summaryParts.append(self.message("Total Epics: %d", roadmapEpicCount))
+            if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(createdTaskDescriptors) {
+                summaryParts.append(milestoneProgress)
+            }
             if self.lastAutoCycleCreatedDependencyTaskCount > 0 {
                 summaryParts.append(
                     self.message(
