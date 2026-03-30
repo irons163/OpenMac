@@ -153,6 +153,7 @@
 "%d failed" = "%d 실패";
 "%d missing details" = "%d 세부정보 누락";
 "%d skipped" = "%d 건너뛰었습니다.";
+"%d blocked by dependencies" = "의존성으로 차단됨 %d개";
 "%d started" = "%d 시작됨";
 "%d succeeded" = "%d 성공";
 "%d unassigned task(s) can be dispatched automatically" = "%d 할당되지 않은 작업을 자동으로 파견할 수 있습니다.";

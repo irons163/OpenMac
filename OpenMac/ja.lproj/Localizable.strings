@@ -153,6 +153,7 @@
 "%d failed" = "%d 失敗しました";
 "%d missing details" = "%d 詳細がありません";
 "%d skipped" = "%d スキップしました";
+"%d blocked by dependencies" = "依存関係でブロック: %d";
 "%d started" = "%d を開始しました";
 "%d succeeded" = "%d は成功しました";
 "%d unassigned task(s) can be dispatched automatically" = "%d 割り当てられていないタスクを自動的にディスパッチできます";

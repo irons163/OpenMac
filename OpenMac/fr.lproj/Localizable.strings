@@ -153,6 +153,7 @@
 "%d failed" = "%d a échoué";
 "%d missing details" = "%d détails manquants";
 "%d skipped" = "%d ignoré";
+"%d blocked by dependencies" = "%d bloqué par des dépendances";
 "%d started" = "%d a démarré";
 "%d succeeded" = "%d a réussi";
 "%d unassigned task(s) can be dispatched automatically" = "%d les tâches non attribuées peuvent être distribuées automatiquement";

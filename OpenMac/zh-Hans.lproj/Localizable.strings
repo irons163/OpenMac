@@ -153,6 +153,7 @@
 "%d failed" = "%d 失败";
 "%d missing details" = "%d 缺少详细信息";
 "%d skipped" = "%d 已跳过";
+"%d blocked by dependencies" = "%d 个任务受依赖阻塞";
 "%d started" = "%d 开始";
 "%d succeeded" = "%d 成功";
 "%d unassigned task(s) can be dispatched automatically" = "%d 未分配的任务可以自动分派";

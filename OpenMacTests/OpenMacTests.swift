@@ -7730,14 +7730,54 @@ struct KanbanPersistenceTests {
 
         let startedFirstPass = viewModel.runAssignedTaskExecutions()
 
-        #expect(startedFirstPass == 1)
+        #expect(startedFirstPass == 2)
         #expect(viewModel.tasks.first(where: { $0.id == prerequisite.id })?.executionRecord?.status == .succeeded)
-        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord == nil)
+        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord?.status == .succeeded)
 
         let startedSecondPass = viewModel.runAssignedTaskExecutions()
 
-        #expect(startedSecondPass == 1)
-        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord?.status == .succeeded)
+        #expect(startedSecondPass == 0)
+        #expect(viewModel.lastBoardMessage == "No assigned tasks are ready to run")
+    }
+
+    @Test("batch run summary includes remaining dependency blockers after runnable tasks finish")
+    func batchRunAssignedExecutionsSummaryIncludesRemainingDependencyBlockedCount() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let runnable = WorkTask(
+            title: "Build Spec",
+            details: "Write implementation notes",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let blocked = WorkTask(
+            title: "Implement Feature",
+            details: """
+            Depends on: External API Contract
+            Build feature code.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [runnable.id: .success(summary: "spec ready")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [blocked, runnable],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let started = viewModel.runAssignedTaskExecutions()
+
+        #expect(started == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == runnable.id })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.id == blocked.id })?.executionRecord == nil)
+        #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
     @Test("batch run warns when assigned tasks are blocked by unresolved dependencies")
@@ -9030,6 +9070,53 @@ struct KanbanPersistenceTests {
         #expect(startedCount == 1)
         #expect(viewModel.lastBoardMessage?.contains("1 skipped") == true)
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("background batch run drains dependency chain in a single run")
+    func runAssignedTaskExecutionsInBackgroundDrainsDependencyChain() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let prerequisite = WorkTask(
+            title: "API Spec",
+            details: "Finalize API contract",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let dependent = WorkTask(
+            title: "Client Integration",
+            details: """
+            Depends on: API Spec
+            Integrate client flow.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                prerequisite.id: .success(summary: "spec done"),
+                dependent.id: .success(summary: "integration done")
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [dependent, prerequisite],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedCount: Int?
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil })
+        #expect(startedCount == 2)
+        #expect(viewModel.tasks.first(where: { $0.id == prerequisite.id })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.id == dependent.id })?.executionRecord?.status == .succeeded)
     }
 
     @Test("auto cycle runs multiple passes until assigned queue is drained")

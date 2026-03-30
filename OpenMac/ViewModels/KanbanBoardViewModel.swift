@@ -3047,10 +3047,12 @@ final class KanbanBoardViewModel: ObservableObject {
         return message("Blocked by dependencies: %@", unresolved.joined(separator: ", "))
     }
 
-    private func prepareAssignedBatchRunQueue() -> BatchRunPreparation {
+    private func prepareAssignedBatchRunQueue(excluding attemptedTaskIDs: Set<UUID> = []) -> BatchRunPreparation {
         let assignedQueue = tasks
             .filter { task in
-                (task.status == .todo || task.status == .inProgress) && task.assignedAgentID != nil
+                (task.status == .todo || task.status == .inProgress) &&
+                    task.assignedAgentID != nil &&
+                    !attemptedTaskIDs.contains(task.id)
             }
             .sorted { lhs, rhs in
                 if lhs.storyPoints != rhs.storyPoints {
@@ -3101,31 +3103,41 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    private func noRunnableAssignedBatchMessage(
+        detailsMissingCount: Int,
+        dependencyBlockedCount: Int
+    ) -> String {
+        if detailsMissingCount > 0 {
+            let label = detailsMissingCount == 1 ? message("task") : message("tasks")
+            return message(
+                "%d assigned %@ with empty details. Fill details before batch run.",
+                detailsMissingCount,
+                label
+            )
+        }
+
+        if dependencyBlockedCount > 0 {
+            let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
+            return message(
+                "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
+                dependencyBlockedCount,
+                label
+            )
+        }
+
+        return message("No assigned tasks are ready to run")
+    }
+
     @discardableResult
     func runAssignedTaskExecutions() -> Int {
-        let batchPreparation = prepareAssignedBatchRunQueue()
-        let detailsMissingCount = batchPreparation.detailsMissingCount
-        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
-        let runnableTaskIDs = batchPreparation.runnableTaskIDs
+        var attemptedTaskIDs: Set<UUID> = []
+        var batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
 
-        guard !runnableTaskIDs.isEmpty else {
-            if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? message("task") : message("tasks")
-                lastBoardMessage = message(
-                    "%d assigned %@ with empty details. Fill details before batch run.",
-                    detailsMissingCount,
-                    label
-                )
-            } else if dependencyBlockedCount > 0 {
-                let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
-                lastBoardMessage = message(
-                    "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
-                    dependencyBlockedCount,
-                    label
-                )
-            } else {
-                lastBoardMessage = message("No assigned tasks are ready to run")
-            }
+        guard !batchPreparation.runnableTaskIDs.isEmpty else {
+            lastBoardMessage = noRunnableAssignedBatchMessage(
+                detailsMissingCount: batchPreparation.detailsMissingCount,
+                dependencyBlockedCount: batchPreparation.dependencyBlockedCount
+            )
             lastBoardMessageSeverity = .warning
             return 0
         }
@@ -3135,26 +3147,34 @@ final class KanbanBoardViewModel: ObservableObject {
         var failedCount = 0
         var skippedCount = 0
 
-        for taskID in runnableTaskIDs {
-            let didRun = runTaskExecution(taskID)
-            guard didRun else {
-                skippedCount += 1
-                continue
-            }
+        while !batchPreparation.runnableTaskIDs.isEmpty {
+            for taskID in batchPreparation.runnableTaskIDs {
+                attemptedTaskIDs.insert(taskID)
 
-            startedCount += 1
-            if let record = executionRecord(for: taskID) {
-                switch record.status {
-                case .succeeded:
-                    succeededCount += 1
-                case .failed:
-                    failedCount += 1
-                case .running:
-                    break
+                let didRun = runTaskExecution(taskID)
+                guard didRun else {
+                    skippedCount += 1
+                    continue
+                }
+
+                startedCount += 1
+                if let record = executionRecord(for: taskID) {
+                    switch record.status {
+                    case .succeeded:
+                        succeededCount += 1
+                    case .failed:
+                        failedCount += 1
+                    case .running:
+                        break
+                    }
                 }
             }
+
+            batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
         }
 
+        let detailsMissingCount = batchPreparation.detailsMissingCount
+        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
         var summaryParts = [
             message("Batch run finished"),
             message("%d started", startedCount),
@@ -3167,36 +3187,29 @@ final class KanbanBoardViewModel: ObservableObject {
         if detailsMissingCount > 0 {
             summaryParts.append(message("%d missing details", detailsMissingCount))
         }
+        if dependencyBlockedCount > 0 {
+            summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
+        }
 
         lastBoardMessage = summaryParts.joined(separator: " · ")
-        lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
+        lastBoardMessageSeverity = (
+            failedCount > 0 ||
+                skippedCount > 0 ||
+                detailsMissingCount > 0 ||
+                dependencyBlockedCount > 0
+        ) ? .warning : .info
         return startedCount
     }
 
     func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
-        let batchPreparation = prepareAssignedBatchRunQueue()
-        let detailsMissingCount = batchPreparation.detailsMissingCount
-        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
-        let runnableTaskIDs = batchPreparation.runnableTaskIDs
+        var attemptedTaskIDs: Set<UUID> = []
+        var batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
 
-        guard !runnableTaskIDs.isEmpty else {
-            if detailsMissingCount > 0 {
-                let label = detailsMissingCount == 1 ? message("task") : message("tasks")
-                lastBoardMessage = message(
-                    "%d assigned %@ with empty details. Fill details before batch run.",
-                    detailsMissingCount,
-                    label
-                )
-            } else if dependencyBlockedCount > 0 {
-                let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
-                lastBoardMessage = message(
-                    "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
-                    dependencyBlockedCount,
-                    label
-                )
-            } else {
-                lastBoardMessage = message("No assigned tasks are ready to run")
-            }
+        guard !batchPreparation.runnableTaskIDs.isEmpty else {
+            lastBoardMessage = noRunnableAssignedBatchMessage(
+                detailsMissingCount: batchPreparation.detailsMissingCount,
+                dependencyBlockedCount: batchPreparation.dependencyBlockedCount
+            )
             lastBoardMessageSeverity = .warning
             completion(0)
             return
@@ -3207,7 +3220,9 @@ final class KanbanBoardViewModel: ObservableObject {
         var failedCount = 0
         var skippedCount = 0
 
-        func finish() {
+        func finish(_ finalPreparation: BatchRunPreparation) {
+            let detailsMissingCount = finalPreparation.detailsMissingCount
+            let dependencyBlockedCount = finalPreparation.dependencyBlockedCount
             var summaryParts = [
                 message("Batch run finished"),
                 message("%d started", startedCount),
@@ -3220,22 +3235,40 @@ final class KanbanBoardViewModel: ObservableObject {
             if detailsMissingCount > 0 {
                 summaryParts.append(message("%d missing details", detailsMissingCount))
             }
+            if dependencyBlockedCount > 0 {
+                summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
+            }
             lastBoardMessage = summaryParts.joined(separator: " · ")
-            lastBoardMessageSeverity = (failedCount > 0 || skippedCount > 0 || detailsMissingCount > 0) ? .warning : .info
+            lastBoardMessageSeverity = (
+                failedCount > 0 ||
+                    skippedCount > 0 ||
+                    detailsMissingCount > 0 ||
+                    dependencyBlockedCount > 0
+            ) ? .warning : .info
             completion(startedCount)
         }
 
-        func runNext(at index: Int) {
+        func runNextRunnableBatch() {
+            batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
+            guard !batchPreparation.runnableTaskIDs.isEmpty else {
+                finish(batchPreparation)
+                return
+            }
+            runBatch(batchPreparation.runnableTaskIDs, at: 0)
+        }
+
+        func runBatch(_ runnableTaskIDs: [UUID], at index: Int) {
             guard index < runnableTaskIDs.count else {
-                finish()
+                runNextRunnableBatch()
                 return
             }
 
             let taskID = runnableTaskIDs[index]
+            attemptedTaskIDs.insert(taskID)
             runTaskExecutionInBackground(taskID) { didRun in
                 if !didRun {
                     skippedCount += 1
-                    runNext(at: index + 1)
+                    runBatch(runnableTaskIDs, at: index + 1)
                     return
                 }
 
@@ -3251,11 +3284,11 @@ final class KanbanBoardViewModel: ObservableObject {
                     }
                 }
 
-                runNext(at: index + 1)
+                runBatch(runnableTaskIDs, at: index + 1)
             }
         }
 
-        runNext(at: 0)
+        runBatch(batchPreparation.runnableTaskIDs, at: 0)
     }
 
     func runAutoDispatchCycleInBackground(

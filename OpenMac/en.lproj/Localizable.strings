@@ -153,6 +153,7 @@
 "%d failed" = "%d failed";
 "%d missing details" = "%d missing details";
 "%d skipped" = "%d skipped";
+"%d blocked by dependencies" = "%d blocked by dependencies";
 "%d started" = "%d started";
 "%d succeeded" = "%d succeeded";
 "%d unassigned task(s) can be dispatched automatically" = "%d unassigned task(s) can be dispatched automatically";
