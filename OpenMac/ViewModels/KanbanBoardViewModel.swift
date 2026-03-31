@@ -1363,6 +1363,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var executionQuotaUsage: ExecutionQuotaUsage
     @Published private(set) var executionParallelizationPolicy: ExecutionParallelizationPolicy
     @Published private(set) var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy
+    @Published private(set) var dagExecutionPolicy: DAGExecutionPolicy
+    @Published private(set) var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1559,6 +1561,8 @@ final class KanbanBoardViewModel: ObservableObject {
         executionQuotaUsage: ExecutionQuotaUsage = .init(),
         executionParallelizationPolicy: ExecutionParallelizationPolicy = .init(),
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
+        dagExecutionPolicy: DAGExecutionPolicy = .init(),
+        executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1594,6 +1598,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.executionQuotaUsage = executionQuotaUsage
         self.executionParallelizationPolicy = executionParallelizationPolicy
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
+        self.dagExecutionPolicy = dagExecutionPolicy
+        self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1616,6 +1622,8 @@ final class KanbanBoardViewModel: ObservableObject {
         executionQuotaUsage: ExecutionQuotaUsage = .init(),
         executionParallelizationPolicy: ExecutionParallelizationPolicy = .init(),
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
+        dagExecutionPolicy: DAGExecutionPolicy = .init(),
+        executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1651,6 +1659,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.executionQuotaUsage = executionQuotaUsage
         self.executionParallelizationPolicy = executionParallelizationPolicy
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
+        self.dagExecutionPolicy = dagExecutionPolicy
+        self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1931,7 +1941,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     executionQuotaPolicy: executionQuotaPolicy,
                     executionQuotaUsage: executionQuotaUsage,
                     executionParallelizationPolicy: executionParallelizationPolicy,
-                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
+                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
+                    dagExecutionPolicy: dagExecutionPolicy,
+                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
                 )
             )
         } catch {
@@ -1968,7 +1980,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     executionQuotaPolicy: executionQuotaPolicy,
                     executionQuotaUsage: executionQuotaUsage,
                     executionParallelizationPolicy: executionParallelizationPolicy,
-                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
+                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
+                    dagExecutionPolicy: dagExecutionPolicy,
+                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
                 )
             )
         } catch {
@@ -2249,6 +2263,8 @@ final class KanbanBoardViewModel: ObservableObject {
             executionQuotaUsage = snapshot.executionQuotaUsage ?? .init()
             executionParallelizationPolicy = snapshot.executionParallelizationPolicy ?? .init()
             gitHubPRQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy ?? .init()
+            dagExecutionPolicy = snapshot.dagExecutionPolicy ?? .init()
+            executionQualitySafetyGatePolicy = snapshot.executionQualitySafetyGatePolicy ?? .init()
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
                 importedBoards.contains { board in
                     board.tasks.contains(where: { $0.id == approvalEntry.key })
@@ -2285,6 +2301,12 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy {
                 gitHubPRQualityGatePolicy = importedQualityGatePolicy
+            }
+            if let importedDAGPolicy = snapshot.dagExecutionPolicy {
+                dagExecutionPolicy = importedDAGPolicy
+            }
+            if let importedQualitySafetyPolicy = snapshot.executionQualitySafetyGatePolicy {
+                executionQualitySafetyGatePolicy = importedQualitySafetyPolicy
             }
             if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
                 taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
@@ -2675,6 +2697,56 @@ final class KanbanBoardViewModel: ObservableObject {
 
         lastBoardMessage = nil
         return plan
+    }
+
+    func previewProjectBlueprint(
+        projectName: String,
+        projectBrief: String
+    ) -> PMProjectBlueprint? {
+        let trimmedBrief = projectBrief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBrief.isEmpty else {
+            lastBoardMessage = message("Project brief is required")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        guard let blueprintPlanner = projectPlanner as? any ProjectBlueprintPlanning,
+              let blueprint = blueprintPlanner.generateBlueprint(
+                  projectName: projectName,
+                  projectBrief: trimmedBrief,
+                  availableAgents: agents
+              ),
+              !blueprint.tickets.isEmpty else {
+            lastBoardMessage = message("PM planner could not generate actionable tickets")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        lastBoardMessage = nil
+        return blueprint
+    }
+
+    func projectBlueprintExportData(
+        projectName: String,
+        projectBrief: String
+    ) -> Data? {
+        guard let blueprint = previewProjectBlueprint(
+            projectName: projectName,
+            projectBrief: projectBrief
+        ) else {
+            return nil
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        do {
+            return try encoder.encode(blueprint)
+        } catch {
+            lastBoardMessage = message("Failed to export blueprint")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
     }
 
     @discardableResult
@@ -3793,6 +3865,48 @@ final class KanbanBoardViewModel: ObservableObject {
         message("PR quality gate commands: %d", gitHubPRQualityGatePolicy.commands.count)
     }
 
+    func updateDAGExecutionPolicy(
+        isEnabled: Bool,
+        autoAssignBeforeRun: Bool,
+        autoCreateMissingDependenciesDuringRun: Bool,
+        maxPasses: Int
+    ) {
+        dagExecutionPolicy = DAGExecutionPolicy(
+            isEnabled: isEnabled,
+            autoAssignBeforeRun: autoAssignBeforeRun,
+            autoCreateMissingDependenciesDuringRun: autoCreateMissingDependenciesDuringRun,
+            maxPasses: maxPasses
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated DAG scheduler settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func updateExecutionQualitySafetyGatePolicy(
+        isEnabled: Bool,
+        requireAcceptanceCriteria: Bool,
+        requireTestCoverageIntent: Bool,
+        requireSecurityPrivacyForSensitiveTasks: Bool
+    ) {
+        executionQualitySafetyGatePolicy = ExecutionQualitySafetyGatePolicy(
+            isEnabled: isEnabled,
+            requireAcceptanceCriteria: requireAcceptanceCriteria,
+            requireTestCoverageIntent: requireTestCoverageIntent,
+            requireSecurityPrivacyForSensitiveTasks: requireSecurityPrivacyForSensitiveTasks,
+            sensitiveKeywords: executionQualitySafetyGatePolicy.sensitiveKeywords
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated quality & safety gate settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func executionQualitySafetyGateSummaryText() -> String {
+        guard executionQualitySafetyGatePolicy.isEnabled else {
+            return message("Quality/safety gate is off")
+        }
+        return message("Quality/safety gate is on")
+    }
+
     func resetExecutionQuotaUsage() {
         executionQuotaUsage = ExecutionQuotaUsage()
         persistBoardState()
@@ -3807,6 +3921,42 @@ final class KanbanBoardViewModel: ObservableObject {
             executionQuotaUsage.estimatedTokensUsed,
             executionQuotaUsage.estimatedCostUSD
         )
+    }
+
+    private func qualitySafetyGateBlockReason(for task: WorkTask) -> String? {
+        let policy = executionQualitySafetyGatePolicy
+        guard policy.isEnabled else { return nil }
+
+        let details = task.details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedContext = "\(task.title)\n\(details)".lowercased()
+
+        if policy.requireAcceptanceCriteria,
+           Self.acceptanceCriteriaLines(from: details).isEmpty {
+            return message("Missing acceptance criteria required by quality/safety gate")
+        }
+
+        if policy.requireTestCoverageIntent {
+            let qualityTokens = ["test", "tests", "testing", "qa", "coverage", "e2e", "tdd", "驗證", "測試"]
+            let hasQualityIntent = qualityTokens.contains { normalizedContext.contains($0) }
+            if !hasQualityIntent {
+                return message("Missing test or coverage intent required by quality/safety gate")
+            }
+        }
+
+        if policy.requireSecurityPrivacyForSensitiveTasks {
+            let isSensitive = policy.sensitiveKeywords.contains { normalizedContext.contains($0) }
+            if isSensitive {
+                let hasSecurityNotes = normalizedContext.contains("security")
+                    || normalizedContext.contains("privacy")
+                    || normalizedContext.contains("安全")
+                    || normalizedContext.contains("隱私")
+                if !hasSecurityNotes {
+                    return message("Sensitive task requires security/privacy notes by quality/safety gate")
+                }
+            }
+        }
+
+        return nil
     }
 
     private func estimatedTokenUsage(for task: WorkTask) -> Int {
@@ -4329,6 +4479,7 @@ final class KanbanBoardViewModel: ObservableObject {
         var dependencyBlockedCount = 0
         var approvalBlockedCount = 0
         var quotaBlockedCount = 0
+        var qualitySafetyBlockedCount = 0
 
         for task in assignedQueue {
             guard !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -4342,6 +4493,11 @@ final class KanbanBoardViewModel: ObservableObject {
 
             if quotaCheckMessage(for: task) != nil {
                 quotaBlockedCount += 1
+                continue
+            }
+
+            if qualitySafetyGateBlockReason(for: task) != nil {
+                qualitySafetyBlockedCount += 1
                 continue
             }
 
@@ -4370,7 +4526,8 @@ final class KanbanBoardViewModel: ObservableObject {
             detailsMissingCount: detailsMissingCount,
             dependencyBlockedCount: dependencyBlockedCount,
             approvalBlockedCount: approvalBlockedCount,
-            quotaBlockedCount: quotaBlockedCount
+            quotaBlockedCount: quotaBlockedCount,
+            qualitySafetyBlockedCount: qualitySafetyBlockedCount
         )
     }
 
@@ -4378,13 +4535,15 @@ final class KanbanBoardViewModel: ObservableObject {
         detailsMissingCount: Int,
         dependencyBlockedCount: Int,
         approvalBlockedCount: Int,
-        quotaBlockedCount: Int
+        quotaBlockedCount: Int,
+        qualitySafetyBlockedCount: Int
     ) -> String {
         ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
             detailsMissingCount: detailsMissingCount,
             dependencyBlockedCount: dependencyBlockedCount,
             approvalBlockedCount: approvalBlockedCount,
-            quotaBlockedCount: quotaBlockedCount
+            quotaBlockedCount: quotaBlockedCount,
+            qualitySafetyBlockedCount: qualitySafetyBlockedCount
         )
     }
 
@@ -4405,7 +4564,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: preparation.detailsMissingCount,
                     dependencyBlockedCount: preparation.dependencyBlockedCount,
                     approvalBlockedCount: preparation.approvalBlockedCount,
-                    quotaBlockedCount: preparation.quotaBlockedCount
+                    quotaBlockedCount: preparation.quotaBlockedCount,
+                    qualitySafetyBlockedCount: preparation.qualitySafetyBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
@@ -4415,12 +4575,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
                 let approvalBlockedCount = state.finalPreparation.approvalBlockedCount
                 let quotaBlockedCount = state.finalPreparation.quotaBlockedCount
+                let qualitySafetyBlockedCount = state.finalPreparation.qualitySafetyBlockedCount
                 self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
                     counters: counters,
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
                     approvalBlockedCount: approvalBlockedCount,
                     quotaBlockedCount: quotaBlockedCount,
+                    qualitySafetyBlockedCount: qualitySafetyBlockedCount,
                     wasCancelled: false
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
@@ -4429,7 +4591,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
                     approvalBlockedCount: approvalBlockedCount,
-                    quotaBlockedCount: quotaBlockedCount
+                    quotaBlockedCount: quotaBlockedCount,
+                    qualitySafetyBlockedCount: qualitySafetyBlockedCount
                 )
             }
         )
@@ -4463,7 +4626,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: preparation.detailsMissingCount,
                     dependencyBlockedCount: preparation.dependencyBlockedCount,
                     approvalBlockedCount: preparation.approvalBlockedCount,
-                    quotaBlockedCount: preparation.quotaBlockedCount
+                    quotaBlockedCount: preparation.quotaBlockedCount,
+                    qualitySafetyBlockedCount: preparation.qualitySafetyBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
@@ -4474,12 +4638,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
                 let approvalBlockedCount = state.finalPreparation.approvalBlockedCount
                 let quotaBlockedCount = state.finalPreparation.quotaBlockedCount
+                let qualitySafetyBlockedCount = state.finalPreparation.qualitySafetyBlockedCount
                 self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
                     counters: counters,
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
                     approvalBlockedCount: approvalBlockedCount,
                     quotaBlockedCount: quotaBlockedCount,
+                    qualitySafetyBlockedCount: qualitySafetyBlockedCount,
                     wasCancelled: state.wasCancelled
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
@@ -4488,7 +4654,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
                     approvalBlockedCount: approvalBlockedCount,
-                    quotaBlockedCount: quotaBlockedCount
+                    quotaBlockedCount: quotaBlockedCount,
+                    qualitySafetyBlockedCount: qualitySafetyBlockedCount
                 )
             },
             completion: completion
@@ -4533,6 +4700,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 if state.totalStarted > 0 || state.wasCancelled {
                     let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
                     let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
+                    let remainingQualitySafetyBlocked = state.remainingPreparation.qualitySafetyBlockedCount
                     self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleFinishedMessage(
                         completedPasses: state.completedPasses,
                         totalStarted: state.totalStarted,
@@ -4541,7 +4709,8 @@ final class KanbanBoardViewModel: ObservableObject {
                         remainingDetailsMissing: remainingDetailsMissing,
                         remainingDependencyBlocked: remainingDependencyBlocked,
                         remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
-                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
+                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount,
+                        remainingQualitySafetyBlocked: remainingQualitySafetyBlocked
                     )
                     self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleFinished(
                         hadWarning: state.hadWarning,
@@ -4549,13 +4718,32 @@ final class KanbanBoardViewModel: ObservableObject {
                         remainingDetailsMissing: remainingDetailsMissing,
                         remainingDependencyBlocked: remainingDependencyBlocked,
                         remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
-                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
+                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount,
+                        remainingQualitySafetyBlocked: remainingQualitySafetyBlocked
                     )
                 } else if self.lastBoardMessage == nil {
                     self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleNoRunnableMessage
                     self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleNoRunnable
                 }
             },
+            completion: completion
+        )
+    }
+
+    func runDAGAutopilotInBackground(
+        completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
+    ) {
+        let policy = dagExecutionPolicy
+        let resolvedMaxPasses = policy.isEnabled ? policy.maxPasses : 3
+        let resolvedAutoAssign = policy.isEnabled ? policy.autoAssignBeforeRun : true
+        let resolvedAutoCreateDependencies = policy.isEnabled
+            ? policy.autoCreateMissingDependenciesDuringRun
+            : false
+
+        runAutoDispatchCycleInBackground(
+            maxPasses: resolvedMaxPasses,
+            autoCreateMissingDependencies: resolvedAutoCreateDependencies,
+            autoAssignBeforeRun: resolvedAutoAssign,
             completion: completion
         )
     }
@@ -4747,6 +4935,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 let createdTickets = state.createdTaskDescriptors.count
                 let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
                 let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
+                let remainingQualitySafetyBlocked = state.remainingPreparation.qualitySafetyBlockedCount
 
                 let roadmapSections = PMRoadmapSummaryBuilder.buildSections(
                     createdTasks: state.createdTaskDescriptors,
@@ -4767,7 +4956,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     remainingDetailsMissing: remainingDetailsMissing,
                     remainingDependencyBlocked: remainingDependencyBlocked,
                     remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
-                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
+                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount,
+                    remainingQualitySafetyBlocked: remainingQualitySafetyBlocked
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
                     cycleHadWarning: state.cycleHadWarning,
@@ -4775,7 +4965,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     remainingDetailsMissing: remainingDetailsMissing,
                     remainingDependencyBlocked: remainingDependencyBlocked,
                     remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
-                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
+                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount,
+                    remainingQualitySafetyBlocked: remainingQualitySafetyBlocked
                 )
             },
             completion: completion
@@ -5191,6 +5382,19 @@ final class KanbanBoardViewModel: ObservableObject {
                 status: .failed,
                 phase: .governance,
                 message: quotaMessage
+            )
+            return nil
+        }
+        if let qualitySafetyMessage = qualitySafetyGateBlockReason(for: tasks[taskIndex]) {
+            lastBoardMessage = qualitySafetyMessage
+            lastBoardMessageSeverity = .warning
+            appendAgentExecutionEvent(
+                agentID: agent.id,
+                taskID: taskID,
+                taskTitle: tasks[taskIndex].title,
+                status: .failed,
+                phase: .governance,
+                message: qualitySafetyMessage
             )
             return nil
         }
@@ -5637,7 +5841,9 @@ final class KanbanBoardViewModel: ObservableObject {
             executionQuotaPolicy: executionQuotaPolicy,
             executionQuotaUsage: executionQuotaUsage,
             executionParallelizationPolicy: executionParallelizationPolicy,
-            gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
+            gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
+            dagExecutionPolicy: dagExecutionPolicy,
+            executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
         )
         try? boardStore.save(snapshot)
     }
@@ -5672,6 +5878,8 @@ extension KanbanBoardViewModel {
                     executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
                     executionParallelizationPolicy: snapshot.executionParallelizationPolicy ?? .init(),
                     gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
+                    dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
+                    executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
                     taskExecutor: taskExecutor,
@@ -5694,6 +5902,8 @@ extension KanbanBoardViewModel {
                 executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
                 executionParallelizationPolicy: snapshot.executionParallelizationPolicy ?? .init(),
                 gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
+                dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
+                executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
                 taskExecutor: taskExecutor,

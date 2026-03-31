@@ -11,7 +11,8 @@ enum ExecutionSeverityPolicy {
         detailsMissingCount: Int,
         dependencyBlockedCount: Int,
         approvalBlockedCount: Int,
-        quotaBlockedCount: Int
+        quotaBlockedCount: Int,
+        qualitySafetyBlockedCount: Int = 0
     ) -> BoardMessageSeverity {
         (
             counters.failedCount > 0 ||
@@ -20,6 +21,7 @@ enum ExecutionSeverityPolicy {
                 detailsMissingCount > 0 ||
                 approvalBlockedCount > 0 ||
                 quotaBlockedCount > 0 ||
+                qualitySafetyBlockedCount > 0 ||
                 dependencyBlockedCount > 0
         ) ? .warning : .info
     }
@@ -30,7 +32,8 @@ enum ExecutionSeverityPolicy {
         remainingDetailsMissing: Int,
         remainingDependencyBlocked: Int,
         remainingApprovalBlocked: Int,
-        remainingQuotaBlocked: Int
+        remainingQuotaBlocked: Int,
+        remainingQualitySafetyBlocked: Int = 0
     ) -> BoardMessageSeverity {
         (
             hadWarning ||
@@ -38,6 +41,7 @@ enum ExecutionSeverityPolicy {
                 remainingDetailsMissing > 0 ||
                 remainingApprovalBlocked > 0 ||
                 remainingQuotaBlocked > 0 ||
+                remainingQualitySafetyBlocked > 0 ||
                 remainingDependencyBlocked > 0
         ) ? .warning : .info
     }
@@ -52,7 +56,8 @@ enum ExecutionSeverityPolicy {
         remainingDetailsMissing: Int,
         remainingDependencyBlocked: Int,
         remainingApprovalBlocked: Int,
-        remainingQuotaBlocked: Int
+        remainingQuotaBlocked: Int,
+        remainingQualitySafetyBlocked: Int = 0
     ) -> BoardMessageSeverity {
         (
             cycleHadWarning ||
@@ -60,6 +65,7 @@ enum ExecutionSeverityPolicy {
                 remainingDetailsMissing > 0 ||
                 remainingApprovalBlocked > 0 ||
                 remainingQuotaBlocked > 0 ||
+                remainingQualitySafetyBlocked > 0 ||
                 remainingDependencyBlocked > 0
         ) ? .warning : .info
     }

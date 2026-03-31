@@ -2497,6 +2497,24 @@ struct KanbanFlowTests {
         #expect(!epics.isEmpty)
     }
 
+    @Test("pm planner can generate blueprint artifact with dependency graph and quality gates")
+    func pmPlannerGeneratesBlueprintArtifact() {
+        let planner = RuleBasedProjectPlanner()
+        let agent = AgentProfile(name: "Planner", skills: ["swiftui", "testing", "release"], maxConcurrentTasks: 3)
+
+        let blueprint = planner.generateBlueprint(
+            projectName: "OpenMac Next",
+            projectBrief: "Build a macOS app with authentication, kanban workflow, tests, and release readiness.",
+            availableAgents: [agent]
+        )
+
+        #expect(blueprint != nil)
+        #expect(blueprint?.tickets.isEmpty == false)
+        #expect(blueprint?.productRequirements.isEmpty == false)
+        #expect(blueprint?.architectureModules.isEmpty == false)
+        #expect(blueprint?.qualitySafetyGates.count == 4)
+    }
+
     @Test("pm planner injects dependency hints for sequential execution flow")
     func pmPlannerInjectsDependencyHints() {
         let planner = RuleBasedProjectPlanner()
@@ -2622,6 +2640,21 @@ struct KanbanFlowTests {
         #expect(plan == nil)
         #expect(viewModel.lastBoardMessage == "Project brief is required")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm blueprint export returns json payload for valid brief")
+    func pmBlueprintExportData() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let data = viewModel.projectBlueprintExportData(
+            projectName: "Blueprint Export",
+            projectBrief: "Build a product with acceptance criteria, testing strategy, and release handoff."
+        )
+
+        #expect(data != nil)
+        let decoded = try? JSONDecoder().decode(PMProjectBlueprint.self, from: data ?? Data())
+        #expect(decoded != nil)
+        #expect(decoded?.projectName == "Blueprint Export")
+        #expect(decoded?.tickets.isEmpty == false)
     }
 
     @Test("pm planner creates tickets and auto-assigns eligible work")
@@ -10610,6 +10643,118 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains("2 started") == true)
         #expect(viewModel.lastBoardMessage?.contains("1 succeeded") == true)
         #expect(viewModel.lastBoardMessage?.contains("1 failed") == true)
+    }
+
+    @Test("quality/safety gate blocks assigned run until checklist is present")
+    func runAssignedTaskExecutionsInBackgroundBlockedByQualitySafetyGate() {
+        let agent = AgentProfile(name: "QA", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Auth login flow",
+            details: """
+            Implement OAuth login flow.
+            Depends on: none
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "ok")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updateExecutionQualitySafetyGatePolicy(
+            isEnabled: true,
+            requireAcceptanceCriteria: true,
+            requireTestCoverageIntent: true,
+            requireSecurityPrivacyForSensitiveTasks: true
+        )
+
+        var startedCount: Int?
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil })
+        #expect(startedCount == 0)
+        #expect(viewModel.lastBoardMessage?.contains("quality/safety gate") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("dag autopilot auto-assigns and drains dependency chain")
+    func runDAGAutopilotInBackgroundDrainsDependencyChain() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let first = WorkTask(
+            title: "Spec",
+            details: """
+            Acceptance:
+            - Spec is complete.
+            Test:
+            - Validate constraints.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let second = WorkTask(
+            title: "Build",
+            details: """
+            Depends on: Spec
+            Acceptance:
+            - Build is complete.
+            Test:
+            - Validate main path.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [
+                first.id: .success(summary: "spec done"),
+                second.id: .success(summary: "build done")
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [second, first],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updateDAGExecutionPolicy(
+            isEnabled: true,
+            autoAssignBeforeRun: true,
+            autoCreateMissingDependenciesDuringRun: false,
+            maxPasses: 8
+        )
+        viewModel.updateExecutionQualitySafetyGatePolicy(
+            isEnabled: true,
+            requireAcceptanceCriteria: true,
+            requireTestCoverageIntent: true,
+            requireSecurityPrivacyForSensitiveTasks: false
+        )
+
+        var startedCount: Int?
+        var completedPasses: Int?
+        viewModel.runDAGAutopilotInBackground { started, passes in
+            startedCount = started
+            completedPasses = passes
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedCount != nil && completedPasses != nil })
+        #expect(startedCount == 2)
+        #expect((completedPasses ?? 0) >= 2)
+        #expect(viewModel.tasks.first(where: { $0.id == first.id })?.executionRecord?.status == .succeeded)
+        #expect(viewModel.tasks.first(where: { $0.id == second.id })?.executionRecord?.status == .succeeded)
     }
 
     @Test("background batch run executes across agents in parallel when scheduler is enabled")

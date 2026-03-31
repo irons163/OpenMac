@@ -343,6 +343,68 @@ struct GitHubPRQualityGatePolicy: Equatable, Codable {
     }
 }
 
+struct DAGExecutionPolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var autoAssignBeforeRun: Bool
+    var autoCreateMissingDependenciesDuringRun: Bool
+    var maxPasses: Int
+
+    init(
+        isEnabled: Bool = true,
+        autoAssignBeforeRun: Bool = true,
+        autoCreateMissingDependenciesDuringRun: Bool = true,
+        maxPasses: Int = 6
+    ) {
+        self.isEnabled = isEnabled
+        self.autoAssignBeforeRun = autoAssignBeforeRun
+        self.autoCreateMissingDependenciesDuringRun = autoCreateMissingDependenciesDuringRun
+        self.maxPasses = max(1, min(24, maxPasses))
+    }
+}
+
+struct ExecutionQualitySafetyGatePolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var requireAcceptanceCriteria: Bool
+    var requireTestCoverageIntent: Bool
+    var requireSecurityPrivacyForSensitiveTasks: Bool
+    var sensitiveKeywords: [String]
+
+    init(
+        isEnabled: Bool = false,
+        requireAcceptanceCriteria: Bool = true,
+        requireTestCoverageIntent: Bool = true,
+        requireSecurityPrivacyForSensitiveTasks: Bool = true,
+        sensitiveKeywords: [String] = Self.defaultSensitiveKeywords
+    ) {
+        self.isEnabled = isEnabled
+        self.requireAcceptanceCriteria = requireAcceptanceCriteria
+        self.requireTestCoverageIntent = requireTestCoverageIntent
+        self.requireSecurityPrivacyForSensitiveTasks = requireSecurityPrivacyForSensitiveTasks
+        self.sensitiveKeywords = Self.normalizedKeywords(sensitiveKeywords)
+    }
+
+    nonisolated static var defaultSensitiveKeywords: [String] {
+        [
+            "auth", "oauth", "login", "password",
+            "payment", "billing", "card",
+            "privacy", "pii", "profile", "matchmaking"
+        ]
+    }
+
+    nonisolated private static func normalizedKeywords(_ rawKeywords: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for keyword in rawKeywords {
+            let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            normalized.append(trimmed)
+        }
+        return normalized.isEmpty ? defaultSensitiveKeywords : normalized
+    }
+}
+
 struct TaskTemplate: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String

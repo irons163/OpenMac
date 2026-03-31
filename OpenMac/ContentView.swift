@@ -124,6 +124,14 @@ struct ContentView: View {
     @State private var parallelSchedulerEnabled = false
     @State private var parallelSchedulerMaxAgents = 2
     @State private var prQualityGateEnabled = false
+    @State private var dagSchedulerEnabled = true
+    @State private var dagSchedulerAutoAssignBeforeRun = true
+    @State private var dagSchedulerAutoCreateDependencies = true
+    @State private var dagSchedulerMaxPasses = 6
+    @State private var qualitySafetyGateEnabled = false
+    @State private var qualitySafetyRequireAcceptance = true
+    @State private var qualitySafetyRequireCoverageIntent = true
+    @State private var qualitySafetyRequireSecurityPrivacyNotes = true
     @State private var isGitHubFlowRunning = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
@@ -384,6 +392,11 @@ struct ContentView: View {
                         }
                         .disabled(isAutoCycleRunning ? viewModel.isAutoCycleCancelRequested : !canRunAutoCycle)
 
+                        Button(L10n.string("Run DAG Autopilot")) {
+                            runDAGAutopilotFromToolbar()
+                        }
+                        .disabled(isAutoCycleRunning || isBatchRunning)
+
                         Toggle(
                             L10n.string("Auto Create Missing Dependencies During Cycle"),
                             isOn: $autoCycleAutoCreateMissingDependencies
@@ -577,6 +590,30 @@ struct ContentView: View {
                         applyPRQualityGateSettings()
                     }
                     Divider()
+                    Text(L10n.string("DAG Scheduler"))
+                    Toggle(L10n.string("Enable dependency DAG scheduler"), isOn: $dagSchedulerEnabled)
+                    Toggle(L10n.string("Auto-assign before DAG run"), isOn: $dagSchedulerAutoAssignBeforeRun)
+                    Toggle(L10n.string("Auto-create missing dependencies during DAG run"), isOn: $dagSchedulerAutoCreateDependencies)
+                    Stepper(
+                        L10n.format("DAG Max Passes: %d", dagSchedulerMaxPasses),
+                        value: $dagSchedulerMaxPasses,
+                        in: 1 ... 24
+                    )
+                    Button(L10n.string("Apply DAG Settings")) {
+                        applyDAGSchedulerSettings()
+                    }
+                    Divider()
+                    Text(L10n.string("Quality & Safety Gate"))
+                    Toggle(L10n.string("Enable quality/safety checks before execution"), isOn: $qualitySafetyGateEnabled)
+                    Toggle(L10n.string("Require acceptance criteria in task details"), isOn: $qualitySafetyRequireAcceptance)
+                    Toggle(L10n.string("Require test/coverage intent in task details"), isOn: $qualitySafetyRequireCoverageIntent)
+                    Toggle(L10n.string("Require security/privacy note for sensitive tasks"), isOn: $qualitySafetyRequireSecurityPrivacyNotes)
+                    Text(viewModel.executionQualitySafetyGateSummaryText())
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Apply Quality & Safety Settings")) {
+                        applyQualitySafetyGateSettings()
+                    }
+                    Divider()
                     Text(L10n.string("Projects Folder"))
                     Text(resolvedCodexProjectsDirectoryPath)
                         .font(.caption2.monospaced())
@@ -704,7 +741,8 @@ struct ContentView: View {
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
                 onRunAutopilot: runPMOneClickFlowFromSheet,
                 onCopyPlan: copyPMPlanFromSheet,
-                onCopyTestPlan: copyPMTestPlanFromSheet
+                onCopyTestPlan: copyPMTestPlanFromSheet,
+                onCopyBlueprint: copyPMBlueprintFromSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -832,6 +870,8 @@ struct ContentView: View {
             syncQuotaGovernanceDraftFromViewModel()
             syncParallelSchedulerDraftFromViewModel()
             syncPRQualityGateDraftFromViewModel()
+            syncDAGSchedulerDraftFromViewModel()
+            syncQualitySafetyGateDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
         }
         .onChange(of: appLanguageOverrideRawValue) { _, newValue in
@@ -1251,6 +1291,17 @@ struct ContentView: View {
         copyToPasteboard(pmTestPlanText)
     }
 
+    private func copyPMBlueprintFromSheet() {
+        guard let data = viewModel.projectBlueprintExportData(
+            projectName: pmProjectName,
+            projectBrief: pmProjectBrief
+        ),
+            let text = String(data: data, encoding: .utf8) else {
+            return
+        }
+        copyToPasteboard(text)
+    }
+
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
         let opened = viewModel.openTask(result.taskID, in: result.boardID)
         if opened {
@@ -1403,6 +1454,20 @@ struct ContentView: View {
         )
     }
 
+    private func runDAGAutopilotFromToolbar() {
+        _ = ExecutionToolbarUseCase.runAutoCycle(
+            isAutoCycleRunning: isAutoCycleRunning,
+            isBatchRunning: isBatchRunning,
+            setAutoCycleRunning: { isAutoCycleRunning = $0 },
+            runAutoDispatchCycleInBackground: { completion in
+                viewModel.runDAGAutopilotInBackground { startedCount, _ in
+                    completion(startedCount)
+                }
+            },
+            refresh: refreshTriageSelections
+        )
+    }
+
     private func cancelAutoCycleFromToolbar() {
         _ = ExecutionToolbarUseCase.cancelAutoCycle(
             isAutoCycleRunning: isAutoCycleRunning,
@@ -1512,6 +1577,38 @@ struct ContentView: View {
 
     private func applyPRQualityGateSettings() {
         viewModel.updateGitHubPRQualityGatePolicy(isEnabled: prQualityGateEnabled)
+    }
+
+    private func syncDAGSchedulerDraftFromViewModel() {
+        dagSchedulerEnabled = viewModel.dagExecutionPolicy.isEnabled
+        dagSchedulerAutoAssignBeforeRun = viewModel.dagExecutionPolicy.autoAssignBeforeRun
+        dagSchedulerAutoCreateDependencies = viewModel.dagExecutionPolicy.autoCreateMissingDependenciesDuringRun
+        dagSchedulerMaxPasses = viewModel.dagExecutionPolicy.maxPasses
+    }
+
+    private func applyDAGSchedulerSettings() {
+        viewModel.updateDAGExecutionPolicy(
+            isEnabled: dagSchedulerEnabled,
+            autoAssignBeforeRun: dagSchedulerAutoAssignBeforeRun,
+            autoCreateMissingDependenciesDuringRun: dagSchedulerAutoCreateDependencies,
+            maxPasses: dagSchedulerMaxPasses
+        )
+    }
+
+    private func syncQualitySafetyGateDraftFromViewModel() {
+        qualitySafetyGateEnabled = viewModel.executionQualitySafetyGatePolicy.isEnabled
+        qualitySafetyRequireAcceptance = viewModel.executionQualitySafetyGatePolicy.requireAcceptanceCriteria
+        qualitySafetyRequireCoverageIntent = viewModel.executionQualitySafetyGatePolicy.requireTestCoverageIntent
+        qualitySafetyRequireSecurityPrivacyNotes = viewModel.executionQualitySafetyGatePolicy.requireSecurityPrivacyForSensitiveTasks
+    }
+
+    private func applyQualitySafetyGateSettings() {
+        viewModel.updateExecutionQualitySafetyGatePolicy(
+            isEnabled: qualitySafetyGateEnabled,
+            requireAcceptanceCriteria: qualitySafetyRequireAcceptance,
+            requireTestCoverageIntent: qualitySafetyRequireCoverageIntent,
+            requireSecurityPrivacyForSensitiveTasks: qualitySafetyRequireSecurityPrivacyNotes
+        )
     }
 
     private func applyAutoRetrySettings() {
@@ -4378,6 +4475,7 @@ private struct PMPlannerSheet: View {
     let onRunAutopilot: () -> Void
     let onCopyPlan: () -> Void
     let onCopyTestPlan: () -> Void
+    let onCopyBlueprint: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
@@ -4726,6 +4824,8 @@ private struct PMPlannerSheet: View {
                             planSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                             testPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
+                Button(L10n.string("Copy Blueprint JSON"), action: onCopyBlueprint)
+                    .disabled(projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button(L10n.string("Cancel"), action: onCancel)
                 Button(L10n.string("Generate Plan"), action: onGeneratePlan)
                     .keyboardShortcut(.defaultAction)

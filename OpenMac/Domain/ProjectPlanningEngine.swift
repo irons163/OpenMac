@@ -1,6 +1,6 @@
 import Foundation
 
-struct PMPlannedTicket: Equatable {
+struct PMPlannedTicket: Equatable, Codable {
     var title: String
     var details: String
     var requiredSkills: [String]
@@ -31,9 +31,32 @@ struct PMPlannedTicket: Equatable {
     }
 }
 
-struct PMProjectPlan: Equatable {
+struct PMProjectPlan: Equatable, Codable {
     var projectName: String
     var summary: String
+    var tickets: [PMPlannedTicket]
+}
+
+struct PMBlueprintDependencyEdge: Equatable, Codable {
+    var fromTicketTitle: String
+    var toTicketTitle: String
+}
+
+struct PMQualitySafetyGate: Equatable, Codable {
+    var name: String
+    var focus: String
+    var checklist: [String]
+}
+
+struct PMProjectBlueprint: Equatable, Codable {
+    var projectName: String
+    var summary: String
+    var productRequirements: [String]
+    var architectureModules: [String]
+    var epics: [String]
+    var milestones: [String]
+    var dependencyEdges: [PMBlueprintDependencyEdge]
+    var qualitySafetyGates: [PMQualitySafetyGate]
     var tickets: [PMPlannedTicket]
 }
 
@@ -45,7 +68,15 @@ protocol ProjectPlanning {
     ) -> PMProjectPlan?
 }
 
-struct RuleBasedProjectPlanner: ProjectPlanning {
+protocol ProjectBlueprintPlanning {
+    func generateBlueprint(
+        projectName: String,
+        projectBrief: String,
+        availableAgents: [AgentProfile]
+    ) -> PMProjectBlueprint?
+}
+
+struct RuleBasedProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning {
     private static let domainSkillMap: [(keywords: [String], skills: [String])] = [
         (["swiftui", "ui", "ux", "frontend", "view"], ["swiftui", "ui", "ux"]),
         (["backend", "api", "server", "database", "db"], ["backend", "api", "database"]),
@@ -189,6 +220,81 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
         )
     }
 
+    func generateBlueprint(
+        projectName: String,
+        projectBrief: String,
+        availableAgents: [AgentProfile]
+    ) -> PMProjectBlueprint? {
+        guard let plan = generatePlan(
+            projectName: projectName,
+            projectBrief: projectBrief,
+            availableAgents: availableAgents
+        ) else {
+            return nil
+        }
+
+        let compactBrief = projectBrief
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+
+        let productRequirements = inferredRequirements(from: compactBrief)
+        let architectureModules = inferredArchitectureModules(from: plan.tickets)
+        let dependencyEdges = inferredDependencyEdges(from: plan.tickets)
+        let epics = uniqueNonEmptyValues(from: plan.tickets.map(\.epic))
+        let milestones = uniqueNonEmptyValues(from: plan.tickets.map(\.milestone))
+
+        let qualitySafetyGates = [
+            PMQualitySafetyGate(
+                name: "Definition of Ready",
+                focus: "Execution quality baseline",
+                checklist: [
+                    "Every ticket contains acceptance criteria.",
+                    "Dependencies are explicit via 'Depends on:'.",
+                    "Story points and skills are set."
+                ]
+            ),
+            PMQualitySafetyGate(
+                name: "Coverage and Regression",
+                focus: "Test confidence",
+                checklist: [
+                    "Critical user path includes automated tests.",
+                    "Regression tests cover failure paths.",
+                    "E2E acceptance verification tasks are present."
+                ]
+            ),
+            PMQualitySafetyGate(
+                name: "Security and Privacy",
+                focus: "Risk controls for sensitive flows",
+                checklist: [
+                    "Sensitive scope has security notes.",
+                    "Privacy/PII handling is documented.",
+                    "No secret/token material appears in task details."
+                ]
+            ),
+            PMQualitySafetyGate(
+                name: "Release Readiness",
+                focus: "Operational handoff",
+                checklist: [
+                    "Rollback and monitoring notes are included.",
+                    "Known risks and mitigations are tracked.",
+                    "Handoff docs are attached."
+                ]
+            )
+        ]
+
+        return PMProjectBlueprint(
+            projectName: plan.projectName,
+            summary: plan.summary,
+            productRequirements: productRequirements,
+            architectureModules: architectureModules,
+            epics: epics,
+            milestones: milestones,
+            dependencyEdges: dependencyEdges,
+            qualitySafetyGates: qualitySafetyGates,
+            tickets: plan.tickets
+        )
+    }
+
     private func resolvedName(explicitName: String, from brief: String) -> String {
         let trimmed = explicitName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
@@ -268,5 +374,103 @@ struct RuleBasedProjectPlanner: ProjectPlanning {
 
         let filtered = normalizedSuggested.filter { availableSkills.contains($0) }
         return filtered.isEmpty ? [] : filtered
+    }
+
+    private func inferredRequirements(from compactBrief: String) -> [String] {
+        let sentences = compactBrief
+            .split(whereSeparator: { $0 == "." || $0 == ";" || $0 == "。" || $0 == "；" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !sentences.isEmpty {
+            return Array(sentences.prefix(6))
+        }
+        if compactBrief.isEmpty {
+            return []
+        }
+        return [compactBrief]
+    }
+
+    private func inferredArchitectureModules(from tickets: [PMPlannedTicket]) -> [String] {
+        var modules = Set<String>()
+        for ticket in tickets {
+            for skill in ticket.requiredSkills {
+                switch skill {
+                case "swiftui", "ui", "ux":
+                    modules.insert("Client Experience Layer")
+                case "backend", "api", "database":
+                    modules.insert("Service and Data Layer")
+                case "testing", "tdd", "qa":
+                    modules.insert("Automated Validation Layer")
+                case "documentation", "planning", "release":
+                    modules.insert("Delivery and Operations Layer")
+                default:
+                    modules.insert("\(skill.uppercased()) Capability Layer")
+                }
+            }
+        }
+
+        if modules.isEmpty {
+            modules.insert("Core Product Layer")
+        }
+        return modules.sorted()
+    }
+
+    private func inferredDependencyEdges(from tickets: [PMPlannedTicket]) -> [PMBlueprintDependencyEdge] {
+        let ticketTitles = Set(tickets.map { normalizedDependencyTitle($0.title) }.filter { !$0.isEmpty })
+        var edges: [PMBlueprintDependencyEdge] = []
+        var seen = Set<String>()
+
+        for ticket in tickets {
+            let fromTitle = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !fromTitle.isEmpty else { continue }
+            let dependencies = parsedDependencyTitles(from: ticket.details)
+            for dependency in dependencies {
+                let normalized = normalizedDependencyTitle(dependency)
+                guard ticketTitles.contains(normalized) else { continue }
+                let dedupeKey = "\(normalized.lowercased())->\(fromTitle.lowercased())"
+                guard seen.insert(dedupeKey).inserted else { continue }
+                edges.append(
+                    PMBlueprintDependencyEdge(
+                        fromTicketTitle: dependency,
+                        toTicketTitle: fromTitle
+                    )
+                )
+            }
+        }
+        return edges
+    }
+
+    private func parsedDependencyTitles(from details: String) -> [String] {
+        let lines = details.split(whereSeparator: \.isNewline).map(String.init)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowercased = trimmed.lowercased()
+            guard lowercased.hasPrefix("depends on:") else { continue }
+            let suffix = trimmed.dropFirst("depends on:".count)
+            return suffix
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.lowercased() != "none" }
+        }
+        return []
+    }
+
+    private func normalizedDependencyTitle(_ rawTitle: String) -> String {
+        rawTitle
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func uniqueNonEmptyValues(from values: [String]) -> [String] {
+        var seen = Set<String>()
+        var unique: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            unique.append(trimmed)
+        }
+        return unique
     }
 }

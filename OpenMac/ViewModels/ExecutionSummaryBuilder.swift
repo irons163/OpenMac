@@ -18,7 +18,8 @@ enum ExecutionSummaryBuilder {
         detailsMissingCount: Int,
         dependencyBlockedCount: Int,
         approvalBlockedCount: Int,
-        quotaBlockedCount: Int
+        quotaBlockedCount: Int,
+        qualitySafetyBlockedCount: Int = 0
     ) -> String {
         if detailsMissingCount > 0 {
             let label = detailsMissingCount == 1 ? message("task") : message("tasks")
@@ -47,6 +48,15 @@ enum ExecutionSummaryBuilder {
             )
         }
 
+        if qualitySafetyBlockedCount > 0 {
+            let label = qualitySafetyBlockedCount == 1 ? message("task") : message("tasks")
+            return message(
+                "%d assigned %@ blocked by quality/safety gate. Fix task quality notes before batch run.",
+                qualitySafetyBlockedCount,
+                label
+            )
+        }
+
         if dependencyBlockedCount > 0 {
             let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
             return message(
@@ -65,6 +75,7 @@ enum ExecutionSummaryBuilder {
         dependencyBlockedCount: Int,
         approvalBlockedCount: Int,
         quotaBlockedCount: Int,
+        qualitySafetyBlockedCount: Int = 0,
         wasCancelled: Bool
     ) -> String {
         var summaryParts = [
@@ -89,6 +100,9 @@ enum ExecutionSummaryBuilder {
         if quotaBlockedCount > 0 {
             summaryParts.append(message("%d blocked by quota", quotaBlockedCount))
         }
+        if qualitySafetyBlockedCount > 0 {
+            summaryParts.append(message("%d blocked by quality/safety gate", qualitySafetyBlockedCount))
+        }
         if dependencyBlockedCount > 0 {
             summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
         }
@@ -108,7 +122,8 @@ enum ExecutionSummaryBuilder {
         remainingDetailsMissing: Int,
         remainingDependencyBlocked: Int,
         remainingApprovalBlocked: Int,
-        remainingQuotaBlocked: Int
+        remainingQuotaBlocked: Int,
+        remainingQualitySafetyBlocked: Int = 0
     ) -> String {
         var summaryParts: [String] = [
             message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
@@ -129,6 +144,9 @@ enum ExecutionSummaryBuilder {
         if remainingQuotaBlocked > 0 {
             summaryParts.append(message("%d blocked by quota", remainingQuotaBlocked))
         }
+        if remainingQualitySafetyBlocked > 0 {
+            summaryParts.append(message("%d blocked by quality/safety gate", remainingQualitySafetyBlocked))
+        }
         if remainingDependencyBlocked > 0 {
             summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))
         }
@@ -148,7 +166,8 @@ enum ExecutionSummaryBuilder {
         remainingDetailsMissing: Int,
         remainingDependencyBlocked: Int,
         remainingApprovalBlocked: Int,
-        remainingQuotaBlocked: Int
+        remainingQuotaBlocked: Int,
+        remainingQualitySafetyBlocked: Int = 0
     ) -> String {
         var summaryParts: [String] = [
             message(
@@ -180,6 +199,9 @@ enum ExecutionSummaryBuilder {
         }
         if remainingQuotaBlocked > 0 {
             summaryParts.append(message("%d blocked by quota", remainingQuotaBlocked))
+        }
+        if remainingQualitySafetyBlocked > 0 {
+            summaryParts.append(message("%d blocked by quality/safety gate", remainingQualitySafetyBlocked))
         }
         if remainingDependencyBlocked > 0 {
             summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))
