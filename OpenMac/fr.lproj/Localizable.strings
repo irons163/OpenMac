@@ -542,7 +542,10 @@
 "DAG Scheduler" = "Planificateur DAG";
 "Enable dependency DAG scheduler" = "Activer le planificateur DAG des dépendances";
 "Auto-assign before DAG run" = "Affecter automatiquement avant l’exécution DAG";
+"Fallback auto-assign when no skill match" = "Activer l’affectation de secours si aucune compétence ne correspond";
+"Auto-relax WIP limits during DAG run" = "Détendre automatiquement les limites WIP pendant l’exécution DAG";
 "Auto-create missing dependencies during DAG run" = "Créer automatiquement les dépendances manquantes pendant l’exécution DAG";
+"Auto-relaxed WIP limits this pass: +%d" = "Limites WIP assouplies automatiquement sur ce passage : +%d";
 "DAG Max Passes: %d" = "Passes DAG max : %d";
 "Apply DAG Settings" = "Appliquer les paramètres DAG";
 "Quality & Safety Gate" = "Contrôle qualité et sécurité";

@@ -542,7 +542,10 @@
 "DAG Scheduler" = "DAG 스케줄러";
 "Enable dependency DAG scheduler" = "의존성 DAG 스케줄러 활성화";
 "Auto-assign before DAG run" = "DAG 실행 전 자동 할당";
+"Fallback auto-assign when no skill match" = "기술 일치가 없을 때 대체 자동 할당 사용";
+"Auto-relax WIP limits during DAG run" = "DAG 실행 중 WIP 한도 자동 완화";
 "Auto-create missing dependencies during DAG run" = "DAG 실행 중 누락 의존성 자동 생성";
+"Auto-relaxed WIP limits this pass: +%d" = "이번 패스에서 WIP 한도를 자동 완화함: +%d";
 "DAG Max Passes: %d" = "DAG 최대 패스: %d";
 "Apply DAG Settings" = "DAG 설정 적용";
 "Quality & Safety Gate" = "품질 및 안전 게이트";

@@ -541,7 +541,10 @@
 "DAG Scheduler" = "DAG 排程器";
 "Enable dependency DAG scheduler" = "啟用依賴 DAG 排程";
 "Auto-assign before DAG run" = "DAG 執行前自動分派";
+"Fallback auto-assign when no skill match" = "技能不匹配時啟用後備自動分派";
+"Auto-relax WIP limits during DAG run" = "DAG 執行時自動放寬 WIP 限制";
 "Auto-create missing dependencies during DAG run" = "DAG 執行時自動補齊缺失依賴";
+"Auto-relaxed WIP limits this pass: +%d" = "本輪已自動放寬 WIP 限制：+%d";
 "DAG Max Passes: %d" = "DAG 最大輪次：%d";
 "Apply DAG Settings" = "套用 DAG 設定";
 "Quality & Safety Gate" = "品質與安全閘門";

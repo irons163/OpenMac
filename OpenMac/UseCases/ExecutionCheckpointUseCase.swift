@@ -2,7 +2,12 @@ import Foundation
 
 enum ExecutionCheckpointResumeAction: Equatable {
     case assignedBatch
-    case autoCycle(maxPasses: Int, autoCreateMissingDependencies: Bool, autoAssignBeforeRun: Bool)
+    case autoCycle(
+        maxPasses: Int,
+        autoCreateMissingDependencies: Bool,
+        autoAssignBeforeRun: Bool,
+        autoAssignFallbackWithoutSkillMatch: Bool
+    )
 }
 
 enum ExecutionCheckpointUseCase {
@@ -16,7 +21,8 @@ enum ExecutionCheckpointUseCase {
             startedAt: startedAt,
             maxAutoCyclePasses: 1,
             autoCreateMissingDependencies: false,
-            autoAssignBeforeRun: false
+            autoAssignBeforeRun: false,
+            autoAssignFallbackWithoutSkillMatch: false
         )
     }
 
@@ -25,6 +31,7 @@ enum ExecutionCheckpointUseCase {
         maxPasses: Int,
         autoCreateMissingDependencies: Bool,
         autoAssignBeforeRun: Bool,
+        autoAssignFallbackWithoutSkillMatch: Bool,
         startedAt: Date = Date()
     ) -> ExecutionCheckpoint {
         ExecutionCheckpoint(
@@ -33,7 +40,8 @@ enum ExecutionCheckpointUseCase {
             startedAt: startedAt,
             maxAutoCyclePasses: max(1, maxPasses),
             autoCreateMissingDependencies: autoCreateMissingDependencies,
-            autoAssignBeforeRun: autoAssignBeforeRun
+            autoAssignBeforeRun: autoAssignBeforeRun,
+            autoAssignFallbackWithoutSkillMatch: autoAssignFallbackWithoutSkillMatch
         )
     }
 
@@ -52,7 +60,8 @@ enum ExecutionCheckpointUseCase {
             return .autoCycle(
                 maxPasses: max(1, checkpoint.maxAutoCyclePasses),
                 autoCreateMissingDependencies: checkpoint.autoCreateMissingDependencies,
-                autoAssignBeforeRun: checkpoint.autoAssignBeforeRun
+                autoAssignBeforeRun: checkpoint.autoAssignBeforeRun,
+                autoAssignFallbackWithoutSkillMatch: checkpoint.autoAssignFallbackWithoutSkillMatch
             )
         }
     }

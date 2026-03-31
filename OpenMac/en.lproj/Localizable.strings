@@ -541,7 +541,10 @@
 "DAG Scheduler" = "DAG Scheduler";
 "Enable dependency DAG scheduler" = "Enable dependency DAG scheduler";
 "Auto-assign before DAG run" = "Auto-assign before DAG run";
+"Fallback auto-assign when no skill match" = "Fallback auto-assign when no skill match";
+"Auto-relax WIP limits during DAG run" = "Auto-relax WIP limits during DAG run";
 "Auto-create missing dependencies during DAG run" = "Auto-create missing dependencies during DAG run";
+"Auto-relaxed WIP limits this pass: +%d" = "Auto-relaxed WIP limits this pass: +%d";
 "DAG Max Passes: %d" = "DAG Max Passes: %d";
 "Apply DAG Settings" = "Apply DAG Settings";
 "Quality & Safety Gate" = "Quality & Safety Gate";
