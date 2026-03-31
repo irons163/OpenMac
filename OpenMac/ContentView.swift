@@ -54,6 +54,7 @@ struct ContentView: View {
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
+    @State private var selectedTaskTemplateID: UUID?
     @State private var editingTaskID: UUID?
     @State private var editTaskTitle = ""
     @State private var editTaskDetails = ""
@@ -104,6 +105,12 @@ struct ContentView: View {
     @State private var pmBlueprintConstraints = ""
     @State private var pmBlueprintQualityBar = ""
     @State private var pmTestPlanText = ""
+    @State private var autoRetryEnabled = true
+    @State private var autoRetryMaxRetries = 2
+    @State private var autoRetryBackoffSeconds = 1.0
+    @State private var autoRetryRetryNetwork = true
+    @State private var autoRetryRetryRateLimit = true
+    @State private var autoRetryRetryServer = true
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -387,6 +394,14 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("e", modifiers: [.command, .shift])
 
+                        Button("Export Execution Report JSON...") {
+                            exportExecutionReportJSONFromToolbar()
+                        }
+
+                        Button("Export Execution Report Markdown...") {
+                            exportExecutionReportMarkdownFromToolbar()
+                        }
+
                         Button(L10n.string("Import Workspace JSON...")) {
                             importWorkspaceFromToolbar()
                         }
@@ -436,6 +451,22 @@ struct ContentView: View {
                 .help(L10n.string("Switch app language or follow system default"))
                 Menu(L10n.string("Developer")) {
                     Toggle(L10n.string("Developer Mode"), isOn: $developerModeEnabled)
+                    Divider()
+                    Text("Execution Auto Retry")
+                    Toggle("Enabled", isOn: $autoRetryEnabled)
+                    Stepper("Max Retries: \(autoRetryMaxRetries)", value: $autoRetryMaxRetries, in: 0 ... 5)
+                    Stepper(
+                        "Backoff Seconds: \(String(format: "%.1f", autoRetryBackoffSeconds))",
+                        value: $autoRetryBackoffSeconds,
+                        in: 0 ... 10,
+                        step: 0.5
+                    )
+                    Toggle("Retry Network Errors", isOn: $autoRetryRetryNetwork)
+                    Toggle("Retry Rate Limit Errors", isOn: $autoRetryRetryRateLimit)
+                    Toggle("Retry Server Errors", isOn: $autoRetryRetryServer)
+                    Button("Apply Auto-Retry Settings") {
+                        applyAutoRetrySettings()
+                    }
                     Divider()
                     Text(L10n.string("Projects Folder"))
                     Text(resolvedCodexProjectsDirectoryPath)
@@ -543,9 +574,13 @@ struct ContentView: View {
                 details: $newTaskDetails,
                 skills: $newTaskSkills,
                 storyPoints: $newTaskPoints,
+                selectedTemplateID: $selectedTaskTemplateID,
+                templates: viewModel.taskTemplates,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetDraftAndClose,
+                onApplyTemplate: applySelectedTaskTemplateFromSheet,
+                onSaveAsTemplate: saveCurrentTaskAsTemplateFromSheet,
                 onCreate: { createTaskFromSheet(autoAssign: false) },
                 onCreateAutoAssign: { createTaskFromSheet(autoAssign: true) }
             )
@@ -653,6 +688,7 @@ struct ContentView: View {
                 AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
             )
             syncSelectedAgentConsoleSelection()
+            syncAutoRetryDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
         }
         .onChange(of: appLanguageOverrideRawValue) { _, newValue in
@@ -684,7 +720,33 @@ struct ContentView: View {
         newTaskDetails = ""
         newTaskSkills = ""
         newTaskPoints = 1
+        selectedTaskTemplateID = nil
         isShowingNewTaskSheet = false
+    }
+
+    private func applySelectedTaskTemplateFromSheet() {
+        guard let templateID = selectedTaskTemplateID,
+              let template = viewModel.taskTemplate(templateID) else {
+            return
+        }
+        newTaskTitle = template.title
+        newTaskDetails = template.details
+        newTaskSkills = template.requiredSkillsText
+        newTaskPoints = template.storyPoints
+    }
+
+    private func saveCurrentTaskAsTemplateFromSheet() {
+        let proposedName = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let templateName = proposedName.isEmpty ? "Task Template" : proposedName
+        let added = viewModel.addTaskTemplate(
+            name: templateName,
+            title: newTaskTitle,
+            details: newTaskDetails,
+            requiredSkillsText: newTaskSkills,
+            storyPoints: newTaskPoints
+        )
+        guard added else { return }
+        selectedTaskTemplateID = viewModel.taskTemplates.first(where: { $0.name == templateName })?.id
     }
 
     private func copyToPasteboard(_ value: String) {
@@ -1126,6 +1188,35 @@ struct ContentView: View {
         viewModel.requestCancelAutoDispatchCycle()
     }
 
+    private func syncAutoRetryDraftFromViewModel() {
+        let config = viewModel.executionAutoRetryConfiguration
+        autoRetryEnabled = config.isEnabled
+        autoRetryMaxRetries = config.maxRetryCount
+        autoRetryBackoffSeconds = config.backoffSeconds
+        autoRetryRetryNetwork = config.retryableErrorTypes.contains(.network)
+        autoRetryRetryRateLimit = config.retryableErrorTypes.contains(.rateLimit)
+        autoRetryRetryServer = config.retryableErrorTypes.contains(.server)
+    }
+
+    private func applyAutoRetrySettings() {
+        var retryableTypes: Set<RetryableExecutionErrorType> = []
+        if autoRetryRetryNetwork {
+            retryableTypes.insert(.network)
+        }
+        if autoRetryRetryRateLimit {
+            retryableTypes.insert(.rateLimit)
+        }
+        if autoRetryRetryServer {
+            retryableTypes.insert(.server)
+        }
+        viewModel.updateExecutionAutoRetryConfiguration(
+            isEnabled: autoRetryEnabled,
+            maxRetryCount: autoRetryMaxRetries,
+            backoffSeconds: autoRetryBackoffSeconds,
+            retryableErrorTypes: retryableTypes
+        )
+    }
+
     private func applyHealthRecommendation(_ action: BoardHealthAction) {
         let applied = viewModel.applyHealthRecommendation(action)
         Self.postHealthRecommendation(
@@ -1176,6 +1267,30 @@ struct ContentView: View {
         }
     }
 
+    private func exportExecutionReportJSONFromToolbar() {
+        let panel = Self.configuredExecutionReportJSONPanel(defaultFileName: selectedBoardExecutionReportJSONFileName())
+        let (modalResponse, url) = Self.savePanelResultProvider(panel)
+
+        _ = Self.handleSavePanelResult(
+            modalResponse: modalResponse,
+            url: url
+        ) { url in
+            viewModel.exportExecutionReportJSONForSelectedBoard(to: url)
+        }
+    }
+
+    private func exportExecutionReportMarkdownFromToolbar() {
+        let panel = Self.configuredExecutionReportMarkdownPanel(defaultFileName: selectedBoardExecutionReportMarkdownFileName())
+        let (modalResponse, url) = Self.savePanelResultProvider(panel)
+
+        _ = Self.handleSavePanelResult(
+            modalResponse: modalResponse,
+            url: url
+        ) { url in
+            viewModel.exportExecutionReportMarkdownForSelectedBoard(to: url)
+        }
+    }
+
     private func importWorkspaceFromToolbar() {
         let panel = Self.configuredWorkspaceImportPanel()
         let (modalResponse, url) = Self.openPanelResultProvider(panel)
@@ -1217,6 +1332,28 @@ struct ContentView: View {
         panel.nameFieldStringValue = defaultFileName
         panel.title = L10n.string("Export Current Board")
         panel.message = L10n.string("Save only the current board as JSON.")
+        return panel
+    }
+
+    fileprivate static func configuredExecutionReportJSONPanel(defaultFileName: String) -> NSSavePanel {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = defaultFileName
+        panel.title = "Export Execution Report (JSON)"
+        panel.message = "Save execution report for current board as JSON."
+        return panel
+    }
+
+    fileprivate static func configuredExecutionReportMarkdownPanel(defaultFileName: String) -> NSSavePanel {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType.plainText]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = defaultFileName
+        panel.title = "Export Execution Report (Markdown)"
+        panel.message = "Save execution report for current board as Markdown."
         return panel
     }
 
@@ -1282,6 +1419,28 @@ struct ContentView: View {
         let slug = rawTokens.joined(separator: "-")
         let resolvedSlug = slug.isEmpty ? "board" : slug
         return "openmac-\(resolvedSlug)-board.json"
+    }
+
+    private func selectedBoardExecutionReportJSONFileName() -> String {
+        let rawTokens = viewModel.selectedBoardName
+            .lowercased()
+            .split { character in
+                !(character.isLetter || character.isNumber)
+            }
+        let slug = rawTokens.joined(separator: "-")
+        let resolvedSlug = slug.isEmpty ? "board" : slug
+        return "openmac-\(resolvedSlug)-execution-report.json"
+    }
+
+    private func selectedBoardExecutionReportMarkdownFileName() -> String {
+        let rawTokens = viewModel.selectedBoardName
+            .lowercased()
+            .split { character in
+                !(character.isLetter || character.isNumber)
+            }
+        let slug = rawTokens.joined(separator: "-")
+        let resolvedSlug = slug.isEmpty ? "board" : slug
+        return "openmac-\(resolvedSlug)-execution-report.md"
     }
 
     fileprivate static func uniquePMBoardName(baseName: String, existingNames: [String]) -> String {
@@ -4221,10 +4380,14 @@ private struct NewTaskSheet: View {
     @Binding var details: String
     @Binding var skills: String
     @Binding var storyPoints: Int
+    @Binding var selectedTemplateID: UUID?
+    let templates: [TaskTemplate]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
+    let onApplyTemplate: () -> Void
+    let onSaveAsTemplate: () -> Void
     let onCreate: () -> Void
     let onCreateAutoAssign: () -> Void
 
@@ -4235,6 +4398,17 @@ private struct NewTaskSheet: View {
 
             if let boardMessage, !boardMessage.isEmpty {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
+            }
+
+            Picker("Task Template", selection: $selectedTemplateID) {
+                Text("No Template").tag(UUID?.none)
+                ForEach(templates) { template in
+                    Text(template.name).tag(Optional(template.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: selectedTemplateID) { _, _ in
+                onApplyTemplate()
             }
 
             TextField(L10n.string("Title"), text: $title)
@@ -4248,11 +4422,12 @@ private struct NewTaskSheet: View {
                 Button(L10n.string("Cancel"), action: onCancel)
                 Button(L10n.string("Create"), action: onCreate)
                     .keyboardShortcut(.defaultAction)
+                Button("Save as Template", action: onSaveAsTemplate)
                 Button(L10n.string("Create + Auto Assign"), action: onCreateAutoAssign)
             }
         }
         .padding(18)
-        .frame(width: 420)
+        .frame(width: 460)
     }
 }
 
@@ -6507,14 +6682,28 @@ enum ContentViewTestHooks {
         var taskDetails = "Details"
         var taskSkills = "swiftui"
         var taskPoints = 3
+        var selectedTemplateID: UUID? = nil
+        let previewTemplates = [
+            TaskTemplate(
+                name: "UI Task",
+                title: "Build Kanban UI",
+                details: "Implement reusable board/task UI components.",
+                requiredSkills: ["swiftui", "ui"],
+                storyPoints: 3
+            )
+        ]
         render(NewTaskSheet(
             title: Binding(get: { taskTitle }, set: { taskTitle = $0 }),
             details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
             skills: Binding(get: { taskSkills }, set: { taskSkills = $0 }),
             storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
+            selectedTemplateID: Binding(get: { selectedTemplateID }, set: { selectedTemplateID = $0 }),
+            templates: previewTemplates,
             boardMessage: nil,
             boardMessageSeverity: nil,
             onCancel: {},
+            onApplyTemplate: {},
+            onSaveAsTemplate: {},
             onCreate: {},
             onCreateAutoAssign: {}
         ))

@@ -5885,6 +5885,39 @@ struct KanbanPersistenceTests {
         #expect(snapshot.selectedBoardID == selectedBoardID)
     }
 
+    @Test("exports workspace snapshot JSON including task templates and auto-retry configuration")
+    func exportsWorkspaceSnapshotJSONIncludingTemplateAndRetryConfig() throws {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let addedTemplate = viewModel.addTaskTemplate(
+            name: "Regression Template",
+            title: "Add regression tests",
+            details: "Cover happy path and edge cases.",
+            requiredSkillsText: "testing, tdd",
+            storyPoints: 2
+        )
+        #expect(addedTemplate)
+        viewModel.updateExecutionAutoRetryConfiguration(
+            isEnabled: true,
+            maxRetryCount: 4,
+            backoffSeconds: 0.5,
+            retryableErrorTypes: Set([.network, .server])
+        )
+
+        let exported = viewModel.workspaceExportData()
+
+        #expect(exported != nil)
+        guard let exported else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exported)
+
+        #expect(snapshot.taskTemplates?.contains(where: { $0.name == "Regression Template" }) == true)
+        #expect(snapshot.executionAutoRetryConfiguration?.isEnabled == true)
+        #expect(snapshot.executionAutoRetryConfiguration?.maxRetryCount == 4)
+        #expect(snapshot.executionAutoRetryConfiguration?.backoffSeconds == 0.5)
+        #expect(snapshot.executionAutoRetryConfiguration?.retryableErrorTypes == Set([.network, .server]))
+    }
+
     @Test("imports workspace snapshot and persists board selection")
     func importsWorkspaceSnapshotAndPersistsSelection() throws {
         let deliveryTask = WorkTask(
@@ -6112,6 +6145,64 @@ struct KanbanPersistenceTests {
         #expect(viewModel.boards.contains(where: { $0.name == "Ops (2)" }))
     }
 
+    @Test("merge import combines task templates by unique name and adopts imported retry configuration")
+    func mergeImportCombinesTaskTemplatesAndRetryConfiguration() throws {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let addedLocalTemplate = viewModel.addTaskTemplate(
+            name: "Local Template",
+            title: "Local Task",
+            details: "Local details",
+            requiredSkillsText: "swiftui",
+            storyPoints: 3
+        )
+        #expect(addedLocalTemplate)
+
+        let importedBoard = KanbanBoardRecord(name: "Imported Board")
+        let importedRetryConfiguration = ExecutionAutoRetryConfiguration(
+            isEnabled: false,
+            maxRetryCount: 1,
+            backoffSeconds: 0,
+            retryableErrorTypes: Set([.rateLimit])
+        )
+        let importedTemplates = [
+            TaskTemplate(
+                name: "Imported Template",
+                title: "Imported Task",
+                details: "Imported details",
+                requiredSkills: ["api"],
+                storyPoints: 5
+            ),
+            TaskTemplate(
+                name: "Local Template",
+                title: "Duplicate Name",
+                details: "Should be deduplicated",
+                requiredSkills: ["dup"],
+                storyPoints: 1
+            )
+        ]
+        let snapshot = KanbanBoardSnapshot(
+            tasks: importedBoard.tasks,
+            agents: importedBoard.agents,
+            wipLimits: importedBoard.wipLimits,
+            boards: [importedBoard],
+            selectedBoardID: importedBoard.id,
+            taskTemplates: importedTemplates,
+            executionAutoRetryConfiguration: importedRetryConfiguration
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(snapshot)
+
+        let imported = viewModel.importWorkspaceData(data, strategy: .merge)
+
+        #expect(imported)
+        #expect(viewModel.taskTemplates.contains(where: { $0.name == "Local Template" }))
+        #expect(viewModel.taskTemplates.contains(where: { $0.name == "Imported Template" }))
+        #expect(viewModel.taskTemplates.filter { $0.name == "Local Template" }.count == 1)
+        #expect(viewModel.executionAutoRetryConfiguration == importedRetryConfiguration)
+    }
+
     @Test("merge import keeps current selection when imported selected id is missing")
     func mergeImportKeepsCurrentSelectionWhenImportedSelectedIDMissing() throws {
         let localTask = WorkTask(
@@ -6337,6 +6428,60 @@ struct KanbanPersistenceTests {
         let snapshot = try decoder.decode(KanbanBoardSnapshot.self, from: exportedData)
         #expect(snapshot.boards?.count == 1)
         #expect(snapshot.selectedBoardID == viewModel.selectedBoardID)
+    }
+
+    @Test("execution report exports JSON and Markdown with task rows")
+    func executionReportExportsJSONAndMarkdown() throws {
+        let agent = AgentProfile(name: "Reporter", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Report Task",
+            details: "Compile status report",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .review,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .succeeded,
+                runCount: 2,
+                lastStartedAt: Date(timeIntervalSince1970: 1000),
+                lastFinishedAt: Date(timeIntervalSince1970: 1010),
+                lastOutputSummary: "Completed",
+                lastError: nil,
+                lastDebugOutput: nil,
+                lastAgentID: agent.id
+            )
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let jsonData = viewModel.executionReportJSONDataForSelectedBoard()
+        #expect(jsonData != nil)
+        guard let jsonData else { return }
+
+        let jsonObject = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        #expect(jsonObject?["boardName"] as? String == viewModel.selectedBoardName)
+        #expect(jsonObject?["totalTasks"] as? Int == 1)
+        #expect(jsonObject?["executedTasks"] as? Int == 1)
+        let rows = jsonObject?["tasks"] as? [[String: Any]]
+        #expect(rows?.first?["title"] as? String == "Report Task")
+        #expect(rows?.first?["executionStatus"] as? String == "succeeded")
+
+        let markdown = viewModel.executionReportMarkdownForSelectedBoard()
+        #expect(markdown?.contains("# Execution Report") == true)
+        #expect(markdown?.contains("| Report Task |") == true)
+
+        let exportDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: exportDirectory) }
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+        let jsonURL = exportDirectory.appendingPathComponent("execution-report.json")
+        let markdownURL = exportDirectory.appendingPathComponent("execution-report.md")
+
+        let jsonExported = viewModel.exportExecutionReportJSONForSelectedBoard(to: jsonURL)
+        let markdownExported = viewModel.exportExecutionReportMarkdownForSelectedBoard(to: markdownURL)
+
+        #expect(jsonExported)
+        #expect(markdownExported)
+        #expect(FileManager.default.fileExists(atPath: jsonURL.path))
+        #expect(FileManager.default.fileExists(atPath: markdownURL.path))
     }
 
     @Test("imports workspace snapshot from JSON file URL")
@@ -7506,6 +7651,50 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.count == 1)
     }
 
+    @Test("task template CRUD supports create-task from template")
+    func taskTemplateCRUDAndCreateTaskFromTemplate() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+        let initialTemplateCount = viewModel.taskTemplates.count
+
+        let added = viewModel.addTaskTemplate(
+            name: "API Retry Template",
+            title: "Integrate retries",
+            details: "Add endpoint retries with deterministic tests.",
+            requiredSkillsText: "api, networking",
+            storyPoints: 5
+        )
+        #expect(added)
+
+        guard let template = viewModel.taskTemplates.first(where: { $0.name == "API Retry Template" }) else {
+            Issue.record("Expected newly added template to exist")
+            return
+        }
+
+        let updated = viewModel.updateTaskTemplate(
+            template.id,
+            name: "API Retry Template",
+            title: "Implement endpoint retries",
+            details: "Handle transient failures and add regression tests.",
+            requiredSkillsText: "API, Networking, api",
+            storyPoints: 8
+        )
+        #expect(updated)
+
+        let created = viewModel.createTask(fromTemplate: template.id, autoAssign: false)
+        #expect(created)
+        let createdTask = viewModel.tasks.first(where: { $0.title == "Implement endpoint retries" })
+        #expect(createdTask != nil)
+        #expect(createdTask?.requiredSkills == ["api", "networking"])
+        #expect(createdTask?.storyPoints == 8)
+
+        let removed = viewModel.removeTaskTemplate(template.id)
+        #expect(removed)
+        #expect(viewModel.taskTemplate(template.id) == nil)
+        #expect(viewModel.taskTemplates.count == initialTemplateCount)
+        #expect(store.savedSnapshots.count >= 4)
+    }
+
     @Test("rejects adding task with empty title")
     func rejectsAddingTaskWithEmptyTitle() {
         let store = SpyBoardStore()
@@ -8078,6 +8267,90 @@ struct KanbanPersistenceTests {
         #expect(agentEvents.first?.status == .failed)
         #expect(agentEvents.last?.status == .running)
         #expect(agentEvents.first?.taskID == task.id)
+    }
+
+    @Test("run task execution auto-retries retryable failures and eventually succeeds")
+    func runTaskExecutionAutoRetryRetriesRetryableFailures() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Retryable task",
+            details: "Exercise auto-retry",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = SequencedTaskExecutor(
+            sequencesByTaskID: [
+                task.id: [
+                    .failure(message: "failed to connect"),
+                    .failure(message: "failed to connect"),
+                    .success(summary: "Recovered")
+                ]
+            ]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration(
+                isEnabled: true,
+                maxRetryCount: 3,
+                backoffSeconds: 0,
+                retryableErrorTypes: Set([.network])
+            ),
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let record = updatedTask?.executionRecord
+        let agentEvents = viewModel.executionEvents(for: agent.id)
+
+        #expect(executed)
+        #expect(executor.callCount(for: task.id) == 3)
+        #expect(updatedTask?.status == .review)
+        #expect(record?.status == .succeeded)
+        #expect(record?.runCount == 3)
+        #expect(record?.lastOutputSummary == "Recovered")
+        #expect(agentEvents.contains(where: { $0.message.contains("Auto-retry attempt 1") }))
+        #expect(agentEvents.contains(where: { $0.message.contains("Auto-retry attempt 2") }))
+    }
+
+    @Test("run task execution auto-retry ignores non-retryable failures")
+    func runTaskExecutionAutoRetrySkipsNonRetryableFailures() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Non-retryable task",
+            details: "Exercise non-retryable path",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = SequencedTaskExecutor(
+            sequencesByTaskID: [task.id: [.failure(message: "validation failed")]]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration(
+                isEnabled: true,
+                maxRetryCount: 3,
+                backoffSeconds: 0,
+                retryableErrorTypes: Set([.network])
+            ),
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let record = viewModel.tasks.first(where: { $0.id == task.id })?.executionRecord
+        let agentEvents = viewModel.executionEvents(for: agent.id)
+
+        #expect(executed)
+        #expect(executor.callCount(for: task.id) == 1)
+        #expect(record?.status == .failed)
+        #expect(record?.runCount == 1)
+        #expect(!agentEvents.contains(where: { $0.message.contains("Auto-retry") }))
     }
 
     @Test("run task execution extracts debug log from failure delimiter")
@@ -10391,6 +10664,42 @@ private struct StubTaskExecutor: AgentTaskExecuting {
             onProgress(update)
         }
         return execute(task: task, agent: agent)
+    }
+}
+
+private final class SequencedTaskExecutor: AgentTaskExecuting {
+    private var sequencesByTaskID: [UUID: [AgentTaskExecutionOutcome]]
+    private var callsByTaskID: [UUID: Int] = [:]
+    private let fallbackOutcome: AgentTaskExecutionOutcome
+
+    init(
+        sequencesByTaskID: [UUID: [AgentTaskExecutionOutcome]],
+        fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok")
+    ) {
+        self.sequencesByTaskID = sequencesByTaskID
+        self.fallbackOutcome = fallbackOutcome
+    }
+
+    func callCount(for taskID: UUID) -> Int {
+        callsByTaskID[taskID, default: 0]
+    }
+
+    func execute(task: WorkTask, agent _: AgentProfile) -> AgentTaskExecutionOutcome {
+        callsByTaskID[task.id, default: 0] += 1
+        guard var sequence = sequencesByTaskID[task.id], !sequence.isEmpty else {
+            return fallbackOutcome
+        }
+        let next = sequence.removeFirst()
+        sequencesByTaskID[task.id] = sequence
+        return next
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress _: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent)
     }
 }
 

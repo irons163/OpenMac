@@ -178,6 +178,71 @@ enum TaskExecutionStatus: String, Codable, Equatable {
     case failed
 }
 
+enum RetryableExecutionErrorType: String, CaseIterable, Codable, Identifiable {
+    case network
+    case rateLimit
+    case server
+
+    var id: String { rawValue }
+}
+
+struct ExecutionAutoRetryConfiguration: Equatable, Codable {
+    var isEnabled: Bool
+    var maxRetryCount: Int
+    var backoffSeconds: Double
+    var retryableErrorTypes: Set<RetryableExecutionErrorType>
+
+    init(
+        isEnabled: Bool = true,
+        maxRetryCount: Int = 2,
+        backoffSeconds: Double = 1.0,
+        retryableErrorTypes: Set<RetryableExecutionErrorType> = Set(RetryableExecutionErrorType.allCases)
+    ) {
+        self.isEnabled = isEnabled
+        self.maxRetryCount = max(0, maxRetryCount)
+        self.backoffSeconds = max(0, backoffSeconds)
+        self.retryableErrorTypes = retryableErrorTypes
+    }
+}
+
+struct TaskTemplate: Identifiable, Equatable, Codable {
+    let id: UUID
+    var name: String
+    var title: String
+    var details: String
+    var requiredSkills: [String]
+    var storyPoints: Int
+    let createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        title: String,
+        details: String,
+        requiredSkills: [String],
+        storyPoints: Int,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.details = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.requiredSkills = Array(
+            Set(
+                requiredSkills
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+        ).sorted()
+        self.storyPoints = max(1, min(13, storyPoints))
+        self.createdAt = createdAt
+    }
+
+    var requiredSkillsText: String {
+        requiredSkills.joined(separator: ", ")
+    }
+}
+
 struct TaskExecutionRecord: Equatable, Codable {
     var status: TaskExecutionStatus
     var runCount: Int

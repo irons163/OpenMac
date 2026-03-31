@@ -1291,6 +1291,38 @@ final class KanbanBoardViewModel: ObservableObject {
         let epic: String
     }
 
+    private struct ExecutionAttemptResult {
+        let outcome: AgentTaskExecutionOutcome
+        let retriesPerformed: Int
+    }
+
+    private struct ExecutionReportTaskEntry: Codable {
+        let id: UUID
+        let title: String
+        let status: String
+        let assignee: String
+        let storyPoints: Int
+        let runCount: Int
+        let executionStatus: String?
+        let lastStartedAt: Date?
+        let lastFinishedAt: Date?
+        let lastSummary: String?
+        let lastError: String?
+    }
+
+    private struct ExecutionReportDocument: Codable {
+        let generatedAt: Date
+        let boardID: UUID
+        let boardName: String
+        let totalTasks: Int
+        let executedTasks: Int
+        let succeededTasks: Int
+        let failedTasks: Int
+        let runningTasks: Int
+        let notRunTasks: Int
+        let tasks: [ExecutionReportTaskEntry]
+    }
+
     @Published private(set) var boards: [KanbanBoardRecord]
     @Published private(set) var selectedBoardID: UUID
     @Published private(set) var tasks: [WorkTask]
@@ -1313,6 +1345,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var isAutoCycleCancelRequested = false
     @Published private(set) var wipLimits: [KanbanStatus: Int]
     @Published var agents: [AgentProfile]
+    @Published private(set) var taskTemplates: [TaskTemplate]
+    @Published private(set) var executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
 
     private let assignmentEngine: AutoAssignmentEngine
@@ -1393,6 +1427,50 @@ final class KanbanBoardViewModel: ObservableObject {
         ).count
     }
 
+    private static func defaultTaskTemplates() -> [TaskTemplate] {
+        [
+            TaskTemplate(
+                name: "SwiftUI Feature",
+                title: "Build SwiftUI feature",
+                details: """
+                Implement the target UI flow and interaction states.
+                Acceptance:
+                - UI is responsive on common window sizes.
+                - Empty/loading/error states are handled.
+                - Includes basic accessibility checks.
+                """,
+                requiredSkills: ["swiftui", "ui"],
+                storyPoints: 3
+            ),
+            TaskTemplate(
+                name: "API Integration",
+                title: "Integrate API endpoint",
+                details: """
+                Integrate backend API contract into the app workflow.
+                Acceptance:
+                - Request/response mapping is validated.
+                - Failure paths and retries are handled.
+                - Logs include actionable diagnostics.
+                """,
+                requiredSkills: ["api", "networking"],
+                storyPoints: 5
+            ),
+            TaskTemplate(
+                name: "Test Coverage",
+                title: "Add regression coverage",
+                details: """
+                Expand automated coverage for the changed behavior.
+                Acceptance:
+                - Adds happy-path and failure-path tests.
+                - Verifies edge cases found during implementation.
+                - Keeps tests deterministic and fast.
+                """,
+                requiredSkills: ["testing", "tdd"],
+                storyPoints: 2
+            )
+        ]
+    }
+
     var totalTaskCount: Int { tasks.count }
     var todoTaskCount: Int { tasks.filter { $0.status == .todo }.count }
     var unassignedTodoTaskCount: Int { tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.count }
@@ -1441,6 +1519,8 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks: [WorkTask],
         agents: [AgentProfile],
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
+        taskTemplates: [TaskTemplate]? = nil,
+        executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1466,6 +1546,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.tasks = tasks
         self.agents = agents
         self.wipLimits = normalizedLimits
+        self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
+        self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1477,6 +1559,8 @@ final class KanbanBoardViewModel: ObservableObject {
     private init(
         boards: [KanbanBoardRecord],
         selectedBoardID: UUID,
+        taskTemplates: [TaskTemplate]? = nil,
+        executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1502,6 +1586,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.tasks = resolvedBoard.tasks
         self.agents = resolvedBoard.agents
         self.wipLimits = resolvedBoard.wipLimits
+        self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
+        self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1771,7 +1857,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     agents: agents,
                     wipLimits: wipLimits,
                     boards: boards,
-                    selectedBoardID: selectedBoardID
+                    selectedBoardID: selectedBoardID,
+                    taskTemplates: taskTemplates,
+                    executionAutoRetryConfiguration: executionAutoRetryConfiguration
                 )
             )
         } catch {
@@ -1797,12 +1885,147 @@ final class KanbanBoardViewModel: ObservableObject {
                     agents: selectedBoard.agents,
                     wipLimits: selectedBoard.wipLimits,
                     boards: [selectedBoard],
-                    selectedBoardID: selectedBoard.id
+                    selectedBoardID: selectedBoard.id,
+                    taskTemplates: taskTemplates,
+                    executionAutoRetryConfiguration: executionAutoRetryConfiguration
                 )
             )
         } catch {
             lastBoardMessage = message("Failed to export board")
             return nil
+        }
+    }
+
+    private func executionReportDocumentForSelectedBoard() -> ExecutionReportDocument? {
+        syncCurrentBoardRecord()
+        guard let selectedBoard = boards.first(where: { $0.id == selectedBoardID }) else {
+            lastBoardMessage = message("Board not found")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
+
+        let agentsByID = Dictionary(uniqueKeysWithValues: selectedBoard.agents.map { ($0.id, $0.name) })
+        let entries = selectedBoard.tasks.map { task in
+            let assignee: String
+            if let assignedAgentID = task.assignedAgentID,
+               let resolvedName = agentsByID[assignedAgentID] {
+                assignee = resolvedName
+            } else {
+                assignee = message("Unassigned")
+            }
+
+            return ExecutionReportTaskEntry(
+                id: task.id,
+                title: task.title,
+                status: task.status.rawValue,
+                assignee: assignee,
+                storyPoints: task.storyPoints,
+                runCount: task.executionRecord?.runCount ?? 0,
+                executionStatus: task.executionRecord?.status.rawValue,
+                lastStartedAt: task.executionRecord?.lastStartedAt,
+                lastFinishedAt: task.executionRecord?.lastFinishedAt,
+                lastSummary: task.executionRecord?.lastOutputSummary,
+                lastError: task.executionRecord?.lastError
+            )
+        }
+
+        let executedTasks = entries.filter { $0.executionStatus != nil }.count
+        let succeededTasks = entries.filter { $0.executionStatus == TaskExecutionStatus.succeeded.rawValue }.count
+        let failedTasks = entries.filter { $0.executionStatus == TaskExecutionStatus.failed.rawValue }.count
+        let runningTasks = entries.filter { $0.executionStatus == TaskExecutionStatus.running.rawValue }.count
+        let notRunTasks = max(0, entries.count - executedTasks)
+
+        return ExecutionReportDocument(
+            generatedAt: Date(),
+            boardID: selectedBoard.id,
+            boardName: selectedBoard.name,
+            totalTasks: entries.count,
+            executedTasks: executedTasks,
+            succeededTasks: succeededTasks,
+            failedTasks: failedTasks,
+            runningTasks: runningTasks,
+            notRunTasks: notRunTasks,
+            tasks: entries
+        )
+    }
+
+    func executionReportJSONDataForSelectedBoard() -> Data? {
+        guard let report = executionReportDocumentForSelectedBoard() else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return try? encoder.encode(report)
+    }
+
+    func executionReportMarkdownForSelectedBoard() -> String? {
+        guard let report = executionReportDocumentForSelectedBoard() else { return nil }
+
+        var lines: [String] = []
+        lines.append("# Execution Report")
+        lines.append("")
+        lines.append("- Generated At: \(ISO8601DateFormatter().string(from: report.generatedAt))")
+        lines.append("- Board: \(report.boardName)")
+        lines.append("- Total Tasks: \(report.totalTasks)")
+        lines.append("- Executed: \(report.executedTasks)")
+        lines.append("- Succeeded: \(report.succeededTasks)")
+        lines.append("- Failed: \(report.failedTasks)")
+        lines.append("- Running: \(report.runningTasks)")
+        lines.append("- Not Run: \(report.notRunTasks)")
+        lines.append("")
+        lines.append("| Task | Status | Assignee | SP | Runs | Execution |")
+        lines.append("| --- | --- | --- | ---: | ---: | --- |")
+        for task in report.tasks {
+            let execution = task.executionStatus ?? "not-run"
+            lines.append(
+                "| \(task.title.replacingOccurrences(of: "|", with: "\\|")) | \(task.status) | \(task.assignee.replacingOccurrences(of: "|", with: "\\|")) | \(task.storyPoints) | \(task.runCount) | \(execution) |"
+            )
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    @discardableResult
+    func exportExecutionReportJSONForSelectedBoard(to url: URL) -> Bool {
+        guard let data = executionReportJSONDataForSelectedBoard() else {
+            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            let fileName = url.lastPathComponent.isEmpty ? "execution-report.json" : url.lastPathComponent
+            lastBoardMessage = "Exported execution report to \(fileName)"
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+    }
+
+    @discardableResult
+    func exportExecutionReportMarkdownForSelectedBoard(to url: URL) -> Bool {
+        guard let markdown = executionReportMarkdownForSelectedBoard() else {
+            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        do {
+            guard let data = markdown.data(using: .utf8) else {
+                lastBoardMessage = "Failed to export execution report"
+                lastBoardMessageSeverity = .warning
+                return false
+            }
+            try data.write(to: url, options: .atomic)
+            let fileName = url.lastPathComponent.isEmpty ? "execution-report.md" : url.lastPathComponent
+            lastBoardMessage = "Exported execution report to \(fileName)"
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessageSeverity = .warning
+            return false
         }
     }
 
@@ -1908,6 +2131,12 @@ final class KanbanBoardViewModel: ObservableObject {
         switch strategy {
         case .replace:
             boards = importedBoards
+            if let importedTemplates = snapshot.taskTemplates, !importedTemplates.isEmpty {
+                taskTemplates = importedTemplates
+            }
+            if let importedRetryConfiguration = snapshot.executionAutoRetryConfiguration {
+                executionAutoRetryConfiguration = importedRetryConfiguration
+            }
             resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
                 importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
             } ?? importedBoards[0].id
@@ -1919,6 +2148,12 @@ final class KanbanBoardViewModel: ObservableObject {
             syncCurrentBoardRecord()
             let currentSelectedBoardID = selectedBoardID
             boards = mergedBoardRecords(currentBoards: boards, importedBoards: importedBoards)
+            if let importedTemplates = snapshot.taskTemplates, !importedTemplates.isEmpty {
+                taskTemplates = mergedTaskTemplates(current: taskTemplates, imported: importedTemplates)
+            }
+            if let importedRetryConfiguration = snapshot.executionAutoRetryConfiguration {
+                executionAutoRetryConfiguration = importedRetryConfiguration
+            }
             resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
                 importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
             } ?? currentSelectedBoardID
@@ -2136,6 +2371,151 @@ final class KanbanBoardViewModel: ObservableObject {
         return true
     }
 
+    func taskTemplate(_ templateID: UUID) -> TaskTemplate? {
+        taskTemplates.first(where: { $0.id == templateID })
+    }
+
+    @discardableResult
+    func addTaskTemplate(
+        name: String,
+        title: String,
+        details: String,
+        requiredSkillsText: String,
+        storyPoints: Int
+    ) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Task template name is required"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            lastBoardMessage = "Task template title is required"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let skills = requiredSkillsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let template = TaskTemplate(
+            name: trimmedName,
+            title: trimmedTitle,
+            details: details,
+            requiredSkills: skills,
+            storyPoints: storyPoints
+        )
+        taskTemplates.append(template)
+        taskTemplates.sort { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        persistBoardState()
+        lastBoardMessage = "Added task template: \(template.name)"
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func updateTaskTemplate(
+        _ templateID: UUID,
+        name: String,
+        title: String,
+        details: String,
+        requiredSkillsText: String,
+        storyPoints: Int
+    ) -> Bool {
+        guard let index = taskTemplates.firstIndex(where: { $0.id == templateID }) else {
+            lastBoardMessage = "Task template not found"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = "Task template name is required"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            lastBoardMessage = "Task template title is required"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let skills = requiredSkillsText
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        taskTemplates[index].name = trimmedName
+        taskTemplates[index].title = trimmedTitle
+        taskTemplates[index].details = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        taskTemplates[index].requiredSkills = Array(Set(skills.map { $0.lowercased() })).sorted()
+        taskTemplates[index].storyPoints = max(1, min(13, storyPoints))
+        taskTemplates.sort { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        persistBoardState()
+        lastBoardMessage = "Updated task template: \(trimmedName)"
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func removeTaskTemplate(_ templateID: UUID) -> Bool {
+        guard let index = taskTemplates.firstIndex(where: { $0.id == templateID }) else {
+            lastBoardMessage = "Task template not found"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        let removedName = taskTemplates[index].name
+        taskTemplates.remove(at: index)
+        persistBoardState()
+        lastBoardMessage = "Deleted task template: \(removedName)"
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func createTask(
+        fromTemplate templateID: UUID,
+        autoAssign: Bool = false
+    ) -> Bool {
+        guard let template = taskTemplate(templateID) else {
+            lastBoardMessage = "Task template not found"
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        return addTask(
+            title: template.title,
+            details: template.details,
+            requiredSkillsText: template.requiredSkillsText,
+            storyPoints: template.storyPoints,
+            autoAssign: autoAssign
+        )
+    }
+
+    func updateExecutionAutoRetryConfiguration(
+        isEnabled: Bool,
+        maxRetryCount: Int,
+        backoffSeconds: Double,
+        retryableErrorTypes: Set<RetryableExecutionErrorType>
+    ) {
+        executionAutoRetryConfiguration = ExecutionAutoRetryConfiguration(
+            isEnabled: isEnabled,
+            maxRetryCount: maxRetryCount,
+            backoffSeconds: backoffSeconds,
+            retryableErrorTypes: retryableErrorTypes
+        )
+        persistBoardState()
+        lastBoardMessage = "Updated execution auto-retry settings"
+        lastBoardMessageSeverity = .info
+    }
+
     func previewProjectPlan(
         projectName: String,
         projectBrief: String
@@ -2324,7 +2704,12 @@ final class KanbanBoardViewModel: ObservableObject {
 
         for descriptor in createdTasks {
             guard let status = statusByTaskID[descriptor.taskID] else { continue }
-            countsByStatus[status, default: 0] += 1
+            if status == .review {
+                // In roadmap summaries, review-complete work is counted as done progress.
+                countsByStatus[.done, default: 0] += 1
+            } else {
+                countsByStatus[status, default: 0] += 1
+            }
         }
 
         let todo = countsByStatus[.todo, default: 0]
@@ -3161,15 +3546,93 @@ final class KanbanBoardViewModel: ObservableObject {
         let agent: AgentProfile
     }
 
+    private func retryableErrorType(for message: String) -> RetryableExecutionErrorType? {
+        let normalized = message.lowercased()
+
+        let networkSignals = [
+            "network", "dns", "connection timed out", "network timeout",
+            "failed to connect", "connection reset",
+            "connection refused", "websocket", "lookup address information"
+        ]
+        if networkSignals.contains(where: { normalized.contains($0) }) {
+            return .network
+        }
+
+        let rateLimitSignals = [
+            "rate limit", "too many requests", "quota",
+            "insufficient_quota", "usage limit"
+        ]
+        if rateLimitSignals.contains(where: { normalized.contains($0) }) {
+            return .rateLimit
+        }
+
+        let serverSignals = [
+            "500", "502", "503", "504",
+            "internal server error", "service unavailable", "bad gateway"
+        ]
+        if serverSignals.contains(where: { normalized.contains($0) }) {
+            return .server
+        }
+
+        return nil
+    }
+
+    private func executeWithAutoRetry(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> ExecutionAttemptResult {
+        var outcome = taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+        let config = executionAutoRetryConfiguration
+        guard config.isEnabled, config.maxRetryCount > 0 else {
+            return ExecutionAttemptResult(outcome: outcome, retriesPerformed: 0)
+        }
+
+        var retriesPerformed = 0
+        while retriesPerformed < config.maxRetryCount {
+            guard case let .failure(errorMessage) = outcome else {
+                break
+            }
+            guard let retryType = retryableErrorType(for: errorMessage),
+                  config.retryableErrorTypes.contains(retryType) else {
+                break
+            }
+
+            let backoff = max(0, config.backoffSeconds * pow(2.0, Double(retriesPerformed)))
+            retriesPerformed += 1
+            onProgress(
+                "Auto-retry scheduled (\(retriesPerformed)/\(config.maxRetryCount)) in \(String(format: "%.1f", backoff))s due to \(retryType.rawValue)"
+            )
+            if backoff > 0 {
+                Thread.sleep(forTimeInterval: backoff)
+            }
+            onProgress("Auto-retry attempt \(retriesPerformed) for \"\(task.title)\"")
+            outcome = taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+        }
+
+        return ExecutionAttemptResult(outcome: outcome, retriesPerformed: retriesPerformed)
+    }
+
+    private func applyRetryRunCount(for taskID: UUID, additionalAttempts: Int) {
+        guard additionalAttempts > 0,
+              let taskIndex = tasks.firstIndex(where: { $0.id == taskID }),
+              var record = tasks[taskIndex].executionRecord else {
+            return
+        }
+        record.runCount = max(0, record.runCount) + additionalAttempts
+        tasks[taskIndex].executionRecord = record
+    }
+
     @discardableResult
     func runTaskExecution(_ taskID: UUID) -> Bool {
         guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
             return false
         }
-        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+        let result = executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
             self.captureExecutionProgress(update, for: prepared)
         }
-        finalizeTaskExecution(prepared, outcome: outcome)
+        applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
+        finalizeTaskExecution(prepared, outcome: result.outcome)
         return true
     }
 
@@ -3178,9 +3641,8 @@ final class KanbanBoardViewModel: ObservableObject {
             completion(false)
             return
         }
-        let executor = taskExecutor
         runOnBackground {
-            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+            let result = self.executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
                 self.runOnMain { [weak self] in
                     self?.captureExecutionProgress(update, for: prepared)
                 }
@@ -3190,7 +3652,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     completion(false)
                     return
                 }
-                self.finalizeTaskExecution(prepared, outcome: outcome)
+                self.applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
+                self.finalizeTaskExecution(prepared, outcome: result.outcome)
                 completion(true)
             }
         }
@@ -3206,10 +3669,11 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
             return false
         }
-        let outcome = taskExecutor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+        let result = executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
             self.captureExecutionProgress(update, for: prepared)
         }
-        finalizeTaskExecution(prepared, outcome: outcome)
+        applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
+        finalizeTaskExecution(prepared, outcome: result.outcome)
         return true
     }
 
@@ -3224,9 +3688,8 @@ final class KanbanBoardViewModel: ObservableObject {
             completion(false)
             return
         }
-        let executor = taskExecutor
         runOnBackground {
-            let outcome = executor.execute(task: prepared.taskSnapshot, agent: prepared.agent) { update in
+            let result = self.executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
                 self.runOnMain { [weak self] in
                     self?.captureExecutionProgress(update, for: prepared)
                 }
@@ -3236,7 +3699,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     completion(false)
                     return
                 }
-                self.finalizeTaskExecution(prepared, outcome: outcome)
+                self.applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
+                self.finalizeTaskExecution(prepared, outcome: result.outcome)
                 completion(true)
             }
         }
@@ -3709,6 +4173,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func runAutoDispatchCycleInBackground(
         maxPasses: Int = 3,
         autoCreateMissingDependencies: Bool = false,
+        autoAssignBeforeRun: Bool = true,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
         isAutoCycleCancelRequested = false
@@ -3775,7 +4240,9 @@ final class KanbanBoardViewModel: ObservableObject {
             if autoCreateMissingDependencies {
                 createdDependencyTaskCount += createMissingDependencyTasks()
             }
-            autoAssignTasks()
+            if autoAssignBeforeRun {
+                autoAssignTasks()
+            }
             runAssignedTaskExecutionsInBackground { started in
                 totalStarted += started
                 let isTerminalNoRunnable =
@@ -3840,7 +4307,8 @@ final class KanbanBoardViewModel: ObservableObject {
 
         runAutoDispatchCycleInBackground(
             maxPasses: maxAutoCyclePasses,
-            autoCreateMissingDependencies: autoCreateMissingDependenciesDuringCycle
+            autoCreateMissingDependencies: autoCreateMissingDependenciesDuringCycle,
+            autoAssignBeforeRun: autoAssign
         ) { startedExecutions, completedPasses in
             let cycleHadWarning = self.lastBoardMessageSeverity == .warning
             let remainingPreparation = self.prepareAssignedBatchRunQueue()
@@ -4606,6 +5074,20 @@ final class KanbanBoardViewModel: ObservableObject {
         return mergedBoards
     }
 
+    private func mergedTaskTemplates(current: [TaskTemplate], imported: [TaskTemplate]) -> [TaskTemplate] {
+        var merged = current
+        var usedNames = Set(current.map { $0.name.lowercased() })
+        for template in imported {
+            let normalizedName = template.name.lowercased()
+            guard !usedNames.contains(normalizedName) else { continue }
+            merged.append(template)
+            usedNames.insert(normalizedName)
+        }
+        return merged.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
     private func decodeWorkspaceSnapshot(from data: Data) -> KanbanBoardSnapshot? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
@@ -4648,7 +5130,9 @@ final class KanbanBoardViewModel: ObservableObject {
             agents: agents,
             wipLimits: wipLimits,
             boards: boards,
-            selectedBoardID: selectedBoardID
+            selectedBoardID: selectedBoardID,
+            taskTemplates: taskTemplates,
+            executionAutoRetryConfiguration: executionAutoRetryConfiguration
         )
         try? boardStore.save(snapshot)
     }
@@ -4662,6 +5146,8 @@ extension KanbanBoardViewModel {
                 return KanbanBoardViewModel(
                     boards: boards,
                     selectedBoardID: resolvedSelectedBoardID,
+                    taskTemplates: snapshot.taskTemplates,
+                    executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
                     boardStore: boardStore
                 )
             }
@@ -4669,6 +5155,8 @@ extension KanbanBoardViewModel {
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,
                 wipLimits: snapshot.wipLimits,
+                taskTemplates: snapshot.taskTemplates,
+                executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
                 boardStore: boardStore
             )
         }
