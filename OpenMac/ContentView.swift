@@ -866,6 +866,7 @@ struct ContentView: View {
             )
         }
         .onAppear {
+            applyWindowAppearanceMode()
             L10n.setRuntimeLocale(
                 AppLanguageResolver.resolvedLocale(overrideRawValue: appLanguageOverrideRawValue)
             )
@@ -878,6 +879,9 @@ struct ContentView: View {
             syncDAGSchedulerDraftFromViewModel()
             syncQualitySafetyGateDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
+        }
+        .onChange(of: appearanceModeRawValue) { _, _ in
+            applyWindowAppearanceMode()
         }
         .onChange(of: appLanguageOverrideRawValue) { _, newValue in
             L10n.setRuntimeLocale(
@@ -3067,6 +3071,18 @@ struct ContentView: View {
             return L10n.string("System Default")
         case let .language(language):
             return L10n.string(language.displayNameKey)
+        }
+    }
+
+    private func applyWindowAppearanceMode() {
+        guard let app = NSApp else { return }
+        switch selectedAppearanceMode {
+        case .system:
+            app.appearance = nil
+        case .light:
+            app.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            app.appearance = NSAppearance(named: .darkAqua)
         }
     }
 
