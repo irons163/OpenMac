@@ -67,12 +67,12 @@ struct ContentView: View {
     @State private var newAgentName = ""
     @State private var newAgentSkills = ""
     @State private var newAgentCapacity = 3
-    @State private var newAgentRuntimeEnabled = false
-    @State private var newAgentRuntimeProvider: AgentRuntimeProvider = .localMock
-    @State private var newAgentRuntimeModel = ""
+    @State private var newAgentRuntimeEnabled = true
+    @State private var newAgentRuntimeProvider: AgentRuntimeProvider = .openAICompatible
+    @State private var newAgentRuntimeModel = AgentRuntimeProfile.defaultCodexBridge.model
     @State private var newAgentRuntimeEndpoint = ""
     @State private var newAgentRuntimeTools = ""
-    @State private var newAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .apiKey
+    @State private var newAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .codexBridge
     @State private var newAgentCodexProfile = ""
     @State private var editingAgentID: UUID?
     @State private var editAgentName = ""
@@ -126,12 +126,15 @@ struct ContentView: View {
     @State private var prQualityGateEnabled = false
     @State private var dagSchedulerEnabled = true
     @State private var dagSchedulerAutoAssignBeforeRun = true
+    @State private var dagSchedulerFallbackAutoAssignNoSkillMatch = true
+    @State private var dagSchedulerAutoRelaxWIPLimitsDuringRun = true
     @State private var dagSchedulerAutoCreateDependencies = true
     @State private var dagSchedulerMaxPasses = 6
     @State private var qualitySafetyGateEnabled = false
     @State private var qualitySafetyRequireAcceptance = true
     @State private var qualitySafetyRequireCoverageIntent = true
     @State private var qualitySafetyRequireSecurityPrivacyNotes = true
+    @State private var isBoardMessageExpanded = false
     @State private var isGitHubFlowRunning = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
@@ -593,6 +596,8 @@ struct ContentView: View {
                     Text(L10n.string("DAG Scheduler"))
                     Toggle(L10n.string("Enable dependency DAG scheduler"), isOn: $dagSchedulerEnabled)
                     Toggle(L10n.string("Auto-assign before DAG run"), isOn: $dagSchedulerAutoAssignBeforeRun)
+                    Toggle(L10n.string("Fallback auto-assign when no skill match"), isOn: $dagSchedulerFallbackAutoAssignNoSkillMatch)
+                    Toggle(L10n.string("Auto-relax WIP limits during DAG run"), isOn: $dagSchedulerAutoRelaxWIPLimitsDuringRun)
                     Toggle(L10n.string("Auto-create missing dependencies during DAG run"), isOn: $dagSchedulerAutoCreateDependencies)
                     Stepper(
                         L10n.format("DAG Max Passes: %d", dagSchedulerMaxPasses),
@@ -880,6 +885,9 @@ struct ContentView: View {
             )
             viewModel.clearLocalizedTransientBoardMessage()
         }
+        .onChange(of: viewModel.lastBoardMessage) { _, _ in
+            isBoardMessageExpanded = false
+        }
         .onChange(of: viewModel.agents) { _, _ in
             normalizeAssigneeFilterSelection()
             syncSelectedAgentConsoleSelection()
@@ -970,12 +978,12 @@ struct ContentView: View {
         newAgentName = ""
         newAgentSkills = ""
         newAgentCapacity = 3
-        newAgentRuntimeEnabled = false
-        newAgentRuntimeProvider = .localMock
-        newAgentRuntimeModel = ""
+        newAgentRuntimeEnabled = true
+        newAgentRuntimeProvider = .openAICompatible
+        newAgentRuntimeModel = AgentRuntimeProfile.defaultCodexBridge.model
         newAgentRuntimeEndpoint = ""
         newAgentRuntimeTools = ""
-        newAgentOpenAIAuthMode = .apiKey
+        newAgentOpenAIAuthMode = .codexBridge
         newAgentCodexProfile = ""
         isShowingNewAgentSheet = false
     }
@@ -1582,6 +1590,8 @@ struct ContentView: View {
     private func syncDAGSchedulerDraftFromViewModel() {
         dagSchedulerEnabled = viewModel.dagExecutionPolicy.isEnabled
         dagSchedulerAutoAssignBeforeRun = viewModel.dagExecutionPolicy.autoAssignBeforeRun
+        dagSchedulerFallbackAutoAssignNoSkillMatch = viewModel.dagExecutionPolicy.autoAssignFallbackWithoutSkillMatch
+        dagSchedulerAutoRelaxWIPLimitsDuringRun = viewModel.dagExecutionPolicy.autoRelaxWIPLimitsDuringRun
         dagSchedulerAutoCreateDependencies = viewModel.dagExecutionPolicy.autoCreateMissingDependenciesDuringRun
         dagSchedulerMaxPasses = viewModel.dagExecutionPolicy.maxPasses
     }
@@ -1590,6 +1600,8 @@ struct ContentView: View {
         viewModel.updateDAGExecutionPolicy(
             isEnabled: dagSchedulerEnabled,
             autoAssignBeforeRun: dagSchedulerAutoAssignBeforeRun,
+            autoAssignFallbackWithoutSkillMatch: dagSchedulerFallbackAutoAssignNoSkillMatch,
+            autoRelaxWIPLimitsDuringRun: dagSchedulerAutoRelaxWIPLimitsDuringRun,
             autoCreateMissingDependenciesDuringRun: dagSchedulerAutoCreateDependencies,
             maxPasses: dagSchedulerMaxPasses
         )
@@ -2484,11 +2496,11 @@ struct ContentView: View {
         editAgentSkills = agent.skills.sorted().joined(separator: ", ")
         editAgentCapacity = agent.maxConcurrentTasks
         editAgentRuntimeEnabled = agent.runtimeProfile != nil
-        editAgentRuntimeProvider = agent.runtimeProfile?.provider ?? .localMock
-        editAgentRuntimeModel = agent.runtimeProfile?.model ?? ""
+        editAgentRuntimeProvider = agent.runtimeProfile?.provider ?? .openAICompatible
+        editAgentRuntimeModel = agent.runtimeProfile?.model ?? AgentRuntimeProfile.defaultCodexBridge.model
         editAgentRuntimeEndpoint = agent.runtimeProfile?.endpoint ?? ""
         editAgentRuntimeTools = agent.runtimeProfile?.tools.sorted().joined(separator: ", ") ?? ""
-        editAgentOpenAIAuthMode = agent.runtimeProfile?.openAIAuthMode ?? .apiKey
+        editAgentOpenAIAuthMode = agent.runtimeProfile?.openAIAuthMode ?? .codexBridge
         editAgentCodexProfile = agent.runtimeProfile?.codexProfile ?? ""
         isShowingEditAgentSheet = true
     }
@@ -2499,11 +2511,11 @@ struct ContentView: View {
         editAgentSkills = ""
         editAgentCapacity = 3
         editAgentRuntimeEnabled = false
-        editAgentRuntimeProvider = .localMock
-        editAgentRuntimeModel = ""
+        editAgentRuntimeProvider = .openAICompatible
+        editAgentRuntimeModel = AgentRuntimeProfile.defaultCodexBridge.model
         editAgentRuntimeEndpoint = ""
         editAgentRuntimeTools = ""
-        editAgentOpenAIAuthMode = .apiKey
+        editAgentOpenAIAuthMode = .codexBridge
         editAgentCodexProfile = ""
         isShowingEditAgentSheet = false
     }
@@ -2761,12 +2773,24 @@ struct ContentView: View {
             for: viewModel.lastBoardMessageSeverity,
             scheme: effectiveColorScheme
         )
+        let isExpandable = Self.isBoardMessageLong(message)
+        let displayMessage = (isExpandable && !isBoardMessageExpanded)
+            ? Self.boardMessageCollapsedPreview(message)
+            : message
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(message)
+                Text(displayMessage)
                     .font(.callout)
                     .foregroundStyle(messageColor)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                if isExpandable {
+                    Button(L10n.string("Details")) {
+                        isBoardMessageExpanded.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 if developerModeEnabled {
                     Spacer()
                     Button(L10n.string("Copy")) {
@@ -2846,6 +2870,33 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    private static func boardMessageCollapsedPreview(_ rawMessage: String) -> String {
+        let normalized = rawMessage
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let segments = normalized
+            .split(separator: "·")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if segments.count >= 6 {
+            return "\(segments.prefix(4).joined(separator: " · ")) …"
+        }
+
+        if normalized.count > 220 {
+            return "\(String(normalized.prefix(220)).trimmingCharacters(in: .whitespacesAndNewlines)) …"
+        }
+        return normalized
+    }
+
+    private static func isBoardMessageLong(_ rawMessage: String) -> Bool {
+        let normalized = rawMessage
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        return boardMessageCollapsedPreview(rawMessage) != normalized
     }
 
     @ViewBuilder
@@ -2969,17 +3020,24 @@ struct ContentView: View {
         codexProfile: String
     ) -> AgentRuntimeProfile? {
         guard isEnabled else { return nil }
-        let resolvedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModelInput = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsedTools = toolsText
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let resolvedOpenAIAuthMode: OpenAICompatibleAuthMode = provider == .openAICompatible ? openAIAuthMode : .apiKey
+        let resolvedModel = if resolvedModelInput.isEmpty {
+            provider == .openAICompatible && resolvedOpenAIAuthMode == .codexBridge
+                ? AgentRuntimeProfile.codexBridgeDefaultModel
+                : provider.defaultModel
+        } else {
+            resolvedModelInput
+        }
         let resolvedEndpoint = provider == .openAICompatible && resolvedOpenAIAuthMode == .apiKey ? endpoint : ""
         let resolvedCodexProfile = provider == .openAICompatible && resolvedOpenAIAuthMode == .codexBridge ? codexProfile : ""
         return AgentRuntimeProfile(
             provider: provider,
-            model: resolvedModel.isEmpty ? provider.defaultModel : resolvedModel,
+            model: resolvedModel,
             endpoint: resolvedEndpoint,
             tools: parsedTools,
             openAIAuthMode: resolvedOpenAIAuthMode,
@@ -3571,16 +3629,19 @@ private struct BoardDependencyInsightsView: View {
             }
 
             if !insights.criticalPathTaskTitles.isEmpty {
-                Text(
-                    L10n.format(
-                        "Critical Path (%d SP): %@",
-                        insights.criticalPathStoryPoints,
-                        insights.criticalPathTaskTitles.joined(separator: " -> ")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(
+                        L10n.format(
+                            "Critical Path (%d SP): %@",
+                            insights.criticalPathStoryPoints,
+                            insights.criticalPathTaskTitles.joined(separator: " -> ")
+                        )
                     )
-                )
-                .font(.caption)
-                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
-                .lineLimit(2)
+                    .font(.caption)
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
             }
 
             if !insights.cycleTaskTitles.isEmpty {
@@ -4532,60 +4593,65 @@ private struct PMPlannerSheet: View {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            TextField(L10n.string("Project Name (optional)"), text: $projectName)
-                .textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField(L10n.string("Project Name (optional)"), text: $projectName)
+                        .textFieldStyle(.roundedBorder)
 
-            HStack(spacing: 10) {
-                Picker(L10n.string("PM Template"), selection: $selectedTemplateID) {
-                    ForEach(templateOptions) { option in
-                        Text(option.title).tag(option.id)
+                    HStack(spacing: 10) {
+                        Picker(L10n.string("PM Template"), selection: $selectedTemplateID) {
+                            ForEach(templateOptions) { option in
+                                Text(option.title).tag(option.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Button(L10n.string("Apply Template"), action: onApplyTemplate)
+                            .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
+
+                        Button(L10n.string("Apply + Generate"), action: onApplyTemplateAndGenerate)
+                            .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
                     }
-                }
-                .pickerStyle(.menu)
 
-                Button(L10n.string("Apply Template"), action: onApplyTemplate)
-                    .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("Blueprint Wizard"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
 
-                Button(L10n.string("Apply + Generate"), action: onApplyTemplateAndGenerate)
-                    .disabled(selectedTemplateID == ContentView.pmCustomTemplateID)
-            }
+                        TextField(L10n.string("Product Vision"), text: $blueprintVision)
+                        TextField(L10n.string("Target Users"), text: $blueprintTargetUsers)
+                        TextField(L10n.string("Core Features"), text: $blueprintCoreFeatures)
+                        TextField(L10n.string("Tech Scope"), text: $blueprintTechScope)
+                        TextField(L10n.string("Constraints"), text: $blueprintConstraints)
+                        TextField(L10n.string("Quality Bar"), text: $blueprintQualityBar)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.string("Blueprint Wizard"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                        HStack {
+                            Button(L10n.string("Build Brief from Blueprint"), action: onApplyBlueprint)
+                                .disabled(!hasBlueprintInput)
+                            Button(L10n.string("Build + Generate"), action: onApplyBlueprintAndGenerate)
+                                .disabled(!hasBlueprintInput)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
 
-                TextField(L10n.string("Product Vision"), text: $blueprintVision)
-                TextField(L10n.string("Target Users"), text: $blueprintTargetUsers)
-                TextField(L10n.string("Core Features"), text: $blueprintCoreFeatures)
-                TextField(L10n.string("Tech Scope"), text: $blueprintTechScope)
-                TextField(L10n.string("Constraints"), text: $blueprintConstraints)
-                TextField(L10n.string("Quality Bar"), text: $blueprintQualityBar)
-
-                HStack {
-                    Button(L10n.string("Build Brief from Blueprint"), action: onApplyBlueprint)
-                        .disabled(!hasBlueprintInput)
-                    Button(L10n.string("Build + Generate"), action: onApplyBlueprintAndGenerate)
-                        .disabled(!hasBlueprintInput)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-            .padding(10)
-            .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.string("Project Brief"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $projectBrief)
-                    .font(.body)
-                    .frame(minHeight: 96, maxHeight: 120)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                    )
-            }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.string("Project Brief"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $projectBrief)
+                            .font(.system(size: 14, weight: .regular, design: .default))
+                            .lineSpacing(3)
+                            .frame(minHeight: 160, maxHeight: 220)
+                            .padding(6)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                            )
+                    }
 
             Text(L10n.string("Describe your goal, scope, and constraints. PM planner will turn this into executable tickets."))
                 .font(.caption)
@@ -4743,8 +4809,10 @@ private struct PMPlannerSheet: View {
                                         set: { plannedTickets[index].details = $0 }
                                     )
                                 )
-                                .font(.caption)
-                                .frame(minHeight: 72, maxHeight: 92)
+                                .font(.system(size: 13, weight: .regular, design: .default))
+                                .frame(minHeight: 84, maxHeight: 112)
+                                .padding(4)
+                                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
@@ -4792,30 +4860,36 @@ private struct PMPlannerSheet: View {
                 .frame(maxHeight: 280)
             }
 
-            if !testPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(L10n.string("Test Plan"))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button(L10n.string("Copy Test Plan"), action: onCopyTestPlan)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
+                    if !testPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(L10n.string("Test Plan"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button(L10n.string("Copy Test Plan"), action: onCopyTestPlan)
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            }
 
-                    ScrollView {
-                        Text(testPlanText)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            ScrollView {
+                                Text(testPlanText)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 130)
+                            .padding(8)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                        }
                     }
-                    .frame(maxHeight: 130)
-                    .padding(8)
-                    .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 2)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
+            Divider()
             HStack {
                 Spacer()
                 Button(L10n.string("Copy"), action: onCopyPlan)
@@ -4827,6 +4901,7 @@ private struct PMPlannerSheet: View {
                 Button(L10n.string("Copy Blueprint JSON"), action: onCopyBlueprint)
                     .disabled(projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button(L10n.string("Cancel"), action: onCancel)
+                    .keyboardShortcut(.cancelAction)
                 Button(L10n.string("Generate Plan"), action: onGeneratePlan)
                     .keyboardShortcut(.defaultAction)
                 Button(L10n.format("Create Tickets (%d)", plannedTickets.count), action: onCreateTickets)
@@ -4838,7 +4913,7 @@ private struct PMPlannerSheet: View {
             }
         }
         .padding(18)
-        .frame(width: 680, height: 820)
+        .frame(width: 760, height: 760)
     }
 }
 

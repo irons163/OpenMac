@@ -83,6 +83,16 @@ enum OpenAICompatibleAuthMode: String, CaseIterable, Codable, Identifiable {
 }
 
 struct AgentRuntimeProfile: Equatable, Codable {
+    static let codexBridgeDefaultModel = "gpt-5"
+
+    static var defaultCodexBridge: AgentRuntimeProfile {
+        AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: codexBridgeDefaultModel,
+            openAIAuthMode: .codexBridge
+        )
+    }
+
     var provider: AgentRuntimeProvider
     var model: String
     var endpoint: String?
@@ -190,6 +200,7 @@ struct ExecutionCheckpoint: Equatable, Codable {
     var maxAutoCyclePasses: Int
     var autoCreateMissingDependencies: Bool
     var autoAssignBeforeRun: Bool
+    var autoAssignFallbackWithoutSkillMatch: Bool
 
     init(
         boardID: UUID,
@@ -197,7 +208,8 @@ struct ExecutionCheckpoint: Equatable, Codable {
         startedAt: Date = Date(),
         maxAutoCyclePasses: Int = 1,
         autoCreateMissingDependencies: Bool = false,
-        autoAssignBeforeRun: Bool = true
+        autoAssignBeforeRun: Bool = true,
+        autoAssignFallbackWithoutSkillMatch: Bool = false
     ) {
         self.boardID = boardID
         self.mode = mode
@@ -205,6 +217,7 @@ struct ExecutionCheckpoint: Equatable, Codable {
         self.maxAutoCyclePasses = max(1, maxAutoCyclePasses)
         self.autoCreateMissingDependencies = autoCreateMissingDependencies
         self.autoAssignBeforeRun = autoAssignBeforeRun
+        self.autoAssignFallbackWithoutSkillMatch = autoAssignFallbackWithoutSkillMatch
     }
 }
 
@@ -346,17 +359,23 @@ struct GitHubPRQualityGatePolicy: Equatable, Codable {
 struct DAGExecutionPolicy: Equatable, Codable {
     var isEnabled: Bool
     var autoAssignBeforeRun: Bool
+    var autoAssignFallbackWithoutSkillMatch: Bool
+    var autoRelaxWIPLimitsDuringRun: Bool
     var autoCreateMissingDependenciesDuringRun: Bool
     var maxPasses: Int
 
     init(
         isEnabled: Bool = true,
         autoAssignBeforeRun: Bool = true,
+        autoAssignFallbackWithoutSkillMatch: Bool = true,
+        autoRelaxWIPLimitsDuringRun: Bool = true,
         autoCreateMissingDependenciesDuringRun: Bool = true,
         maxPasses: Int = 6
     ) {
         self.isEnabled = isEnabled
         self.autoAssignBeforeRun = autoAssignBeforeRun
+        self.autoAssignFallbackWithoutSkillMatch = autoAssignFallbackWithoutSkillMatch
+        self.autoRelaxWIPLimitsDuringRun = autoRelaxWIPLimitsDuringRun
         self.autoCreateMissingDependenciesDuringRun = autoCreateMissingDependenciesDuringRun
         self.maxPasses = max(1, min(24, maxPasses))
     }

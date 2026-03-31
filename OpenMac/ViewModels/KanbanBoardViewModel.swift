@@ -231,7 +231,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         agent: AgentProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
-        let runtimeProfile = agent.runtimeProfile ?? AgentRuntimeProfile(provider: .localMock)
+        let runtimeProfile = agent.runtimeProfile ?? .defaultCodexBridge
         let provider = runtimeProfile.provider
         switch provider {
         case .localMock:
@@ -2435,8 +2435,12 @@ final class KanbanBoardViewModel: ObservableObject {
         moveTask(taskID, to: status)
     }
 
-    func autoAssignTasks() {
-        let result = assignmentEngine.assign(tasks: tasks, agents: agents)
+    func autoAssignTasks(allowFallbackWithoutSkillMatch: Bool = false) {
+        let result = assignmentEngine.assign(
+            tasks: tasks,
+            agents: agents,
+            allowFallbackWithoutSkillMatch: allowFallbackWithoutSkillMatch
+        )
         tasks = result.tasks
         lastUnassignedTaskIDs = result.unassignedTaskIDs
         lastAssignmentReasons = result.decisions.reduce(into: [:]) { partialResult, pair in
@@ -2447,7 +2451,10 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func autoAssignTask(_ taskID: UUID) -> Bool {
+    func autoAssignTask(
+        _ taskID: UUID,
+        allowFallbackWithoutSkillMatch: Bool = false
+    ) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
         guard tasks[taskIndex].status == .todo else {
             lastBoardMessage = message("Only To Do tasks can be auto-assigned")
@@ -2463,7 +2470,8 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let decision = assignmentEngine.bestAgent(
             for: tasks[taskIndex],
             among: tasks,
-            agents: agents
+            agents: agents,
+            allowFallbackWithoutSkillMatch: allowFallbackWithoutSkillMatch
         ) else {
             lastUnassignedTaskIDs.insert(taskID)
             lastBoardMessage = message("No eligible agent for task")
@@ -3254,7 +3262,7 @@ final class KanbanBoardViewModel: ObservableObject {
             name: name,
             skillsText: skillsText,
             maxConcurrentTasks: maxConcurrentTasks,
-            runtimeProfile: nil
+            runtimeProfile: .defaultCodexBridge
         )
     }
 
@@ -3668,6 +3676,42 @@ final class KanbanBoardViewModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    private func autoRelaxWIPLimitsForAutoCycle() -> Int {
+        var limitUpdates: [KanbanStatus: Int?] = [:]
+
+        if let inProgressLimit = wipLimit(for: .inProgress),
+           wipPressurePercent(for: .inProgress) >= 100,
+           hasRunnableTodoBlockedByInProgressWIP() {
+            limitUpdates[.inProgress] = inProgressLimit + 1
+        }
+
+        if let reviewLimit = wipLimit(for: .review),
+           wipPressurePercent(for: .review) >= 100,
+           tasks.contains(where: { $0.status == .inProgress }) {
+            limitUpdates[.review] = reviewLimit + 1
+        }
+
+        guard !limitUpdates.isEmpty else { return 0 }
+        guard updateWIPLimits(limitUpdates) else { return 0 }
+        lastBoardMessage = message("Auto-relaxed WIP limits this pass: +%d", limitUpdates.count)
+        lastBoardMessageSeverity = .info
+        return limitUpdates.count
+    }
+
+    private func hasRunnableTodoBlockedByInProgressWIP() -> Bool {
+        tasks.contains { task in
+            guard task.status == .todo else { return false }
+            guard task.assignedAgentID != nil else { return false }
+            guard !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            guard unresolvedDependencies(for: task.id).isEmpty else { return false }
+            guard !(requiresHumanApproval(for: task.id) && !isTaskApprovedForExecution(task.id)) else { return false }
+            guard quotaCheckMessage(for: task) == nil else { return false }
+            guard qualitySafetyGateBlockReason(for: task) == nil else { return false }
+            return true
+        }
+    }
+
     func assignmentReason(for taskID: UUID) -> String? {
         lastAssignmentReasons[taskID]
     }
@@ -3868,12 +3912,16 @@ final class KanbanBoardViewModel: ObservableObject {
     func updateDAGExecutionPolicy(
         isEnabled: Bool,
         autoAssignBeforeRun: Bool,
+        autoAssignFallbackWithoutSkillMatch: Bool,
+        autoRelaxWIPLimitsDuringRun: Bool = true,
         autoCreateMissingDependenciesDuringRun: Bool,
         maxPasses: Int
     ) {
         dagExecutionPolicy = DAGExecutionPolicy(
             isEnabled: isEnabled,
             autoAssignBeforeRun: autoAssignBeforeRun,
+            autoAssignFallbackWithoutSkillMatch: autoAssignFallbackWithoutSkillMatch,
+            autoRelaxWIPLimitsDuringRun: autoRelaxWIPLimitsDuringRun,
             autoCreateMissingDependenciesDuringRun: autoCreateMissingDependenciesDuringRun,
             maxPasses: maxPasses
         )
@@ -4666,14 +4714,21 @@ final class KanbanBoardViewModel: ObservableObject {
         maxPasses: Int = 3,
         autoCreateMissingDependencies: Bool = false,
         autoAssignBeforeRun: Bool = true,
+        autoAssignFallbackWithoutSkillMatch: Bool? = nil,
+        autoRelaxWIPLimitsDuringRun: Bool? = nil,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
+        let resolvedAutoAssignFallback = autoAssignFallbackWithoutSkillMatch
+            ?? dagExecutionPolicy.autoAssignFallbackWithoutSkillMatch
+        let resolvedAutoRelaxWIPLimits = autoRelaxWIPLimitsDuringRun
+            ?? dagExecutionPolicy.autoRelaxWIPLimitsDuringRun
         updateExecutionCheckpoint(
             ExecutionCheckpointUseCase.makeAutoCycleCheckpoint(
                 boardID: selectedBoardID,
                 maxPasses: maxPasses,
                 autoCreateMissingDependencies: autoCreateMissingDependencies,
-                autoAssignBeforeRun: autoAssignBeforeRun
+                autoAssignBeforeRun: autoAssignBeforeRun,
+                autoAssignFallbackWithoutSkillMatch: resolvedAutoAssignFallback
             )
         )
         ExecutionCoordinator.runAutoDispatchCycleInBackground(
@@ -4684,9 +4739,22 @@ final class KanbanBoardViewModel: ObservableObject {
             isCancelRequested: { self.isAutoCycleCancelRequested },
             setCreatedDependencyTaskCount: { self.lastAutoCycleCreatedDependencyTaskCount = $0 },
             createMissingDependencyTasks: { self.createMissingDependencyTasks() },
-            autoAssignTasks: { self.autoAssignTasks() },
+            autoAssignTasks: {
+                self.autoAssignTasks(allowFallbackWithoutSkillMatch: resolvedAutoAssignFallback)
+            },
             runAssignedTaskExecutionsInBackground: { completion in
-                self.runAssignedTaskExecutionsInBackground(completion: completion)
+                self.runAssignedTaskExecutionsInBackground { started in
+                    guard started == 0, resolvedAutoRelaxWIPLimits else {
+                        completion(started)
+                        return
+                    }
+                    let relaxedCount = self.autoRelaxWIPLimitsForAutoCycle()
+                    guard relaxedCount > 0 else {
+                        completion(started)
+                        return
+                    }
+                    self.runAssignedTaskExecutionsInBackground(completion: completion)
+                }
             },
             boardMessageSeverity: { self.lastBoardMessageSeverity },
             isTerminalNoRunnablePass: { started, totalStarted in
@@ -4736,6 +4804,12 @@ final class KanbanBoardViewModel: ObservableObject {
         let policy = dagExecutionPolicy
         let resolvedMaxPasses = policy.isEnabled ? policy.maxPasses : 3
         let resolvedAutoAssign = policy.isEnabled ? policy.autoAssignBeforeRun : true
+        let resolvedAutoAssignFallback = policy.isEnabled
+            ? policy.autoAssignFallbackWithoutSkillMatch
+            : false
+        let resolvedAutoRelaxWIPLimits = policy.isEnabled
+            ? policy.autoRelaxWIPLimitsDuringRun
+            : false
         let resolvedAutoCreateDependencies = policy.isEnabled
             ? policy.autoCreateMissingDependenciesDuringRun
             : false
@@ -4744,6 +4818,8 @@ final class KanbanBoardViewModel: ObservableObject {
             maxPasses: resolvedMaxPasses,
             autoCreateMissingDependencies: resolvedAutoCreateDependencies,
             autoAssignBeforeRun: resolvedAutoAssign,
+            autoAssignFallbackWithoutSkillMatch: resolvedAutoAssignFallback,
+            autoRelaxWIPLimitsDuringRun: resolvedAutoRelaxWIPLimits,
             completion: completion
         )
     }
@@ -4775,13 +4851,14 @@ final class KanbanBoardViewModel: ObservableObject {
             runAssignedTaskExecutionsInBackground { startedCount in
                 completion(startedCount > 0)
             }
-        case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun):
+        case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun, autoAssignFallbackWithoutSkillMatch):
             lastBoardMessage = message("Resuming interrupted auto cycle")
             lastBoardMessageSeverity = .info
             runAutoDispatchCycleInBackground(
                 maxPasses: maxPasses,
                 autoCreateMissingDependencies: autoCreateMissingDependencies,
-                autoAssignBeforeRun: autoAssignBeforeRun
+                autoAssignBeforeRun: autoAssignBeforeRun,
+                autoAssignFallbackWithoutSkillMatch: autoAssignFallbackWithoutSkillMatch
             ) { startedCount, _ in
                 completion(startedCount > 0)
             }

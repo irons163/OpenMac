@@ -2175,6 +2175,46 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks.first?.assignedAgentID == nil)
     }
 
+    @Test("single-task auto assign can fallback when enabled")
+    func autoAssignSingleTaskAllowsFallbackWhenEnabled() {
+        let task = WorkTask(
+            title: "No match task",
+            details: "",
+            requiredSkills: ["backend"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        let assigned = viewModel.autoAssignTask(task.id, allowFallbackWithoutSkillMatch: true)
+
+        #expect(assigned)
+        #expect(viewModel.tasks.first?.assignedAgentID == agent.id)
+        #expect(viewModel.assignmentReason(for: task.id)?.contains("fallback[no-skill-match]") == true)
+    }
+
+    @Test("bulk auto assign can fallback when enabled")
+    func autoAssignTasksAllowsFallbackWhenEnabled() {
+        let task = WorkTask(
+            title: "No match task",
+            details: "",
+            requiredSkills: ["backend"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+
+        viewModel.autoAssignTasks(allowFallbackWithoutSkillMatch: true)
+
+        #expect(viewModel.tasks.first?.assignedAgentID == agent.id)
+        #expect(viewModel.lastUnassignedTaskIDs.isEmpty)
+        #expect(viewModel.assignmentReason(for: task.id)?.contains("fallback[no-skill-match]") == true)
+    }
+
     @Test("single-task auto assign rejects non-To-Do task")
     func autoAssignSingleTaskRejectsNonTodoTask() {
         let task = WorkTask(
@@ -3827,6 +3867,17 @@ struct ContentViewLogicTests {
         #expect(openAICodex?.openAIAuthMode == .codexBridge)
         #expect(openAICodex?.endpoint == nil)
         #expect(openAICodex?.codexProfile == "team-profile")
+
+        let openAICodexDefaultModel = ContentViewTestHooks.buildRuntimeProfile(
+            isEnabled: true,
+            provider: .openAICompatible,
+            model: " ",
+            endpoint: "",
+            toolsText: "",
+            openAIAuthMode: .codexBridge,
+            codexProfile: ""
+        )
+        #expect(openAICodexDefaultModel?.model == AgentRuntimeProfile.codexBridgeDefaultModel)
 
         let localRuntime = ContentViewTestHooks.buildRuntimeProfile(
             isEnabled: true,
@@ -5659,16 +5710,18 @@ struct ExecutionCheckpointUseCaseTests {
             boardID: boardID,
             maxPasses: 4,
             autoCreateMissingDependencies: true,
-            autoAssignBeforeRun: false
+            autoAssignBeforeRun: false,
+            autoAssignFallbackWithoutSkillMatch: true
         )
 
         let matched = ExecutionCheckpointUseCase.resumeAction(for: checkpoint, selectedBoardID: boardID)
         let mismatched = ExecutionCheckpointUseCase.resumeAction(for: checkpoint, selectedBoardID: UUID())
 
-        if case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun)? = matched {
+        if case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun, autoAssignFallbackWithoutSkillMatch)? = matched {
             #expect(maxPasses == 4)
             #expect(autoCreateMissingDependencies)
             #expect(!autoAssignBeforeRun)
+            #expect(autoAssignFallbackWithoutSkillMatch)
         } else {
             #expect(Bool(false))
         }
@@ -10232,6 +10285,9 @@ struct KanbanPersistenceTests {
         #expect(viewModel.agents[0].name == "Platform Agent")
         #expect(viewModel.agents[0].skills == Set(["api", "db", "swiftui"]))
         #expect(viewModel.agents[0].maxConcurrentTasks == 4)
+        #expect(viewModel.agents[0].runtimeProfile?.provider == .openAICompatible)
+        #expect(viewModel.agents[0].runtimeProfile?.openAIAuthMode == .codexBridge)
+        #expect(viewModel.agents[0].runtimeProfile?.model == AgentRuntimeProfile.codexBridgeDefaultModel)
         #expect(store.savedSnapshots.count == 1)
         #expect(store.savedSnapshots.last?.agents.count == 1)
     }
@@ -10733,6 +10789,7 @@ struct KanbanPersistenceTests {
         viewModel.updateDAGExecutionPolicy(
             isEnabled: true,
             autoAssignBeforeRun: true,
+            autoAssignFallbackWithoutSkillMatch: true,
             autoCreateMissingDependenciesDuringRun: false,
             maxPasses: 8
         )
@@ -11172,6 +11229,97 @@ struct KanbanPersistenceTests {
         #expect(totalStarted == 1)
         #expect(viewModel.tasks.first?.assignedAgentID == agent.id)
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("auto cycle auto-relaxes WIP limits when runnable work is blocked by In Progress limit")
+    func runAutoDispatchCycleInBackgroundAutoRelaxesWIPLimits() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let activeBlocked = WorkTask(
+            title: "Active blocked",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let queuedRunnable = WorkTask(
+            title: "Queued runnable",
+            details: "Implement feature",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [queuedRunnable.id: .success(summary: "done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [activeBlocked, queuedRunnable],
+            agents: [agent],
+            wipLimits: [.inProgress: 1, .review: 2],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        viewModel.runAutoDispatchCycleInBackground(
+            maxPasses: 1,
+            autoAssignBeforeRun: false,
+            autoRelaxWIPLimitsDuringRun: true
+        ) { started, _ in
+            totalStarted = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil })
+        #expect(totalStarted == 1)
+        #expect(viewModel.wipLimit(for: .inProgress) == 2)
+        #expect(viewModel.tasks.first(where: { $0.id == queuedRunnable.id })?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("auto cycle keeps WIP limits unchanged when auto-relax is disabled")
+    func runAutoDispatchCycleInBackgroundCanDisableAutoRelaxWIPLimits() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let activeBlocked = WorkTask(
+            title: "Active blocked",
+            details: "",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: agent.id
+        )
+        let queuedRunnable = WorkTask(
+            title: "Queued runnable",
+            details: "Implement feature",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [queuedRunnable.id: .success(summary: "done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [activeBlocked, queuedRunnable],
+            agents: [agent],
+            wipLimits: [.inProgress: 1, .review: 2],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var totalStarted: Int?
+        viewModel.runAutoDispatchCycleInBackground(
+            maxPasses: 1,
+            autoAssignBeforeRun: false,
+            autoRelaxWIPLimitsDuringRun: false
+        ) { started, _ in
+            totalStarted = started
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil })
+        #expect(totalStarted == 0)
+        #expect(viewModel.wipLimit(for: .inProgress) == 1)
     }
 
     @Test("auto cycle can auto-create missing dependency tasks and unblock execution")
