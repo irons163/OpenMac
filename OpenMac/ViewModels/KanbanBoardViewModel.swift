@@ -2610,156 +2610,6 @@ final class KanbanBoardViewModel: ObservableObject {
         return createdTasks
     }
 
-    private func pmAutopilotMilestoneProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        guard !createdTasks.isEmpty else { return nil }
-        let groupedByMilestone = Dictionary(grouping: createdTasks, by: \.milestone)
-        guard !groupedByMilestone.isEmpty else { return nil }
-
-        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
-        let sortedMilestones = groupedByMilestone.keys.sorted {
-            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-        }
-
-        var segments: [String] = []
-        segments.reserveCapacity(sortedMilestones.count)
-
-        for milestone in sortedMilestones {
-            let entries = groupedByMilestone[milestone] ?? []
-            let total = entries.count
-            guard total > 0 else { continue }
-            let advanced = entries.reduce(0) { partialResult, entry in
-                guard let status = statusByTaskID[entry.taskID] else {
-                    return partialResult
-                }
-                return partialResult + (status == .todo ? 0 : 1)
-            }
-            segments.append("\(message("Milestone: %@", milestone)) \(advanced)/\(total)")
-        }
-
-        guard !segments.isEmpty else { return nil }
-        return "\(message("Roadmap")) [\(message("Milestone"))]: \(segments.joined(separator: " | "))"
-    }
-
-    private func pmAutopilotEpicProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        let tasksWithEpic = createdTasks.filter {
-            !$0.epic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        guard !tasksWithEpic.isEmpty else { return nil }
-
-        let groupedByEpic = Dictionary(grouping: tasksWithEpic) { descriptor in
-            descriptor.epic.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !groupedByEpic.isEmpty else { return nil }
-
-        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
-        let sortedEpics = groupedByEpic.keys.sorted {
-            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-        }
-
-        var segments: [String] = []
-        segments.reserveCapacity(sortedEpics.count)
-
-        for epic in sortedEpics {
-            let entries = groupedByEpic[epic] ?? []
-            let total = entries.count
-            guard total > 0 else { continue }
-            let advanced = entries.reduce(0) { partialResult, entry in
-                guard let status = statusByTaskID[entry.taskID] else {
-                    return partialResult
-                }
-                return partialResult + (status == .todo ? 0 : 1)
-            }
-            segments.append("\(message("Epic: %@", epic)) \(advanced)/\(total)")
-        }
-
-        guard !segments.isEmpty else { return nil }
-        return "\(message("Roadmap")) [\(message("Epic"))]: \(segments.joined(separator: " | "))"
-    }
-
-    private func pmAutopilotOverallProgressSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        guard !createdTasks.isEmpty else { return nil }
-        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
-        let total = createdTasks.count
-        guard total > 0 else { return nil }
-
-        let advanced = createdTasks.reduce(0) { partialResult, descriptor in
-            guard let status = statusByTaskID[descriptor.taskID] else {
-                return partialResult
-            }
-            return partialResult + (status == .todo ? 0 : 1)
-        }
-        let percent = Int(((Double(advanced) / Double(total)) * 100).rounded())
-        return "\(message("Roadmap")) [\(message("Total"))]: \(advanced)/\(total) (\(percent)%)"
-    }
-
-    private func pmAutopilotStatusDistributionSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        guard !createdTasks.isEmpty else { return nil }
-        let statusByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.status) })
-        var countsByStatus: [KanbanStatus: Int] = Dictionary(uniqueKeysWithValues: KanbanStatus.allCases.map { ($0, 0) })
-
-        for descriptor in createdTasks {
-            guard let status = statusByTaskID[descriptor.taskID] else { continue }
-            if status == .review {
-                // In roadmap summaries, review-complete work is counted as done progress.
-                countsByStatus[.done, default: 0] += 1
-            } else {
-                countsByStatus[status, default: 0] += 1
-            }
-        }
-
-        let todo = countsByStatus[.todo, default: 0]
-        let inProgress = countsByStatus[.inProgress, default: 0]
-        let review = countsByStatus[.review, default: 0]
-        let done = countsByStatus[.done, default: 0]
-        return "\(message("Roadmap")) [\(message("To Do"))/\(message("In Progress"))/\(message("Review"))/\(message("Done"))]: \(todo)/\(inProgress)/\(review)/\(done)"
-    }
-
-    private func pmAutopilotExecutionOutcomeSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        guard !createdTasks.isEmpty else { return nil }
-        let executionByTaskID: [UUID: TaskExecutionStatus] = Dictionary(
-            uniqueKeysWithValues: tasks.compactMap { task in
-                guard let executionStatus = task.executionRecord?.status else {
-                    return nil
-                }
-                return (task.id, executionStatus)
-            }
-        )
-
-        var succeeded = 0
-        var failed = 0
-        var running = 0
-
-        for descriptor in createdTasks {
-            guard let status = executionByTaskID[descriptor.taskID] else {
-                continue
-            }
-            switch status {
-            case .succeeded:
-                succeeded += 1
-            case .failed:
-                failed += 1
-            case .running:
-                running += 1
-            }
-        }
-
-        guard (succeeded + failed + running) > 0 else { return nil }
-        return "\(message("Roadmap")) [\(message("Succeeded"))/\(message("Failed"))/\(message("Running"))]: \(succeeded)/\(failed)/\(running)"
-    }
-
-    private func pmAutopilotUnassignedSummary(_ createdTasks: [PMCreatedTaskDescriptor]) -> String? {
-        let total = createdTasks.count
-        guard total > 0 else { return nil }
-        let assignedByTaskID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.assignedAgentID) })
-        let unassigned = createdTasks.reduce(0) { partialResult, descriptor in
-            guard let assignedAgentID = assignedByTaskID[descriptor.taskID] else {
-                return partialResult + 1
-            }
-            return partialResult + (assignedAgentID == nil ? 1 : 0)
-        }
-        return "\(message("Roadmap")) [\(message("Unassigned"))]: \(unassigned)/\(total)"
-    }
-
     @discardableResult
     func createMissingAgentsForPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
@@ -3982,7 +3832,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: preparation.detailsMissingCount,
                     dependencyBlockedCount: preparation.dependencyBlockedCount
                 )
-                self.lastBoardMessageSeverity = .warning
+                self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
             handleFinished: { state in
                 let counters = state.counters
@@ -3994,12 +3844,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     dependencyBlockedCount: dependencyBlockedCount,
                     wasCancelled: false
                 )
-                self.lastBoardMessageSeverity = (
-                    counters.failedCount > 0 ||
-                        counters.skippedCount > 0 ||
-                        detailsMissingCount > 0 ||
-                        dependencyBlockedCount > 0
-                ) ? .warning : .info
+                self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
+                    counters: counters,
+                    wasCancelled: false,
+                    detailsMissingCount: detailsMissingCount,
+                    dependencyBlockedCount: dependencyBlockedCount
+                )
             }
         )
     }
@@ -4022,7 +3872,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     detailsMissingCount: preparation.detailsMissingCount,
                     dependencyBlockedCount: preparation.dependencyBlockedCount
                 )
-                self.lastBoardMessageSeverity = .warning
+                self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
             handleFinished: { state in
                 let counters = state.counters
@@ -4034,13 +3884,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     dependencyBlockedCount: dependencyBlockedCount,
                     wasCancelled: state.wasCancelled
                 )
-                self.lastBoardMessageSeverity = (
-                    counters.failedCount > 0 ||
-                        state.wasCancelled ||
-                        counters.skippedCount > 0 ||
-                        detailsMissingCount > 0 ||
-                        dependencyBlockedCount > 0
-                ) ? .warning : .info
+                self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
+                    counters: counters,
+                    wasCancelled: state.wasCancelled,
+                    detailsMissingCount: detailsMissingCount,
+                    dependencyBlockedCount: dependencyBlockedCount
+                )
             },
             completion: completion
         )
@@ -4083,15 +3932,15 @@ final class KanbanBoardViewModel: ObservableObject {
                         remainingDetailsMissing: remainingDetailsMissing,
                         remainingDependencyBlocked: remainingDependencyBlocked
                     )
-                    self.lastBoardMessageSeverity = (
-                        state.hadWarning ||
-                            state.wasCancelled ||
-                            remainingDetailsMissing > 0 ||
-                            remainingDependencyBlocked > 0
-                    ) ? .warning : .info
+                    self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleFinished(
+                        hadWarning: state.hadWarning,
+                        wasCancelled: state.wasCancelled,
+                        remainingDetailsMissing: remainingDetailsMissing,
+                        remainingDependencyBlocked: remainingDependencyBlocked
+                    )
                 } else if self.lastBoardMessage == nil {
                     self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleNoRunnableMessage
-                    self.lastBoardMessageSeverity = .warning
+                    self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleNoRunnable
                 }
             },
             completion: completion
@@ -4165,25 +4014,13 @@ final class KanbanBoardViewModel: ObservableObject {
                 let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
                 let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
 
-                var roadmapSections: [String] = []
-                if let overallProgress = self.pmAutopilotOverallProgressSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(overallProgress)
-                }
-                if let unassignedSummary = self.pmAutopilotUnassignedSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(unassignedSummary)
-                }
-                if let statusDistribution = self.pmAutopilotStatusDistributionSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(statusDistribution)
-                }
-                if let executionOutcomes = self.pmAutopilotExecutionOutcomeSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(executionOutcomes)
-                }
-                if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(milestoneProgress)
-                }
-                if let epicProgress = self.pmAutopilotEpicProgressSummary(state.createdTaskDescriptors) {
-                    roadmapSections.append(epicProgress)
-                }
+                let roadmapSections = PMRoadmapSummaryBuilder.buildSections(
+                    createdTasks: state.createdTaskDescriptors,
+                    tasks: self.tasks,
+                    taskID: { $0.taskID },
+                    milestone: { $0.milestone },
+                    epic: { $0.epic }
+                )
                 self.lastBoardMessage = ExecutionSummaryBuilder.pmAutopilotFinishedMessage(
                     createdAgents: state.createdAgents,
                     createdTickets: createdTickets,
@@ -4196,12 +4033,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     remainingDetailsMissing: remainingDetailsMissing,
                     remainingDependencyBlocked: remainingDependencyBlocked
                 )
-                self.lastBoardMessageSeverity = (
-                    state.cycleHadWarning ||
-                        state.startedExecutions == 0 ||
-                        remainingDetailsMissing > 0 ||
-                        remainingDependencyBlocked > 0
-                ) ? .warning : .info
+                self.lastBoardMessageSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
+                    cycleHadWarning: state.cycleHadWarning,
+                    startedExecutions: state.startedExecutions,
+                    remainingDetailsMissing: remainingDetailsMissing,
+                    remainingDependencyBlocked: remainingDependencyBlocked
+                )
             },
             completion: completion
         )

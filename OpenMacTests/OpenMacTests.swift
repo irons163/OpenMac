@@ -10775,6 +10775,167 @@ struct ExecutionSummaryBuilderTests {
     }
 }
 
+@MainActor
+struct ExecutionSeverityPolicyTests {
+    @Test("batch severity is info when run completed cleanly")
+    func batchSeverityInfoWhenClean() {
+        var counters = BatchRunCounters()
+        counters.startedCount = 2
+        counters.succeededCount = 2
+        counters.failedCount = 0
+        counters.skippedCount = 0
+
+        let severity = ExecutionSeverityPolicy.batchRunFinished(
+            counters: counters,
+            wasCancelled: false,
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 0
+        )
+
+        #expect(severity == .info)
+    }
+
+    @Test("batch severity is warning when cancellation or blockers occurred")
+    func batchSeverityWarningWhenCancelledOrBlocked() {
+        var counters = BatchRunCounters()
+        counters.startedCount = 2
+        counters.succeededCount = 1
+        counters.failedCount = 0
+        counters.skippedCount = 1
+
+        let severity = ExecutionSeverityPolicy.batchRunFinished(
+            counters: counters,
+            wasCancelled: true,
+            detailsMissingCount: 1,
+            dependencyBlockedCount: 0
+        )
+
+        #expect(severity == .warning)
+    }
+
+    @Test("auto cycle severity reflects warnings and remaining blockers")
+    func autoCycleSeverity() {
+        let warningSeverity = ExecutionSeverityPolicy.autoCycleFinished(
+            hadWarning: false,
+            wasCancelled: false,
+            remainingDetailsMissing: 0,
+            remainingDependencyBlocked: 1
+        )
+        let infoSeverity = ExecutionSeverityPolicy.autoCycleFinished(
+            hadWarning: false,
+            wasCancelled: false,
+            remainingDetailsMissing: 0,
+            remainingDependencyBlocked: 0
+        )
+
+        #expect(warningSeverity == .warning)
+        #expect(infoSeverity == .info)
+        #expect(ExecutionSeverityPolicy.autoCycleNoRunnable == .warning)
+        #expect(ExecutionSeverityPolicy.noRunnableAssignedBatch == .warning)
+    }
+
+    @Test("pm autopilot severity warns when no executions started")
+    func pmAutopilotSeverityWarnsWithoutExecution() {
+        let warningSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
+            cycleHadWarning: false,
+            startedExecutions: 0,
+            remainingDetailsMissing: 0,
+            remainingDependencyBlocked: 0
+        )
+        let infoSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
+            cycleHadWarning: false,
+            startedExecutions: 2,
+            remainingDetailsMissing: 0,
+            remainingDependencyBlocked: 0
+        )
+
+        #expect(warningSeverity == .warning)
+        #expect(infoSeverity == .info)
+    }
+}
+
+@MainActor
+struct PMRoadmapSummaryBuilderTests {
+    private struct Descriptor {
+        let taskID: UUID
+        let milestone: String
+        let epic: String
+    }
+
+    @Test("buildSections composes roadmap totals distributions and grouped progress")
+    func buildSectionsComposesAllRoadmapSegments() {
+        let agentID = UUID()
+        let taskA = WorkTask(
+            title: "Task A",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil,
+            executionRecord: TaskExecutionRecord(status: .failed)
+        )
+        let taskB = WorkTask(
+            title: "Task B",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: agentID,
+            executionRecord: TaskExecutionRecord(status: .running)
+        )
+        let taskC = WorkTask(
+            title: "Task C",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: agentID,
+            executionRecord: TaskExecutionRecord(status: .succeeded)
+        )
+
+        let descriptors = [
+            Descriptor(taskID: taskA.id, milestone: "M2 MVP Complete", epic: "Core"),
+            Descriptor(taskID: taskB.id, milestone: "M1 Setup", epic: ""),
+            Descriptor(taskID: taskC.id, milestone: "M2 MVP Complete", epic: "Growth")
+        ]
+
+        let sections = PMRoadmapSummaryBuilder.buildSections(
+            createdTasks: descriptors,
+            tasks: [taskA, taskB, taskC],
+            taskID: { $0.taskID },
+            milestone: { $0.milestone },
+            epic: { $0.epic }
+        )
+
+        #expect(sections.count == 6)
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("Total"))]: 2/3 (67%)"))
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("Unassigned"))]: 1/3"))
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("To Do"))/\(L10n.string("In Progress"))/\(L10n.string("Review"))/\(L10n.string("Done"))]: 1/1/0/1"))
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("Succeeded"))/\(L10n.string("Failed"))/\(L10n.string("Running"))]: 1/1/1"))
+
+        let milestoneSection = sections.first { $0.contains("[\(L10n.string("Milestone"))]") }
+        #expect(milestoneSection?.contains("\(L10n.format("Milestone: %@", "M1 Setup")) 1/1") == true)
+        #expect(milestoneSection?.contains("\(L10n.format("Milestone: %@", "M2 MVP Complete")) 1/2") == true)
+
+        let epicSection = sections.first { $0.contains("[\(L10n.string("Epic"))]") }
+        #expect(epicSection?.contains("\(L10n.format("Epic: %@", "Core")) 0/1") == true)
+        #expect(epicSection?.contains("\(L10n.format("Epic: %@", "Growth")) 1/1") == true)
+    }
+
+    @Test("buildSections returns empty list for empty roadmap")
+    func buildSectionsEmptyRoadmap() {
+        let sections = PMRoadmapSummaryBuilder.buildSections(
+            createdTasks: [Descriptor](),
+            tasks: [],
+            taskID: { $0.taskID },
+            milestone: { $0.milestone },
+            epic: { $0.epic }
+        )
+
+        #expect(sections.isEmpty)
+    }
+}
+
 struct AppLanguageResolverTests {
     private static let userDefaultsMutationLock = NSLock()
     private static let runtimeLocaleMutationLock = NSLock()
