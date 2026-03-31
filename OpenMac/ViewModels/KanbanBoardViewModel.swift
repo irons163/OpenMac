@@ -1285,6 +1285,7 @@ struct AgentExecutionEvent: Identifiable, Equatable {
 
 final class KanbanBoardViewModel: ObservableObject {
     typealias ExecutionDispatcher = (@escaping () -> Void) -> Void
+    typealias GitCommandRunner = GitHubPRFlowUseCase.CommandRunner
     private struct PMCreatedTaskDescriptor {
         let taskID: UUID
         let milestone: String
@@ -1335,6 +1336,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var lastBoardMessageSeverity: BoardMessageSeverity?
     @Published private(set) var lastExecutionDebugLog: String?
     @Published private(set) var lastCodexLoginCommand: String?
+    @Published private(set) var lastGitHubPRURL: String?
+    @Published private(set) var lastGitHubPRLog: String?
     @Published private(set) var lastAutoCycleCreatedDependencyTaskCount = 0
     @Published private(set) var isBatchRunCancelRequested = false
     @Published private(set) var isAutoCycleCancelRequested = false
@@ -1342,6 +1345,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published var agents: [AgentProfile]
     @Published private(set) var taskTemplates: [TaskTemplate]
     @Published private(set) var executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration
+    @Published private(set) var executionCheckpoint: ExecutionCheckpoint?
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
 
     private let assignmentEngine: AutoAssignmentEngine
@@ -1350,6 +1354,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private let boardStore: KanbanBoardStore?
     private let runOnBackground: ExecutionDispatcher
     private let runOnMain: ExecutionDispatcher
+    private let gitCommandRunner: GitCommandRunner
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
 
@@ -1509,6 +1514,15 @@ final class KanbanBoardViewModel: ObservableObject {
     var selectedBoardName: String {
         boards.first(where: { $0.id == selectedBoardID })?.name ?? Self.defaultBoardName
     }
+    var hasExecutionCheckpointForSelectedBoard: Bool {
+        ExecutionCheckpointUseCase.resumeAction(
+            for: executionCheckpoint,
+            selectedBoardID: selectedBoardID
+        ) != nil
+    }
+    var selectedBoardDependencyInsights: DependencyGraphInsights {
+        DependencyGraphInsightsUseCase.build(tasks: tasks)
+    }
 
     init(
         tasks: [WorkTask],
@@ -1516,10 +1530,12 @@ final class KanbanBoardViewModel: ObservableObject {
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
         taskTemplates: [TaskTemplate]? = nil,
         executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
+        executionCheckpoint: ExecutionCheckpoint? = nil,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
+        gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
         runOnBackground: @escaping ExecutionDispatcher = { work in
             DispatchQueue.global(qos: .userInitiated).async(execute: work)
         },
@@ -1543,12 +1559,15 @@ final class KanbanBoardViewModel: ObservableObject {
         self.wipLimits = normalizedLimits
         self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
+        self.executionCheckpoint = executionCheckpoint
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
+        self.gitCommandRunner = gitCommandRunner
         self.runOnBackground = runOnBackground
         self.runOnMain = runOnMain
+        markRunningExecutionsAsInterruptedIfNeeded()
     }
 
     private init(
@@ -1556,10 +1575,12 @@ final class KanbanBoardViewModel: ObservableObject {
         selectedBoardID: UUID,
         taskTemplates: [TaskTemplate]? = nil,
         executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
+        executionCheckpoint: ExecutionCheckpoint? = nil,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
+        gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
         runOnBackground: @escaping ExecutionDispatcher = { work in
             DispatchQueue.global(qos: .userInitiated).async(execute: work)
         },
@@ -1583,12 +1604,15 @@ final class KanbanBoardViewModel: ObservableObject {
         self.wipLimits = resolvedBoard.wipLimits
         self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
+        self.executionCheckpoint = executionCheckpoint
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
         self.boardStore = boardStore
+        self.gitCommandRunner = gitCommandRunner
         self.runOnBackground = runOnBackground
         self.runOnMain = runOnMain
+        markRunningExecutionsAsInterruptedIfNeeded()
     }
 
     @discardableResult
@@ -1854,7 +1878,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     boards: boards,
                     selectedBoardID: selectedBoardID,
                     taskTemplates: taskTemplates,
-                    executionAutoRetryConfiguration: executionAutoRetryConfiguration
+                    executionAutoRetryConfiguration: executionAutoRetryConfiguration,
+                    executionCheckpoint: executionCheckpoint
                 )
             )
         } catch {
@@ -1882,7 +1907,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     boards: [selectedBoard],
                     selectedBoardID: selectedBoard.id,
                     taskTemplates: taskTemplates,
-                    executionAutoRetryConfiguration: executionAutoRetryConfiguration
+                    executionAutoRetryConfiguration: executionAutoRetryConfiguration,
+                    executionCheckpoint: executionCheckpoint?.boardID == selectedBoard.id ? executionCheckpoint : nil
                 )
             )
         } catch {
@@ -1976,6 +2002,31 @@ final class KanbanBoardViewModel: ObservableObject {
             )
         }
 
+        return lines.joined(separator: "\n")
+    }
+
+    private func githubPRBody(
+        boardName: String,
+        executionReportMarkdown: String,
+        dependencyInsights: DependencyGraphInsights
+    ) -> String {
+        var lines: [String] = []
+        lines.append("## OpenMac Board Summary")
+        lines.append("")
+        lines.append("- Board: \(boardName)")
+        lines.append("- Blocked Tasks: \(dependencyInsights.blockedTaskCount)")
+        lines.append("- Dependencies: \(dependencyInsights.totalTaskDependencies) (external: \(dependencyInsights.externalDependencyCount))")
+        lines.append("- Critical Path: \(dependencyInsights.criticalPathStoryPoints) SP")
+        if !dependencyInsights.criticalPathTaskTitles.isEmpty {
+            lines.append("- Critical Path Tasks: \(dependencyInsights.criticalPathTaskTitles.joined(separator: " -> "))")
+        }
+        if !dependencyInsights.cycleTaskTitles.isEmpty {
+            lines.append("- Dependency Cycles: \(dependencyInsights.cycleTaskTitles.joined(separator: ", "))")
+        }
+        lines.append("")
+        lines.append("## Execution Report")
+        lines.append("")
+        lines.append(executionReportMarkdown)
         return lines.joined(separator: "\n")
     }
 
@@ -2132,6 +2183,7 @@ final class KanbanBoardViewModel: ObservableObject {
             if let importedRetryConfiguration = snapshot.executionAutoRetryConfiguration {
                 executionAutoRetryConfiguration = importedRetryConfiguration
             }
+            executionCheckpoint = snapshot.executionCheckpoint
             resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
                 importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
             } ?? importedBoards[0].id
@@ -3462,6 +3514,11 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks[taskIndex].executionRecord = record
     }
 
+    private func updateExecutionCheckpoint(_ checkpoint: ExecutionCheckpoint?) {
+        executionCheckpoint = checkpoint
+        persistBoardState()
+    }
+
     @discardableResult
     private func performTaskExecution(_ taskID: UUID, requiresTaskDetails: Bool) -> Bool {
         ExecutionCoordinator.runTaskExecution(
@@ -3855,6 +3912,9 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
+        updateExecutionCheckpoint(
+            ExecutionCheckpointUseCase.makeAssignedBatchCheckpoint(boardID: selectedBoardID)
+        )
         ExecutionCoordinator.runAssignedTaskExecutionsInBackground(
             setCancelRequested: { self.isBatchRunCancelRequested = $0 },
             isCancelRequested: { self.isBatchRunCancelRequested },
@@ -3868,6 +3928,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.executionRecord(for: taskID)?.status
             },
             handleNoRunnable: { preparation in
+                self.updateExecutionCheckpoint(nil)
                 self.lastBoardMessage = self.noRunnableAssignedBatchMessage(
                     detailsMissingCount: preparation.detailsMissingCount,
                     dependencyBlockedCount: preparation.dependencyBlockedCount
@@ -3875,6 +3936,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
             handleFinished: { state in
+                self.updateExecutionCheckpoint(nil)
                 let counters = state.counters
                 let detailsMissingCount = state.finalPreparation.detailsMissingCount
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
@@ -3901,6 +3963,14 @@ final class KanbanBoardViewModel: ObservableObject {
         autoAssignBeforeRun: Bool = true,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
+        updateExecutionCheckpoint(
+            ExecutionCheckpointUseCase.makeAutoCycleCheckpoint(
+                boardID: selectedBoardID,
+                maxPasses: maxPasses,
+                autoCreateMissingDependencies: autoCreateMissingDependencies,
+                autoAssignBeforeRun: autoAssignBeforeRun
+            )
+        )
         ExecutionCoordinator.runAutoDispatchCycleInBackground(
             maxPasses: maxPasses,
             autoCreateMissingDependencies: autoCreateMissingDependencies,
@@ -3921,6 +3991,7 @@ final class KanbanBoardViewModel: ObservableObject {
             },
             prepareRemainingQueue: { self.prepareAssignedBatchRunQueue() },
             handleFinished: { state in
+                self.updateExecutionCheckpoint(nil)
                 if state.totalStarted > 0 || state.wasCancelled {
                     let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
                     let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
@@ -3945,6 +4016,112 @@ final class KanbanBoardViewModel: ObservableObject {
             },
             completion: completion
         )
+    }
+
+    @discardableResult
+    func clearExecutionCheckpoint() -> Bool {
+        guard executionCheckpoint != nil else { return false }
+        updateExecutionCheckpoint(nil)
+        lastBoardMessage = message("Cleared interrupted run checkpoint")
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    func resumeExecutionFromCheckpointInBackground(completion: @escaping (Bool) -> Void) {
+        guard let action = ExecutionCheckpointUseCase.resumeAction(
+            for: executionCheckpoint,
+            selectedBoardID: selectedBoardID
+        ) else {
+            lastBoardMessage = message("No interrupted run checkpoint available for this board")
+            lastBoardMessageSeverity = .warning
+            completion(false)
+            return
+        }
+
+        switch action {
+        case .assignedBatch:
+            lastBoardMessage = message("Resuming interrupted assigned run")
+            lastBoardMessageSeverity = .info
+            runAssignedTaskExecutionsInBackground { startedCount in
+                completion(startedCount > 0)
+            }
+        case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun):
+            lastBoardMessage = message("Resuming interrupted auto cycle")
+            lastBoardMessageSeverity = .info
+            runAutoDispatchCycleInBackground(
+                maxPasses: maxPasses,
+                autoCreateMissingDependencies: autoCreateMissingDependencies,
+                autoAssignBeforeRun: autoAssignBeforeRun
+            ) { startedCount, _ in
+                completion(startedCount > 0)
+            }
+        }
+    }
+
+    func runGitHubPRFlowForSelectedBoardInBackground(
+        repositoryPath: String,
+        baseBranch: String,
+        remoteName: String,
+        branchPrefix: String,
+        completion: @escaping (Bool) -> Void
+    ) {
+        syncCurrentBoardRecord()
+        guard let selectedBoard = boards.first(where: { $0.id == selectedBoardID }) else {
+            lastBoardMessage = message("Board not found")
+            lastBoardMessageSeverity = .warning
+            completion(false)
+            return
+        }
+        guard let executionReportMarkdown = executionReportMarkdownForSelectedBoard() else {
+            lastBoardMessage = message("Failed to generate execution report")
+            lastBoardMessageSeverity = .warning
+            completion(false)
+            return
+        }
+
+        let dependencyInsights = selectedBoardDependencyInsights
+        let boardName = selectedBoard.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBoardName = boardName.isEmpty ? message("Default Board") : boardName
+
+        let request = GitHubPRFlowRequest(
+            repositoryPath: repositoryPath,
+            boardName: resolvedBoardName,
+            baseBranch: baseBranch,
+            remoteName: remoteName,
+            branchPrefix: branchPrefix,
+            commitMessage: "chore(\(resolvedBoardName)): OpenMac board sync",
+            prTitle: "[OpenMac] \(resolvedBoardName) board update",
+            prBody: githubPRBody(
+                boardName: resolvedBoardName,
+                executionReportMarkdown: executionReportMarkdown,
+                dependencyInsights: dependencyInsights
+            )
+        )
+
+        runOnBackground {
+            let result = GitHubPRFlowUseCase.run(
+                request: request,
+                commandRunner: self.gitCommandRunner
+            )
+            self.runOnMain {
+                self.lastGitHubPRURL = result.pullRequestURL
+                self.lastGitHubPRLog = result.debugLog
+                self.lastExecutionDebugLog = result.debugLog.isEmpty ? nil : result.debugLog
+                self.lastCodexLoginCommand = nil
+                if result.succeeded {
+                    if let pullRequestURL = result.pullRequestURL, !pullRequestURL.isEmpty {
+                        self.lastBoardMessage = self.message("GitHub PR created: %@", pullRequestURL)
+                    } else {
+                        self.lastBoardMessage = self.message("GitHub PR created for branch %@", result.branchName)
+                    }
+                    self.lastBoardMessageSeverity = .info
+                } else {
+                    self.lastBoardMessage = self.message("GitHub PR flow failed: %@", result.message)
+                    self.lastBoardMessageSeverity = .warning
+                }
+                completion(result.succeeded)
+            }
+        }
     }
 
     func requestCancelAssignedTaskExecutions() {
@@ -4623,6 +4800,40 @@ final class KanbanBoardViewModel: ObservableObject {
             .first
     }
 
+    private func markRunningExecutionsAsInterruptedIfNeeded() {
+        guard executionCheckpoint != nil else { return }
+
+        var hasInterruptedRunningExecution = false
+        for taskIndex in tasks.indices {
+            guard var record = tasks[taskIndex].executionRecord,
+                  record.status == .running else {
+                continue
+            }
+
+            hasInterruptedRunningExecution = true
+            record.status = .failed
+            record.lastFinishedAt = Date()
+            if (record.lastError ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                record.lastError = message("Execution interrupted by app restart. Resume interrupted run to continue.")
+            }
+            tasks[taskIndex].executionRecord = record
+
+            if let agentID = record.lastAgentID ?? tasks[taskIndex].assignedAgentID {
+                appendAgentExecutionEvent(
+                    agentID: agentID,
+                    taskID: tasks[taskIndex].id,
+                    taskTitle: tasks[taskIndex].title,
+                    status: .failed,
+                    message: record.lastError ?? message("Execution interrupted by app restart. Resume interrupted run to continue.")
+                )
+            }
+        }
+
+        guard hasInterruptedRunningExecution else { return }
+        lastBoardMessage = message("Detected interrupted execution. Use Resume Interrupted Run to continue.")
+        lastBoardMessageSeverity = .warning
+    }
+
     private func isWIPLimitReached(for destination: KanbanStatus, excluding taskID: UUID) -> Bool {
         guard let limit = wipLimits[destination] else { return false }
         let currentCount = tasks.filter { $0.status == destination && $0.id != taskID }.count
@@ -4806,14 +5017,27 @@ final class KanbanBoardViewModel: ObservableObject {
             boards: boards,
             selectedBoardID: selectedBoardID,
             taskTemplates: taskTemplates,
-            executionAutoRetryConfiguration: executionAutoRetryConfiguration
+            executionAutoRetryConfiguration: executionAutoRetryConfiguration,
+            executionCheckpoint: executionCheckpoint
         )
         try? boardStore.save(snapshot)
     }
 }
 
 extension KanbanBoardViewModel {
-    static func persistentBoard(boardStore: KanbanBoardStore = FileKanbanBoardStore()) -> KanbanBoardViewModel {
+    static func persistentBoard(
+        boardStore: KanbanBoardStore = FileKanbanBoardStore(),
+        assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
+        gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
+        runOnBackground: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        runOnMain: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.main.async(execute: work)
+        }
+    ) -> KanbanBoardViewModel {
         if let snapshot = try? boardStore.load() {
             if let boards = snapshot.boards, !boards.isEmpty {
                 let resolvedSelectedBoardID = snapshot.selectedBoardID ?? boards[0].id
@@ -4822,7 +5046,14 @@ extension KanbanBoardViewModel {
                     selectedBoardID: resolvedSelectedBoardID,
                     taskTemplates: snapshot.taskTemplates,
                     executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
-                    boardStore: boardStore
+                    executionCheckpoint: snapshot.executionCheckpoint,
+                    assignmentEngine: assignmentEngine,
+                    projectPlanner: projectPlanner,
+                    taskExecutor: taskExecutor,
+                    boardStore: boardStore,
+                    gitCommandRunner: gitCommandRunner,
+                    runOnBackground: runOnBackground,
+                    runOnMain: runOnMain
                 )
             }
             return KanbanBoardViewModel(
@@ -4831,18 +5062,51 @@ extension KanbanBoardViewModel {
                 wipLimits: snapshot.wipLimits,
                 taskTemplates: snapshot.taskTemplates,
                 executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
-                boardStore: boardStore
+                executionCheckpoint: snapshot.executionCheckpoint,
+                assignmentEngine: assignmentEngine,
+                projectPlanner: projectPlanner,
+                taskExecutor: taskExecutor,
+                boardStore: boardStore,
+                gitCommandRunner: gitCommandRunner,
+                runOnBackground: runOnBackground,
+                runOnMain: runOnMain
             )
         }
-        return demoBoard(boardStore: boardStore)
+        return demoBoard(
+            boardStore: boardStore,
+            assignmentEngine: assignmentEngine,
+            projectPlanner: projectPlanner,
+            taskExecutor: taskExecutor,
+            gitCommandRunner: gitCommandRunner,
+            runOnBackground: runOnBackground,
+            runOnMain: runOnMain
+        )
     }
 
-    static func demoBoard(boardStore: KanbanBoardStore? = nil) -> KanbanBoardViewModel {
+    static func demoBoard(
+        boardStore: KanbanBoardStore? = nil,
+        assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
+        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
+        gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
+        runOnBackground: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        runOnMain: @escaping ExecutionDispatcher = { work in
+            DispatchQueue.main.async(execute: work)
+        }
+    ) -> KanbanBoardViewModel {
         let demoData = demoSeedData()
         return KanbanBoardViewModel(
             tasks: demoData.tasks,
             agents: demoData.agents,
-            boardStore: boardStore
+            assignmentEngine: assignmentEngine,
+            projectPlanner: projectPlanner,
+            taskExecutor: taskExecutor,
+            boardStore: boardStore,
+            gitCommandRunner: gitCommandRunner,
+            runOnBackground: runOnBackground,
+            runOnMain: runOnMain
         )
     }
 

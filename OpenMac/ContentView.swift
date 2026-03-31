@@ -35,6 +35,10 @@ struct ContentView: View {
     @AppStorage("autoCycleMaxPasses") private var autoCycleMaxPasses = 3
     @AppStorage("autoCycleAutoCreateMissingDependencies") private var autoCycleAutoCreateMissingDependencies = true
     @AppStorage(CodexProjectsDirectorySettings.userDefaultsKey) private var codexProjectsDirectoryPath = ""
+    @AppStorage("githubRepositoryPath") private var githubRepositoryPath = ""
+    @AppStorage("githubBaseBranch") private var githubBaseBranch = "main"
+    @AppStorage("githubRemoteName") private var githubRemoteName = "origin"
+    @AppStorage("githubBranchPrefix") private var githubBranchPrefix = "openmac"
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -111,6 +115,7 @@ struct ContentView: View {
     @State private var autoRetryRetryNetwork = true
     @State private var autoRetryRetryRateLimit = true
     @State private var autoRetryRetryServer = true
+    @State private var isGitHubFlowRunning = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -167,7 +172,9 @@ struct ContentView: View {
                     healthLabel: viewModel.boardHealthLabel,
                     healthBreakdownText: viewModel.boardHealthBreakdownText,
                     inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
-                    reviewPressure: viewModel.wipPressurePercent(for: .review)
+                    reviewPressure: viewModel.wipPressurePercent(for: .review),
+                    blockedTasks: selectedBoardDependencyInsights.blockedTaskCount,
+                    criticalPathStoryPoints: selectedBoardDependencyInsights.criticalPathStoryPoints
                 )
 
                 BoardHealthRecommendationsView(
@@ -175,6 +182,8 @@ struct ContentView: View {
                     onAction: applyHealthRecommendation,
                     onApplyAll: applyAllHealthRecommendations
                 )
+
+                BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
 
                 HStack(spacing: 12) {
                     TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
@@ -332,6 +341,10 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("p", modifiers: [.command, .shift])
 
+                        Button(L10n.string("Autopilot Create + Run")) {
+                            runPMOneClickFromToolbar()
+                        }
+
                         Divider()
 
                         Button(isBatchRunning ? L10n.string("Cancel") : L10n.string("Run Assigned Tasks")) {
@@ -356,6 +369,16 @@ struct ContentView: View {
                             L10n.string("Auto Create Missing Dependencies During Cycle"),
                             isOn: $autoCycleAutoCreateMissingDependencies
                         )
+
+                        Button(L10n.string("Resume Interrupted Run")) {
+                            resumeInterruptedExecutionFromToolbar()
+                        }
+                        .disabled(!viewModel.hasExecutionCheckpointForSelectedBoard || isBatchRunning || isAutoCycleRunning)
+
+                        Button(L10n.string("Clear Interrupted Run Checkpoint")) {
+                            clearExecutionCheckpointFromToolbar()
+                        }
+                        .disabled(!viewModel.hasExecutionCheckpointForSelectedBoard)
 
                         Divider()
 
@@ -484,6 +507,36 @@ struct ContentView: View {
                     Button(L10n.string("Copy Projects Folder Path")) {
                         copyToPasteboard(resolvedCodexProjectsDirectoryPath)
                     }
+                    Divider()
+                    Text(L10n.string("GitHub PR Flow"))
+                    Text(resolvedGitHubRepositoryPath)
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Choose GitHub Repository...")) {
+                        chooseGitHubRepositoryDirectory()
+                    }
+                    Button(L10n.string("Use Projects Folder as GitHub Repository")) {
+                        githubRepositoryPath = resolvedCodexProjectsDirectoryPath
+                    }
+                    Button(L10n.string("Open GitHub Repository in Finder")) {
+                        openGitHubRepositoryInFinder()
+                    }
+                    Button(L10n.string("Copy GitHub Repository Path")) {
+                        copyToPasteboard(resolvedGitHubRepositoryPath)
+                    }
+                    Button(isGitHubFlowRunning ? L10n.string("GitHub PR Flow Running...") : L10n.string("Run GitHub PR Flow")) {
+                        runGitHubPRFlowFromToolbar()
+                    }
+                    .disabled(isGitHubFlowRunning)
+                    if let lastGitHubPRURL = viewModel.lastGitHubPRURL, !lastGitHubPRURL.isEmpty {
+                        Button(L10n.string("Copy Last PR URL")) {
+                            copyToPasteboard(lastGitHubPRURL)
+                        }
+                    }
+                    if let lastGitHubPRLog = viewModel.lastGitHubPRLog, !lastGitHubPRLog.isEmpty {
+                        Button(L10n.string("Copy Last GitHub PR Log")) {
+                            copyToPasteboard(lastGitHubPRLog)
+                        }
+                    }
                     if let message = viewModel.lastBoardMessage, !message.isEmpty {
                         Button(L10n.string("Copy Board Message")) {
                             copyToPasteboard(message)
@@ -563,7 +616,7 @@ struct ContentView: View {
                 onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
                 onCreateTickets: createPMTicketsFromSheet,
                 onCreateAndRun: createAndRunPMTicketsFromSheet,
-                onRunAutopilot: runPMAutopilotFromSheet,
+                onRunAutopilot: runPMOneClickFlowFromSheet,
                 onCopyPlan: copyPMPlanFromSheet,
                 onCopyTestPlan: copyPMTestPlanFromSheet
             )
@@ -997,7 +1050,20 @@ struct ContentView: View {
         runAssignedExecutionsFromToolbar()
     }
 
-    private func runPMAutopilotFromSheet() {
+    private func runPMOneClickFromToolbar() {
+        _ = PMOneClickFlowUseCase.run(
+            plannedTicketsCount: pmPlannedTickets.count,
+            projectBrief: pmProjectBrief,
+            runAutopilot: {
+                runPMOneClickFlowFromSheet()
+            },
+            openPlanner: {
+                openPMPlannerSheet()
+            }
+        )
+    }
+
+    private func runPMOneClickFlowFromSheet() {
         let preparation = PMAutopilotSheetUseCase.prepareForRun(
             isAutoCycleRunning: isAutoCycleRunning,
             isBatchRunning: isBatchRunning,
@@ -1063,7 +1129,7 @@ struct ContentView: View {
         isAutoCycleRunning = true
         viewModel.runPMAutopilotInBackground(
             plannedTickets: pmPlannedTickets,
-            autoAssign: true,
+            autoAssign: pmAutoAssignAfterCreate,
             autoCreateMissingDependenciesDuringCycle: autoCycleAutoCreateMissingDependencies,
             maxAutoCyclePasses: autoCycleMaxPasses
         ) { _, createdTickets, _, _ in
@@ -1073,6 +1139,10 @@ struct ContentView: View {
                 closePMPlannerSheet()
             }
         }
+    }
+
+    private func runPMAutopilotFromSheet() {
+        runPMOneClickFlowFromSheet()
     }
 
     private func copyPMPlanFromSheet() {
@@ -1235,6 +1305,50 @@ struct ContentView: View {
                 viewModel.requestCancelAutoDispatchCycle()
             }
         )
+    }
+
+    private func resumeInterruptedExecutionFromToolbar() {
+        guard !isBatchRunning, !isAutoCycleRunning else { return }
+
+        if let action = ExecutionCheckpointUseCase.resumeAction(
+            for: viewModel.executionCheckpoint,
+            selectedBoardID: viewModel.selectedBoardID
+        ) {
+            switch action {
+            case .assignedBatch:
+                isBatchRunning = true
+            case .autoCycle:
+                isAutoCycleRunning = true
+            }
+        }
+
+        viewModel.resumeExecutionFromCheckpointInBackground { resumed in
+            if !resumed {
+                self.isBatchRunning = false
+                self.isAutoCycleRunning = false
+                return
+            }
+            self.refreshTriageSelections()
+            self.isBatchRunning = false
+            self.isAutoCycleRunning = false
+        }
+    }
+
+    private func clearExecutionCheckpointFromToolbar() {
+        _ = viewModel.clearExecutionCheckpoint()
+    }
+
+    private func runGitHubPRFlowFromToolbar() {
+        guard !isGitHubFlowRunning else { return }
+        isGitHubFlowRunning = true
+        viewModel.runGitHubPRFlowForSelectedBoardInBackground(
+            repositoryPath: resolvedGitHubRepositoryPath,
+            baseBranch: githubBaseBranch,
+            remoteName: githubRemoteName,
+            branchPrefix: githubBranchPrefix
+        ) { _ in
+            self.isGitHubFlowRunning = false
+        }
     }
 
     private func syncAutoRetryDraftFromViewModel() {
@@ -2224,6 +2338,15 @@ struct ContentView: View {
         Self.pmBriefTemplateOptions()
     }
 
+    private var selectedBoardDependencyInsights: DependencyGraphInsights {
+        viewModel.selectedBoardDependencyInsights
+    }
+
+    private var resolvedGitHubRepositoryPath: String {
+        let trimmed = githubRepositoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? resolvedCodexProjectsDirectoryPath : trimmed
+    }
+
     private func resetTaskFilters() {
         taskSearchQuery = ""
         selectedAssigneeFilterKey = "all"
@@ -2278,6 +2401,22 @@ struct ContentView: View {
         ensureCodexProjectsDirectoryExists()
     }
 
+    private func chooseGitHubRepositoryDirectory() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.title = L10n.string("Choose GitHub Repository")
+        panel.message = L10n.string("Select the git repository folder used for branch/PR automation.")
+        panel.prompt = L10n.string("Use Folder")
+        panel.directoryURL = URL(fileURLWithPath: resolvedGitHubRepositoryPath, isDirectory: true)
+
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
+        guard modalResponse == .OK, let url else { return }
+        githubRepositoryPath = url.path
+    }
+
     private func useDefaultCodexProjectsDirectory() {
         codexProjectsDirectoryPath = ""
         ensureCodexProjectsDirectoryExists()
@@ -2290,6 +2429,13 @@ struct ContentView: View {
         } catch {
             presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
         }
+    }
+
+    private func openGitHubRepositoryInFinder() {
+        let path = resolvedGitHubRepositoryPath
+        let expanded = (path as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded, isDirectory: true)
+        Self.workspaceActivator([url])
     }
 
     private func ensureCodexProjectsDirectoryExists() {
@@ -3030,6 +3176,8 @@ private struct BoardHealthSummaryView: View {
     let healthBreakdownText: String
     let inProgressPressure: Int
     let reviewPressure: Int
+    let blockedTasks: Int
+    let criticalPathStoryPoints: Int
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -3046,6 +3194,12 @@ private struct BoardHealthSummaryView: View {
                 )
                 SummaryBadge(title: L10n.string("In Progress WIP"), value: "\(inProgressPressure)%", accent: inProgressPressure >= 100 ? .red : .teal)
                 SummaryBadge(title: L10n.string("Review WIP"), value: "\(reviewPressure)%", accent: reviewPressure >= 100 ? .red : .mint)
+                SummaryBadge(title: L10n.string("Blocked"), value: "\(blockedTasks)", accent: blockedTasks > 0 ? .red : .green)
+                SummaryBadge(
+                    title: L10n.string("Critical Path"),
+                    value: L10n.format("%d SP", criticalPathStoryPoints),
+                    accent: criticalPathStoryPoints > 0 ? .amber : .blue
+                )
                 Spacer(minLength: 0)
             }
         }
@@ -3133,6 +3287,50 @@ private struct BoardHealthRecommendationsView: View {
 
     private var autoFixRecommendationCount: Int {
         recommendations.filter { $0.action.isAutoFixable }.count
+    }
+}
+
+private struct BoardDependencyInsightsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let insights: DependencyGraphInsights
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(L10n.string("Dependency Graph"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+                Text(
+                    L10n.format(
+                        "Blocked %d · Dependencies %d",
+                        insights.blockedTaskCount,
+                        insights.totalTaskDependencies
+                    )
+                )
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
+            }
+
+            if !insights.criticalPathTaskTitles.isEmpty {
+                Text(
+                    L10n.format(
+                        "Critical Path (%d SP): %@",
+                        insights.criticalPathStoryPoints,
+                        insights.criticalPathTaskTitles.joined(separator: " -> ")
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: colorScheme))
+                .lineLimit(2)
+            }
+
+            if !insights.cycleTaskTitles.isEmpty {
+                Text(L10n.format("Cycle detected: %@", insights.cycleTaskTitles.joined(separator: ", ")))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .error, scheme: colorScheme))
+                    .lineLimit(2)
+            }
+        }
     }
 }
 
@@ -5584,6 +5782,11 @@ private extension ContentView {
         hit { view.importWorkspaceFromToolbar() }
         hit { view.chooseCodexProjectsDirectory() }
         hit { view.openCodexProjectsDirectoryInFinder() }
+        hit { view.chooseGitHubRepositoryDirectory() }
+        hit { view.openGitHubRepositoryInFinder() }
+        hit { view.runGitHubPRFlowFromToolbar() }
+        hit { view.clearExecutionCheckpointFromToolbar() }
+        hit { view.resumeInterruptedExecutionFromToolbar() }
         hit {
             shouldFailCodexDirectoryEnsurer = true
             view.openCodexProjectsDirectoryInFinder()
@@ -6130,7 +6333,9 @@ enum ContentViewTestHooks {
             healthLabel: "Excellent",
             healthBreakdownText: "",
             inProgressPressure: 0,
-            reviewPressure: 0
+            reviewPressure: 0,
+            blockedTasks: 0,
+            criticalPathStoryPoints: 0
         )
         return summary.testHealthScoreAccent
     }
@@ -6699,7 +6904,20 @@ enum ContentViewTestHooks {
             healthLabel: "Watch",
             healthBreakdownText: "Needs attention",
             inProgressPressure: 50,
-            reviewPressure: 100
+            reviewPressure: 100,
+            blockedTasks: 1,
+            criticalPathStoryPoints: 8
+        ))
+        render(BoardDependencyInsightsView(
+            insights: DependencyGraphInsights(
+                totalTaskDependencies: 2,
+                externalDependencyCount: 1,
+                blockedTaskCount: 1,
+                criticalPathStoryPoints: 8,
+                criticalPathTaskIDs: [UUID()],
+                criticalPathTaskTitles: ["Spec", "Build"],
+                cycleTaskTitles: []
+            )
         ))
         render(BoardHealthRecommendationsView(
             recommendations: [],

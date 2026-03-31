@@ -8,6 +8,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var selectedBoardID: UUID?
     var taskTemplates: [TaskTemplate]?
     var executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration?
+    var executionCheckpoint: ExecutionCheckpoint?
 
     init(
         tasks: [WorkTask],
@@ -16,7 +17,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         boards: [KanbanBoardRecord]? = nil,
         selectedBoardID: UUID? = nil,
         taskTemplates: [TaskTemplate]? = nil,
-        executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration? = nil
+        executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration? = nil,
+        executionCheckpoint: ExecutionCheckpoint? = nil
     ) {
         self.tasks = tasks
         self.agents = agents
@@ -25,6 +27,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.selectedBoardID = selectedBoardID
         self.taskTemplates = taskTemplates
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
+        self.executionCheckpoint = executionCheckpoint
     }
 
     init(
@@ -39,7 +42,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             boards: nil,
             selectedBoardID: nil,
             taskTemplates: nil,
-            executionAutoRetryConfiguration: nil
+            executionAutoRetryConfiguration: nil,
+            executionCheckpoint: nil
         )
     }
 }

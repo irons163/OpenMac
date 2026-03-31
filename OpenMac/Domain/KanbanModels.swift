@@ -178,6 +178,36 @@ enum TaskExecutionStatus: String, Codable, Equatable {
     case failed
 }
 
+enum ExecutionCheckpointMode: String, Codable, Equatable {
+    case assignedBatch
+    case autoCycle
+}
+
+struct ExecutionCheckpoint: Equatable, Codable {
+    var boardID: UUID
+    var mode: ExecutionCheckpointMode
+    var startedAt: Date
+    var maxAutoCyclePasses: Int
+    var autoCreateMissingDependencies: Bool
+    var autoAssignBeforeRun: Bool
+
+    init(
+        boardID: UUID,
+        mode: ExecutionCheckpointMode,
+        startedAt: Date = Date(),
+        maxAutoCyclePasses: Int = 1,
+        autoCreateMissingDependencies: Bool = false,
+        autoAssignBeforeRun: Bool = true
+    ) {
+        self.boardID = boardID
+        self.mode = mode
+        self.startedAt = startedAt
+        self.maxAutoCyclePasses = max(1, maxAutoCyclePasses)
+        self.autoCreateMissingDependencies = autoCreateMissingDependencies
+        self.autoAssignBeforeRun = autoAssignBeforeRun
+    }
+}
+
 enum RetryableExecutionErrorType: String, CaseIterable, Codable, Identifiable {
     case network
     case rateLimit

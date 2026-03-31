@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  openmac-tests:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Xcode Version
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run OpenMac Tests (with coverage)
+        run: |
+          set -eo pipefail
+          xcodebuild test \
+            -project OpenMac.xcodeproj \
+            -scheme OpenMac \
+            -destination 'platform=macOS' \
+            -enableCodeCoverage YES \
+            -only-testing:OpenMacTests \
+            -resultBundlePath TestResults.xcresult
+
+      - name: Export Coverage Reports
+        run: |
+          xcrun xccov view --report TestResults.xcresult > coverage-report.txt
+          xcrun xccov view --report --json TestResults.xcresult > coverage-report.json
+
+      - name: Build Coverage Snapshot
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path("coverage-report.json").read_text())
+          targets = report.get("targets", [])
+          app_target = next((target for target in targets if target.get("name") == "OpenMac.app"), None)
+
+          def coverage_text(node: dict) -> str:
+              return f"{node.get('lineCoverage', 0.0) * 100:.2f}% ({node.get('coveredLines', 0)}/{node.get('executableLines', 0)})"
+
+          rows = []
+          if app_target is not None:
+              rows.append(("OpenMac.app", coverage_text(app_target)))
+          files = app_target.get("files", []) if app_target else []
+
+          focus_files = [
+              "OpenMac/ViewModels/KanbanBoardViewModel.swift",
+              "OpenMac/ViewModels/ExecutionSummaryBuilder.swift",
+              "OpenMac/ViewModels/ExecutionSeverityPolicy.swift",
+              "OpenMac/ViewModels/PMRoadmapSummaryBuilder.swift",
+              "OpenMac/UseCases/PMAutopilotSheetUseCase.swift",
+          ]
+
+          for focus_path in focus_files:
+              match = next((item for item in files if item.get("path", "").endswith(focus_path)), None)
+              if match is not None:
+                  rows.append((focus_path, coverage_text(match)))
+
+          summary_lines = ["## Coverage Snapshot", "", "| Scope | Coverage |", "|---|---|"]
+          summary_lines += [f"| `{scope}` | {coverage} |" for scope, coverage in rows]
+          summary = "\n".join(summary_lines) + "\n"
+
+          Path("coverage-snapshot.md").write_text(summary, encoding="utf-8")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write(summary)
+          PY
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmac-test-artifacts
+          path: |
+            TestResults.xcresult
+            coverage-report.txt
+            coverage-report.json
+            coverage-snapshot.md

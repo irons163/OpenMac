@@ -5190,6 +5190,57 @@ struct ContentActionUseCaseTests {
         #expect(retryableTypes == [.network, .server])
     }
 
+    @Test("pm one-click flow starts autopilot when brief exists")
+    func pmOneClickFlowStartsAutopilotFromBrief() {
+        var autopilotCalls = 0
+        var plannerCalls = 0
+
+        let action = PMOneClickFlowUseCase.run(
+            plannedTicketsCount: 0,
+            projectBrief: "Build a dating app MVP",
+            runAutopilot: { autopilotCalls += 1 },
+            openPlanner: { plannerCalls += 1 }
+        )
+
+        #expect(action == .startedAutopilot)
+        #expect(autopilotCalls == 1)
+        #expect(plannerCalls == 0)
+    }
+
+    @Test("pm one-click flow opens planner when no brief and no tickets")
+    func pmOneClickFlowOpensPlannerWhenInputMissing() {
+        var autopilotCalls = 0
+        var plannerCalls = 0
+
+        let action = PMOneClickFlowUseCase.run(
+            plannedTicketsCount: 0,
+            projectBrief: "   ",
+            runAutopilot: { autopilotCalls += 1 },
+            openPlanner: { plannerCalls += 1 }
+        )
+
+        #expect(action == .openedPlanner)
+        #expect(autopilotCalls == 0)
+        #expect(plannerCalls == 1)
+    }
+
+    @Test("pm one-click flow starts autopilot when tickets already exist")
+    func pmOneClickFlowStartsAutopilotFromExistingTickets() {
+        var autopilotCalls = 0
+        var plannerCalls = 0
+
+        let action = PMOneClickFlowUseCase.run(
+            plannedTicketsCount: 2,
+            projectBrief: "",
+            runAutopilot: { autopilotCalls += 1 },
+            openPlanner: { plannerCalls += 1 }
+        )
+
+        #expect(action == .startedAutopilot)
+        #expect(autopilotCalls == 1)
+        #expect(plannerCalls == 0)
+    }
+
     @Test("pm autopilot preparation generates plan and board context before starting")
     func pmAutopilotPreparationGeneratesPlanAndBoard() {
         var createdBoardNames: [String] = []
@@ -5287,6 +5338,41 @@ struct ContentActionUseCaseTests {
         #expect(result.testPlanText == "existing-test-plan")
     }
 
+    @Test("pm autopilot preparation is blocked while assigned batch run is already running")
+    func pmAutopilotPreparationBlockedByBatchRun() {
+        var generatedPlanCalls = 0
+        let existingTicket = PMPlannedTicket(
+            title: "Existing",
+            details: "details",
+            requiredSkills: [],
+            storyPoints: 1
+        )
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: true,
+            plannedTickets: [existingTicket],
+            testPlanText: "existing-test-plan",
+            projectName: "Existing Project",
+            shouldCreateNewBoard: false,
+            existingBoardNames: [],
+            generatePlan: {
+                generatedPlanCalls += 1
+                return nil
+            },
+            applyAutoAcceptanceCriteria: { $0 },
+            generateTestPlan: { _, _ in "" },
+            uniqueBoardName: { name, _ in name },
+            createBoard: { _ in true }
+        )
+
+        #expect(result.status == .blockedByBatchRun)
+        #expect(result.shouldStart == false)
+        #expect(generatedPlanCalls == 0)
+        #expect(result.plannedTickets == [existingTicket])
+        #expect(result.testPlanText == "existing-test-plan")
+    }
+
     @Test("pm autopilot preparation reports missing tickets when plan generation fails")
     func pmAutopilotPreparationReportsMissingTickets() {
         let result = PMAutopilotSheetUseCase.prepareForRun(
@@ -5309,6 +5395,454 @@ struct ContentActionUseCaseTests {
         #expect(result.status == .missingTickets)
         #expect(result.shouldStart == false)
         #expect(result.plannedTickets.isEmpty)
+    }
+
+    @Test("pm autopilot preparation reports missing tickets when generated plan is empty")
+    func pmAutopilotPreparationReportsMissingWhenGeneratedPlanHasNoTickets() {
+        var autoAcceptanceCalls = 0
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: false,
+            plannedTickets: [],
+            testPlanText: "",
+            projectName: "Empty Project",
+            shouldCreateNewBoard: false,
+            existingBoardNames: [],
+            generatePlan: {
+                PMGeneratedPlan(
+                    projectName: "Generated Empty Project",
+                    summary: "No actionable work",
+                    tickets: []
+                )
+            },
+            applyAutoAcceptanceCriteria: { tickets in
+                autoAcceptanceCalls += 1
+                return tickets
+            },
+            generateTestPlan: { _, _ in "" },
+            uniqueBoardName: { name, _ in name },
+            createBoard: { _ in true }
+        )
+
+        #expect(result.status == .missingTickets)
+        #expect(result.shouldStart == false)
+        #expect(result.projectName == "Generated Empty Project")
+        #expect(result.generatedPlanSummary == "No actionable work")
+        #expect(result.plannedTickets.isEmpty)
+        #expect(autoAcceptanceCalls == 0)
+    }
+
+    @Test("pm autopilot preparation reports board creation failure after ticket preparation")
+    func pmAutopilotPreparationReportsBoardCreationFailure() {
+        let sourceTicket = PMPlannedTicket(
+            title: "Ticket",
+            details: "Details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3
+        )
+        var generatedTestPlanCalls = 0
+        var createBoardCalls = 0
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: false,
+            plannedTickets: [sourceTicket],
+            testPlanText: "",
+            projectName: "Project Alpha",
+            shouldCreateNewBoard: true,
+            existingBoardNames: ["Project Alpha"],
+            generatePlan: {
+                nil
+            },
+            applyAutoAcceptanceCriteria: { tickets in
+                tickets.map { ticket in
+                    PMPlannedTicket(
+                        title: ticket.title,
+                        details: "\(ticket.details)\nAcceptance:\n- Ready",
+                        requiredSkills: ticket.requiredSkills,
+                        storyPoints: ticket.storyPoints,
+                        epic: ticket.epic,
+                        milestone: ticket.milestone
+                    )
+                }
+            },
+            generateTestPlan: { projectName, tickets in
+                generatedTestPlanCalls += 1
+                return "\(projectName)-tp-\(tickets.count)"
+            },
+            uniqueBoardName: { baseName, _ in
+                "\(baseName) (2)"
+            },
+            createBoard: { _ in
+                createBoardCalls += 1
+                return false
+            }
+        )
+
+        #expect(result.status == .boardCreationFailed)
+        #expect(result.shouldStart == false)
+        #expect(result.didSwitchBoardContext == false)
+        #expect(result.projectName == "Project Alpha")
+        #expect(result.testPlanText == "Project Alpha-tp-1")
+        #expect(result.plannedTickets.count == 1)
+        #expect(result.plannedTickets[0].details.contains("Acceptance:"))
+        #expect(generatedTestPlanCalls == 1)
+        #expect(createBoardCalls == 1)
+    }
+
+    @Test("pm autopilot preparation keeps provided test plan and does not regenerate")
+    func pmAutopilotPreparationKeepsProvidedTestPlan() {
+        let sourceTicket = PMPlannedTicket(
+            title: "Ticket",
+            details: "Details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2
+        )
+        var generatedTestPlanCalls = 0
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: false,
+            plannedTickets: [sourceTicket],
+            testPlanText: " Keep this ",
+            projectName: "Project Beta",
+            shouldCreateNewBoard: false,
+            existingBoardNames: [],
+            generatePlan: {
+                nil
+            },
+            applyAutoAcceptanceCriteria: { $0 },
+            generateTestPlan: { _, _ in
+                generatedTestPlanCalls += 1
+                return "generated"
+            },
+            uniqueBoardName: { name, _ in name },
+            createBoard: { _ in true }
+        )
+
+        #expect(result.status == .ready)
+        #expect(result.shouldStart == true)
+        #expect(result.testPlanText == " Keep this ")
+        #expect(generatedTestPlanCalls == 0)
+    }
+}
+
+struct DependencyGraphInsightsUseCaseTests {
+    @Test("dependency insights computes blocked count, external dependencies, and critical path")
+    func dependencyInsightsComputesCriticalPath() {
+        let spec = WorkTask(
+            title: "Spec",
+            details: "Create product spec",
+            requiredSkills: ["pm"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let api = WorkTask(
+            title: "API",
+            details: "Depends on: Spec",
+            requiredSkills: ["backend"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let ui = WorkTask(
+            title: "UI",
+            details: "Depends on: API",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let deployment = WorkTask(
+            title: "Deploy",
+            details: "Depends on: Production Infra",
+            requiredSkills: ["devops"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+
+        let insights = DependencyGraphInsightsUseCase.build(tasks: [spec, api, ui, deployment])
+
+        #expect(insights.totalTaskDependencies == 3)
+        #expect(insights.externalDependencyCount == 1)
+        #expect(insights.blockedTaskCount == 3)
+        #expect(insights.criticalPathStoryPoints == 10)
+        #expect(insights.criticalPathTaskTitles == ["Spec", "API", "UI"])
+        #expect(insights.cycleTaskTitles.isEmpty)
+    }
+
+    @Test("dependency insights reports cycle nodes when graph contains loop")
+    func dependencyInsightsReportsCycles() {
+        let a = WorkTask(
+            title: "A",
+            details: "Depends on: B",
+            requiredSkills: ["swift"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let b = WorkTask(
+            title: "B",
+            details: "Depends on: A",
+            requiredSkills: ["swift"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+
+        let insights = DependencyGraphInsightsUseCase.build(tasks: [a, b])
+
+        #expect(insights.totalTaskDependencies == 2)
+        #expect(insights.externalDependencyCount == 0)
+        #expect(insights.blockedTaskCount == 2)
+        #expect(insights.cycleTaskTitles.count == 2)
+        #expect(insights.cycleTaskTitles.contains("A"))
+        #expect(insights.cycleTaskTitles.contains("B"))
+    }
+}
+
+struct ExecutionCheckpointUseCaseTests {
+    @Test("checkpoint use case resolves assigned batch resume action")
+    func checkpointResumeActionAssignedBatch() {
+        let boardID = UUID()
+        let checkpoint = ExecutionCheckpointUseCase.makeAssignedBatchCheckpoint(boardID: boardID)
+
+        let action = ExecutionCheckpointUseCase.resumeAction(for: checkpoint, selectedBoardID: boardID)
+
+        if case .assignedBatch? = action {
+            #expect(Bool(true))
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test("checkpoint use case resolves auto-cycle settings and guards board mismatch")
+    func checkpointResumeActionAutoCycleAndBoardMismatch() {
+        let boardID = UUID()
+        let checkpoint = ExecutionCheckpointUseCase.makeAutoCycleCheckpoint(
+            boardID: boardID,
+            maxPasses: 4,
+            autoCreateMissingDependencies: true,
+            autoAssignBeforeRun: false
+        )
+
+        let matched = ExecutionCheckpointUseCase.resumeAction(for: checkpoint, selectedBoardID: boardID)
+        let mismatched = ExecutionCheckpointUseCase.resumeAction(for: checkpoint, selectedBoardID: UUID())
+
+        if case let .autoCycle(maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun)? = matched {
+            #expect(maxPasses == 4)
+            #expect(autoCreateMissingDependencies)
+            #expect(!autoAssignBeforeRun)
+        } else {
+            #expect(Bool(false))
+        }
+        #expect(mismatched == nil)
+    }
+}
+
+@Suite(.serialized)
+@MainActor
+struct ExecutionCheckpointIntegrationTests {
+    @Test("background batch run persists checkpoint lifecycle and clears it on finish")
+    func batchRunPersistsCheckpointLifecycle() {
+        let agent = AgentProfile(name: "A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build",
+            details: "Implement screen",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let store = SpyBoardStore()
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: "done")])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            boardStore: store,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedCount = -1
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+        }
+
+        #expect(startedCount == 1)
+        #expect(store.savedSnapshots.contains(where: { $0.executionCheckpoint?.mode == .assignedBatch }))
+        #expect(store.savedSnapshots.last?.executionCheckpoint == nil)
+        #expect(viewModel.executionCheckpoint == nil)
+    }
+
+    @Test("resume from assigned checkpoint restarts queue and clears checkpoint")
+    func resumeFromAssignedCheckpoint() {
+        let agent = AgentProfile(name: "A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build",
+            details: "Implement screen",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let boardID = UUID()
+        let snapshot = KanbanBoardSnapshot(
+            tasks: [task],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2],
+            boards: [
+                KanbanBoardRecord(
+                    id: boardID,
+                    name: "Main",
+                    tasks: [task],
+                    agents: [agent],
+                    wipLimits: [.inProgress: 3, .review: 2]
+                )
+            ],
+            selectedBoardID: boardID,
+            taskTemplates: nil,
+            executionAutoRetryConfiguration: .init(),
+            executionCheckpoint: ExecutionCheckpoint(boardID: boardID, mode: .assignedBatch)
+        )
+        let store = SpyBoardStore(loadSnapshot: snapshot)
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: "done")])
+        let viewModel = KanbanBoardViewModel.persistentBoard(
+            boardStore: store,
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var resumed: Bool?
+        viewModel.resumeExecutionFromCheckpointInBackground { didResume in
+            resumed = didResume
+        }
+        _ = waitForMainQueue { resumed != nil }
+
+        #expect(resumed == true)
+        #expect(viewModel.executionCheckpoint == nil)
+        #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("initialization marks running records as interrupted when checkpoint exists")
+    func initializationMarksRunningRecordsAsInterrupted() {
+        let agent = AgentProfile(name: "A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let runningTask = WorkTask(
+            title: "Interrupted Work",
+            details: "Implement feature",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .running,
+                runCount: 1,
+                lastStartedAt: Date(),
+                lastFinishedAt: nil,
+                lastOutputSummary: nil,
+                lastError: nil,
+                lastDebugOutput: nil,
+                lastAgentID: agent.id
+            )
+        )
+        let boardID = UUID()
+        let snapshot = KanbanBoardSnapshot(
+            tasks: [runningTask],
+            agents: [agent],
+            wipLimits: [.inProgress: 3, .review: 2],
+            boards: [
+                KanbanBoardRecord(
+                    id: boardID,
+                    name: "Main",
+                    tasks: [runningTask],
+                    agents: [agent],
+                    wipLimits: [.inProgress: 3, .review: 2]
+                )
+            ],
+            selectedBoardID: boardID,
+            taskTemplates: nil,
+            executionAutoRetryConfiguration: .init(),
+            executionCheckpoint: ExecutionCheckpoint(boardID: boardID, mode: .assignedBatch)
+        )
+        let store = SpyBoardStore(loadSnapshot: snapshot)
+        let viewModel = KanbanBoardViewModel.persistentBoard(boardStore: store)
+
+        #expect(viewModel.tasks.first?.executionRecord?.status == .failed)
+        #expect(viewModel.lastBoardMessage?.contains("interrupted execution") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+}
+
+struct GitHubPRFlowUseCaseTests {
+    @Test("github PR flow use case runs git+gh command sequence and extracts PR URL")
+    func githubPRFlowRunsHappyPath() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        var invokedCommands: [[String]] = []
+
+        let result = GitHubPRFlowUseCase.run(
+            request: GitHubPRFlowRequest(
+                repositoryPath: "/repo",
+                boardName: "Dating App Board",
+                baseBranch: "main",
+                remoteName: "origin",
+                branchPrefix: "openmac",
+                commitMessage: "chore: sync",
+                prTitle: "[OpenMac] Sync",
+                prBody: "Body"
+            ),
+            now: fixedDate,
+            commandRunner: { executablePath, arguments, _ in
+                invokedCommands.append([executablePath] + arguments)
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments.starts(with: ["gh", "pr", "create"]) {
+                    return (0, "https://github.com/acme/openmac/pull/123")
+                }
+                return (0, "ok")
+            }
+        )
+
+        #expect(result.succeeded)
+        #expect(result.branchName == "openmac/dating-app-board-19700101-000000")
+        #expect(result.pullRequestURL == "https://github.com/acme/openmac/pull/123")
+        #expect(invokedCommands.count == 7)
+    }
+
+    @Test("github PR flow use case fails when no staged changes exist")
+    func githubPRFlowFailsWhenNoStagedChanges() {
+        let result = GitHubPRFlowUseCase.run(
+            request: GitHubPRFlowRequest(
+                repositoryPath: "/repo",
+                boardName: "Board",
+                baseBranch: "main",
+                remoteName: "origin",
+                branchPrefix: "openmac",
+                commitMessage: "chore: sync",
+                prTitle: "PR",
+                prBody: "Body"
+            ),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (0, "")
+                }
+                return (0, "ok")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "No staged changes to commit")
     }
 }
 
@@ -10933,6 +11467,70 @@ struct PMRoadmapSummaryBuilderTests {
         )
 
         #expect(sections.isEmpty)
+    }
+
+    @Test("buildSections skips missing status rows and omits outcome section when no executions exist")
+    func buildSectionsHandlesMissingTaskRowsWithoutExecutions() {
+        let knownTask = WorkTask(
+            title: "Known",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let missingTaskID = UUID()
+        let descriptors = [
+            Descriptor(taskID: knownTask.id, milestone: "M1", epic: "Core"),
+            Descriptor(taskID: missingTaskID, milestone: "M2", epic: "Growth")
+        ]
+
+        let sections = PMRoadmapSummaryBuilder.buildSections(
+            createdTasks: descriptors,
+            tasks: [knownTask],
+            taskID: { $0.taskID },
+            milestone: { $0.milestone },
+            epic: { $0.epic }
+        )
+
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("Total"))]: 0/2 (0%)"))
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("Unassigned"))]: 2/2"))
+        #expect(sections.contains("\(L10n.string("Roadmap")) [\(L10n.string("To Do"))/\(L10n.string("In Progress"))/\(L10n.string("Review"))/\(L10n.string("Done"))]: 1/0/0/0"))
+        #expect(sections.contains { $0.contains("[\(L10n.string("Succeeded"))/\(L10n.string("Failed"))/\(L10n.string("Running"))]") } == false)
+
+        let milestoneSection = sections.first { $0.contains("[\(L10n.string("Milestone"))]") }
+        #expect(milestoneSection?.contains("\(L10n.format("Milestone: %@", "M1")) 0/1") == true)
+        #expect(milestoneSection?.contains("\(L10n.format("Milestone: %@", "M2")) 0/1") == true)
+
+        let epicSection = sections.first { $0.contains("[\(L10n.string("Epic"))]") }
+        #expect(epicSection?.contains("\(L10n.format("Epic: %@", "Core")) 0/1") == true)
+        #expect(epicSection?.contains("\(L10n.format("Epic: %@", "Growth")) 0/1") == true)
+    }
+
+    @Test("buildSections omits epic section when every epic is blank")
+    func buildSectionsOmitsEpicSectionWhenBlank() {
+        let task = WorkTask(
+            title: "Task",
+            details: "details",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .inProgress,
+            assignedAgentID: UUID()
+        )
+        let descriptors = [
+            Descriptor(taskID: task.id, milestone: "M1", epic: ""),
+            Descriptor(taskID: task.id, milestone: "M1", epic: "   ")
+        ]
+
+        let sections = PMRoadmapSummaryBuilder.buildSections(
+            createdTasks: descriptors,
+            tasks: [task],
+            taskID: { $0.taskID },
+            milestone: { $0.milestone },
+            epic: { $0.epic }
+        )
+
+        #expect(sections.contains { $0.contains("[\(L10n.string("Epic"))]") } == false)
     }
 }
 
