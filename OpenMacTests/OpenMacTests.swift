@@ -5070,6 +5070,250 @@ struct ContentViewLogicTests {
 
 @Suite(.serialized)
 @MainActor
+struct ContentActionUseCaseTests {
+    @Test("execution toolbar use case blocks assigned run while batch is already running")
+    func executionToolbarUseCaseBlocksAssignedRunWhenBatchRunning() {
+        var batchStateTransitions: [Bool] = []
+        var runCalls = 0
+        var refreshCalls = 0
+
+        let started = ExecutionToolbarUseCase.runAssignedExecutions(
+            isBatchRunning: true,
+            isAutoCycleRunning: false,
+            setBatchRunning: { batchStateTransitions.append($0) },
+            runAssignedExecutionsInBackground: { _ in
+                runCalls += 1
+            },
+            refresh: {
+                refreshCalls += 1
+            }
+        )
+
+        #expect(started == false)
+        #expect(batchStateTransitions.isEmpty)
+        #expect(runCalls == 0)
+        #expect(refreshCalls == 0)
+    }
+
+    @Test("execution toolbar use case toggles running state and refreshes after assigned run")
+    func executionToolbarUseCaseRunsAssignedAndRefreshes() {
+        var batchStateTransitions: [Bool] = []
+        var refreshCalls = 0
+
+        let started = ExecutionToolbarUseCase.runAssignedExecutions(
+            isBatchRunning: false,
+            isAutoCycleRunning: false,
+            setBatchRunning: { batchStateTransitions.append($0) },
+            runAssignedExecutionsInBackground: { completion in
+                completion(2)
+            },
+            refresh: {
+                refreshCalls += 1
+            }
+        )
+
+        #expect(started == true)
+        #expect(batchStateTransitions == [true, false])
+        #expect(refreshCalls == 1)
+    }
+
+    @Test("execution toolbar use case blocks auto cycle while assigned batch is running")
+    func executionToolbarUseCaseBlocksAutoCycleWhenBatchRunning() {
+        var autoCycleStateTransitions: [Bool] = []
+        var runCalls = 0
+        var refreshCalls = 0
+
+        let started = ExecutionToolbarUseCase.runAutoCycle(
+            isAutoCycleRunning: false,
+            isBatchRunning: true,
+            setAutoCycleRunning: { autoCycleStateTransitions.append($0) },
+            runAutoDispatchCycleInBackground: { _ in
+                runCalls += 1
+            },
+            refresh: {
+                refreshCalls += 1
+            }
+        )
+
+        #expect(started == false)
+        #expect(autoCycleStateTransitions.isEmpty)
+        #expect(runCalls == 0)
+        #expect(refreshCalls == 0)
+    }
+
+    @Test("execution toolbar use case cancel helpers honor running state")
+    func executionToolbarUseCaseCancelHelpersHonorRunningState() {
+        var assignedCancelCalls = 0
+        let assignedCancelled = ExecutionToolbarUseCase.cancelAssignedExecutions(
+            isBatchRunning: true,
+            requestCancelAssignedTaskExecutions: {
+                assignedCancelCalls += 1
+            }
+        )
+        let assignedNotCancelled = ExecutionToolbarUseCase.cancelAssignedExecutions(
+            isBatchRunning: false,
+            requestCancelAssignedTaskExecutions: {
+                assignedCancelCalls += 1
+            }
+        )
+
+        var autoCycleCancelCalls = 0
+        let autoCycleCancelled = ExecutionToolbarUseCase.cancelAutoCycle(
+            isAutoCycleRunning: true,
+            requestCancelAutoDispatchCycle: {
+                autoCycleCancelCalls += 1
+            }
+        )
+        let autoCycleNotCancelled = ExecutionToolbarUseCase.cancelAutoCycle(
+            isAutoCycleRunning: false,
+            requestCancelAutoDispatchCycle: {
+                autoCycleCancelCalls += 1
+            }
+        )
+
+        #expect(assignedCancelled == true)
+        #expect(assignedNotCancelled == false)
+        #expect(assignedCancelCalls == 1)
+        #expect(autoCycleCancelled == true)
+        #expect(autoCycleNotCancelled == false)
+        #expect(autoCycleCancelCalls == 1)
+    }
+
+    @Test("execution toolbar use case computes retryable error types from toggles")
+    func executionToolbarUseCaseRetryableTypesFromToggles() {
+        let retryableTypes = ExecutionToolbarUseCase.selectedRetryableErrorTypes(
+            retryNetwork: true,
+            retryRateLimit: false,
+            retryServer: true
+        )
+
+        #expect(retryableTypes == [.network, .server])
+    }
+
+    @Test("pm autopilot preparation generates plan and board context before starting")
+    func pmAutopilotPreparationGeneratesPlanAndBoard() {
+        var createdBoardNames: [String] = []
+        let seedTicket = PMPlannedTicket(
+            title: "Coverage Task",
+            details: "Implement feature",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            epic: "Core",
+            milestone: "M1"
+        )
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: false,
+            plannedTickets: [],
+            testPlanText: "",
+            projectName: "Coverage Project",
+            shouldCreateNewBoard: true,
+            existingBoardNames: ["Coverage Project"],
+            generatePlan: {
+                PMGeneratedPlan(
+                    projectName: "Coverage Project",
+                    summary: "Generated summary",
+                    tickets: [seedTicket]
+                )
+            },
+            applyAutoAcceptanceCriteria: { tickets in
+                tickets.map { ticket in
+                    PMPlannedTicket(
+                        title: ticket.title,
+                        details: "\(ticket.details)\nAcceptance:\n- Ready",
+                        requiredSkills: ticket.requiredSkills,
+                        storyPoints: ticket.storyPoints,
+                        epic: ticket.epic,
+                        milestone: ticket.milestone
+                    )
+                }
+            },
+            generateTestPlan: { projectName, tickets in
+                "\(projectName)-test-plan-\(tickets.count)"
+            },
+            uniqueBoardName: { baseName, _ in
+                "\(baseName) (2)"
+            },
+            createBoard: { boardName in
+                createdBoardNames.append(boardName)
+                return true
+            }
+        )
+
+        #expect(result.status == .ready)
+        #expect(result.shouldStart == true)
+        #expect(result.didSwitchBoardContext == true)
+        #expect(result.projectName == "Coverage Project (2)")
+        #expect(result.generatedPlanSummary == "Generated summary")
+        #expect(result.testPlanText == "Coverage Project-test-plan-1")
+        #expect(createdBoardNames == ["Coverage Project (2)"])
+        #expect(result.plannedTickets.count == 1)
+        #expect(result.plannedTickets[0].details.contains("Acceptance:"))
+    }
+
+    @Test("pm autopilot preparation is blocked while auto cycle is already running")
+    func pmAutopilotPreparationBlockedByAutoCycle() {
+        var generatedPlanCalls = 0
+        let existingTicket = PMPlannedTicket(
+            title: "Existing",
+            details: "details",
+            requiredSkills: [],
+            storyPoints: 1
+        )
+
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: true,
+            isBatchRunning: false,
+            plannedTickets: [existingTicket],
+            testPlanText: "existing-test-plan",
+            projectName: "Existing Project",
+            shouldCreateNewBoard: false,
+            existingBoardNames: [],
+            generatePlan: {
+                generatedPlanCalls += 1
+                return nil
+            },
+            applyAutoAcceptanceCriteria: { $0 },
+            generateTestPlan: { _, _ in "" },
+            uniqueBoardName: { name, _ in name },
+            createBoard: { _ in true }
+        )
+
+        #expect(result.status == .blockedByAutoCycle)
+        #expect(result.shouldStart == false)
+        #expect(generatedPlanCalls == 0)
+        #expect(result.plannedTickets == [existingTicket])
+        #expect(result.testPlanText == "existing-test-plan")
+    }
+
+    @Test("pm autopilot preparation reports missing tickets when plan generation fails")
+    func pmAutopilotPreparationReportsMissingTickets() {
+        let result = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: false,
+            isBatchRunning: false,
+            plannedTickets: [],
+            testPlanText: "",
+            projectName: "Empty Project",
+            shouldCreateNewBoard: false,
+            existingBoardNames: [],
+            generatePlan: {
+                nil
+            },
+            applyAutoAcceptanceCriteria: { $0 },
+            generateTestPlan: { _, _ in "" },
+            uniqueBoardName: { name, _ in name },
+            createBoard: { _ in true }
+        )
+
+        #expect(result.status == .missingTickets)
+        #expect(result.shouldStart == false)
+        #expect(result.plannedTickets.isEmpty)
+    }
+}
+
+@Suite(.serialized)
+@MainActor
 struct KanbanPersistenceTests {
 
     @Test("clears localized transient board message")

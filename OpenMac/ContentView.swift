@@ -27,6 +27,220 @@ private struct PMBriefTemplateDefinition: Equatable {
     let briefKey: String
 }
 
+struct PMGeneratedPlan {
+    let projectName: String
+    let summary: String
+    let tickets: [PMPlannedTicket]
+}
+
+enum PMAutopilotPreparationStatus {
+    case ready
+    case blockedByAutoCycle
+    case blockedByBatchRun
+    case missingTickets
+    case boardCreationFailed
+}
+
+struct PMAutopilotPreparationResult {
+    let status: PMAutopilotPreparationStatus
+    let shouldStart: Bool
+    let plannedTickets: [PMPlannedTicket]
+    let testPlanText: String
+    let projectName: String
+    let generatedPlanSummary: String?
+    let didSwitchBoardContext: Bool
+}
+
+@MainActor
+enum PMAutopilotSheetUseCase {
+    static func prepareForRun(
+        isAutoCycleRunning: Bool,
+        isBatchRunning: Bool,
+        plannedTickets: [PMPlannedTicket],
+        testPlanText: String,
+        projectName: String,
+        shouldCreateNewBoard: Bool,
+        existingBoardNames: [String],
+        generatePlan: () -> PMGeneratedPlan?,
+        applyAutoAcceptanceCriteria: ([PMPlannedTicket]) -> [PMPlannedTicket],
+        generateTestPlan: (_ projectName: String, _ tickets: [PMPlannedTicket]) -> String,
+        uniqueBoardName: (_ baseName: String, _ existingNames: [String]) -> String,
+        createBoard: (_ boardName: String) -> Bool
+    ) -> PMAutopilotPreparationResult {
+        guard !isAutoCycleRunning else {
+            return PMAutopilotPreparationResult(
+                status: .blockedByAutoCycle,
+                shouldStart: false,
+                plannedTickets: plannedTickets,
+                testPlanText: testPlanText,
+                projectName: projectName,
+                generatedPlanSummary: nil,
+                didSwitchBoardContext: false
+            )
+        }
+        guard !isBatchRunning else {
+            return PMAutopilotPreparationResult(
+                status: .blockedByBatchRun,
+                shouldStart: false,
+                plannedTickets: plannedTickets,
+                testPlanText: testPlanText,
+                projectName: projectName,
+                generatedPlanSummary: nil,
+                didSwitchBoardContext: false
+            )
+        }
+
+        var resolvedProjectName = projectName
+        var resolvedTickets = plannedTickets
+        var generatedPlanSummary: String?
+
+        if resolvedTickets.isEmpty {
+            guard let generatedPlan = generatePlan() else {
+                return PMAutopilotPreparationResult(
+                    status: .missingTickets,
+                    shouldStart: false,
+                    plannedTickets: [],
+                    testPlanText: testPlanText,
+                    projectName: projectName,
+                    generatedPlanSummary: nil,
+                    didSwitchBoardContext: false
+                )
+            }
+            resolvedProjectName = generatedPlan.projectName
+            generatedPlanSummary = generatedPlan.summary
+            resolvedTickets = generatedPlan.tickets
+        }
+        guard !resolvedTickets.isEmpty else {
+            return PMAutopilotPreparationResult(
+                status: .missingTickets,
+                shouldStart: false,
+                plannedTickets: [],
+                testPlanText: testPlanText,
+                projectName: resolvedProjectName,
+                generatedPlanSummary: generatedPlanSummary,
+                didSwitchBoardContext: false
+            )
+        }
+
+        resolvedTickets = applyAutoAcceptanceCriteria(resolvedTickets)
+        var resolvedTestPlanText = testPlanText
+        if resolvedTestPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resolvedTestPlanText = generateTestPlan(resolvedProjectName, resolvedTickets)
+        }
+
+        var didSwitchBoardContext = false
+        if shouldCreateNewBoard {
+            let resolvedBoardName = uniqueBoardName(resolvedProjectName, existingBoardNames)
+            guard createBoard(resolvedBoardName) else {
+                return PMAutopilotPreparationResult(
+                    status: .boardCreationFailed,
+                    shouldStart: false,
+                    plannedTickets: resolvedTickets,
+                    testPlanText: resolvedTestPlanText,
+                    projectName: resolvedProjectName,
+                    generatedPlanSummary: generatedPlanSummary,
+                    didSwitchBoardContext: false
+                )
+            }
+            resolvedProjectName = resolvedBoardName
+            didSwitchBoardContext = true
+        }
+
+        return PMAutopilotPreparationResult(
+            status: .ready,
+            shouldStart: true,
+            plannedTickets: resolvedTickets,
+            testPlanText: resolvedTestPlanText,
+            projectName: resolvedProjectName,
+            generatedPlanSummary: generatedPlanSummary,
+            didSwitchBoardContext: didSwitchBoardContext
+        )
+    }
+}
+
+@MainActor
+enum ExecutionToolbarUseCase {
+    @discardableResult
+    static func runAssignedExecutions(
+        isBatchRunning: Bool,
+        isAutoCycleRunning: Bool,
+        setBatchRunning: @escaping (Bool) -> Void,
+        runAssignedExecutionsInBackground: (@escaping (Int) -> Void) -> Void,
+        refresh: @escaping () -> Void
+    ) -> Bool {
+        guard !isBatchRunning else { return false }
+        guard !isAutoCycleRunning else { return false }
+
+        setBatchRunning(true)
+        runAssignedExecutionsInBackground { startedCount in
+            setBatchRunning(false)
+            if startedCount > 0 {
+                refresh()
+            }
+        }
+        return true
+    }
+
+    @discardableResult
+    static func cancelAssignedExecutions(
+        isBatchRunning: Bool,
+        requestCancelAssignedTaskExecutions: () -> Void
+    ) -> Bool {
+        guard isBatchRunning else { return false }
+        requestCancelAssignedTaskExecutions()
+        return true
+    }
+
+    @discardableResult
+    static func runAutoCycle(
+        isAutoCycleRunning: Bool,
+        isBatchRunning: Bool,
+        setAutoCycleRunning: @escaping (Bool) -> Void,
+        runAutoDispatchCycleInBackground: (@escaping (Int) -> Void) -> Void,
+        refresh: @escaping () -> Void
+    ) -> Bool {
+        guard !isAutoCycleRunning else { return false }
+        guard !isBatchRunning else { return false }
+
+        setAutoCycleRunning(true)
+        runAutoDispatchCycleInBackground { startedCount in
+            setAutoCycleRunning(false)
+            if startedCount > 0 {
+                refresh()
+            }
+        }
+        return true
+    }
+
+    @discardableResult
+    static func cancelAutoCycle(
+        isAutoCycleRunning: Bool,
+        requestCancelAutoDispatchCycle: () -> Void
+    ) -> Bool {
+        guard isAutoCycleRunning else { return false }
+        requestCancelAutoDispatchCycle()
+        return true
+    }
+
+    static func selectedRetryableErrorTypes(
+        retryNetwork: Bool,
+        retryRateLimit: Bool,
+        retryServer: Bool
+    ) -> Set<RetryableExecutionErrorType> {
+        var retryableTypes: Set<RetryableExecutionErrorType> = []
+        if retryNetwork {
+            retryableTypes.insert(.network)
+        }
+        if retryRateLimit {
+            retryableTypes.insert(.rateLimit)
+        }
+        if retryServer {
+            retryableTypes.insert(.server)
+        }
+        return retryableTypes
+    }
+}
+
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
@@ -998,26 +1212,65 @@ struct ContentView: View {
     }
 
     private func runPMAutopilotFromSheet() {
-        guard !isAutoCycleRunning else { return }
-        guard !isBatchRunning else { return }
+        let preparation = PMAutopilotSheetUseCase.prepareForRun(
+            isAutoCycleRunning: isAutoCycleRunning,
+            isBatchRunning: isBatchRunning,
+            plannedTickets: pmPlannedTickets,
+            testPlanText: pmTestPlanText,
+            projectName: pmProjectName,
+            shouldCreateNewBoard: pmCreateNewBoardForPlan,
+            existingBoardNames: viewModel.boards.map(\.name),
+            generatePlan: {
+                guard let plan = viewModel.previewProjectPlan(
+                    projectName: pmProjectName,
+                    projectBrief: pmProjectBrief
+                ) else {
+                    return nil
+                }
+                return PMGeneratedPlan(
+                    projectName: plan.projectName,
+                    summary: plan.summary,
+                    tickets: plan.tickets
+                )
+            },
+            applyAutoAcceptanceCriteria: { tickets in
+                tickets.map { ticket in
+                    Self.applyingAutoAcceptanceCriteria(to: ticket)
+                }
+            },
+            generateTestPlan: { resolvedProjectName, resolvedTickets in
+                Self.pmTestPlanText(
+                    projectName: resolvedProjectName,
+                    projectBrief: pmProjectBrief,
+                    tickets: resolvedTickets
+                )
+            },
+            uniqueBoardName: { baseName, existingNames in
+                Self.uniquePMBoardName(baseName: baseName, existingNames: existingNames)
+            },
+            createBoard: { boardName in
+                viewModel.createBoard(name: boardName)
+            }
+        )
 
-        if pmPlannedTickets.isEmpty {
-            generatePMPlanFromSheet()
+        guard preparation.shouldStart else {
+            if let summary = preparation.generatedPlanSummary {
+                pmPlanSummary = summary
+                pmPlannedTickets = preparation.plannedTickets
+            } else if preparation.status == .missingTickets {
+                pmPlanSummary = ""
+                pmPlannedTickets = []
+            }
+            return
         }
-        guard !pmPlannedTickets.isEmpty else { return }
 
-        applyPMAutoAcceptanceCriteriaForAllTickets()
-        if pmTestPlanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            generatePMTestPlanFromSheet()
+        pmProjectName = preparation.projectName
+        pmPlannedTickets = preparation.plannedTickets
+        pmTestPlanText = preparation.testPlanText
+        if let summary = preparation.generatedPlanSummary {
+            pmPlanSummary = summary
         }
-
-        if pmCreateNewBoardForPlan {
-            let resolvedBoardName = Self.uniquePMBoardName(
-                baseName: pmProjectName,
-                existingNames: viewModel.boards.map(\.name)
-            )
-            guard viewModel.createBoard(name: resolvedBoardName) else { return }
-            pmProjectName = resolvedBoardName
+        if preparation.didSwitchBoardContext {
             handleBoardContextChanged()
         }
 
@@ -1152,40 +1405,50 @@ struct ContentView: View {
     }
 
     private func runAssignedExecutionsFromToolbar() {
-        guard !isBatchRunning else { return }
-        guard !isAutoCycleRunning else { return }
-        isBatchRunning = true
-        viewModel.runAssignedTaskExecutionsInBackground { startedCount in
-            isBatchRunning = false
-            if startedCount > 0 {
-                refreshTriageSelections()
-            }
-        }
+        _ = ExecutionToolbarUseCase.runAssignedExecutions(
+            isBatchRunning: isBatchRunning,
+            isAutoCycleRunning: isAutoCycleRunning,
+            setBatchRunning: { isBatchRunning = $0 },
+            runAssignedExecutionsInBackground: { completion in
+                viewModel.runAssignedTaskExecutionsInBackground(completion: completion)
+            },
+            refresh: refreshTriageSelections
+        )
     }
 
     private func cancelAssignedExecutionsFromToolbar() {
-        guard isBatchRunning else { return }
-        viewModel.requestCancelAssignedTaskExecutions()
+        _ = ExecutionToolbarUseCase.cancelAssignedExecutions(
+            isBatchRunning: isBatchRunning,
+            requestCancelAssignedTaskExecutions: {
+                viewModel.requestCancelAssignedTaskExecutions()
+            }
+        )
     }
 
     private func runAutoCycleFromToolbar() {
-        guard !isAutoCycleRunning else { return }
-        guard !isBatchRunning else { return }
-        isAutoCycleRunning = true
-        viewModel.runAutoDispatchCycleInBackground(
-            maxPasses: autoCycleMaxPasses,
-            autoCreateMissingDependencies: autoCycleAutoCreateMissingDependencies
-        ) { startedCount, _ in
-            isAutoCycleRunning = false
-            if startedCount > 0 {
-                refreshTriageSelections()
-            }
-        }
+        _ = ExecutionToolbarUseCase.runAutoCycle(
+            isAutoCycleRunning: isAutoCycleRunning,
+            isBatchRunning: isBatchRunning,
+            setAutoCycleRunning: { isAutoCycleRunning = $0 },
+            runAutoDispatchCycleInBackground: { completion in
+                viewModel.runAutoDispatchCycleInBackground(
+                    maxPasses: autoCycleMaxPasses,
+                    autoCreateMissingDependencies: autoCycleAutoCreateMissingDependencies
+                ) { startedCount, _ in
+                    completion(startedCount)
+                }
+            },
+            refresh: refreshTriageSelections
+        )
     }
 
     private func cancelAutoCycleFromToolbar() {
-        guard isAutoCycleRunning else { return }
-        viewModel.requestCancelAutoDispatchCycle()
+        _ = ExecutionToolbarUseCase.cancelAutoCycle(
+            isAutoCycleRunning: isAutoCycleRunning,
+            requestCancelAutoDispatchCycle: {
+                viewModel.requestCancelAutoDispatchCycle()
+            }
+        )
     }
 
     private func syncAutoRetryDraftFromViewModel() {
@@ -1199,21 +1462,15 @@ struct ContentView: View {
     }
 
     private func applyAutoRetrySettings() {
-        var retryableTypes: Set<RetryableExecutionErrorType> = []
-        if autoRetryRetryNetwork {
-            retryableTypes.insert(.network)
-        }
-        if autoRetryRetryRateLimit {
-            retryableTypes.insert(.rateLimit)
-        }
-        if autoRetryRetryServer {
-            retryableTypes.insert(.server)
-        }
         viewModel.updateExecutionAutoRetryConfiguration(
             isEnabled: autoRetryEnabled,
             maxRetryCount: autoRetryMaxRetries,
             backoffSeconds: autoRetryBackoffSeconds,
-            retryableErrorTypes: retryableTypes
+            retryableErrorTypes: ExecutionToolbarUseCase.selectedRetryableErrorTypes(
+                retryNetwork: autoRetryRetryNetwork,
+                retryRateLimit: autoRetryRetryRateLimit,
+                retryServer: autoRetryRetryServer
+            )
         )
     }
 
