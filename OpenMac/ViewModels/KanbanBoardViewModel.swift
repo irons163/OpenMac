@@ -1987,18 +1987,18 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func exportExecutionReportJSONForSelectedBoard(to url: URL) -> Bool {
         guard let data = executionReportJSONDataForSelectedBoard() else {
-            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessage = message("Failed to export execution report")
             lastBoardMessageSeverity = .warning
             return false
         }
         do {
             try data.write(to: url, options: .atomic)
             let fileName = url.lastPathComponent.isEmpty ? "execution-report.json" : url.lastPathComponent
-            lastBoardMessage = "Exported execution report to \(fileName)"
+            lastBoardMessage = message("Exported execution report to %@", fileName)
             lastBoardMessageSeverity = .info
             return true
         } catch {
-            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessage = message("Failed to export execution report")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2007,23 +2007,23 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func exportExecutionReportMarkdownForSelectedBoard(to url: URL) -> Bool {
         guard let markdown = executionReportMarkdownForSelectedBoard() else {
-            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessage = message("Failed to export execution report")
             lastBoardMessageSeverity = .warning
             return false
         }
         do {
             guard let data = markdown.data(using: .utf8) else {
-                lastBoardMessage = "Failed to export execution report"
+                lastBoardMessage = message("Failed to export execution report")
                 lastBoardMessageSeverity = .warning
                 return false
             }
             try data.write(to: url, options: .atomic)
             let fileName = url.lastPathComponent.isEmpty ? "execution-report.md" : url.lastPathComponent
-            lastBoardMessage = "Exported execution report to \(fileName)"
+            lastBoardMessage = message("Exported execution report to %@", fileName)
             lastBoardMessageSeverity = .info
             return true
         } catch {
-            lastBoardMessage = "Failed to export execution report"
+            lastBoardMessage = message("Failed to export execution report")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2385,14 +2385,14 @@ final class KanbanBoardViewModel: ObservableObject {
     ) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Task template name is required"
+            lastBoardMessage = message("Task template name is required")
             lastBoardMessageSeverity = .warning
             return false
         }
 
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
-            lastBoardMessage = "Task template title is required"
+            lastBoardMessage = message("Task template title is required")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2413,7 +2413,7 @@ final class KanbanBoardViewModel: ObservableObject {
             lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
         persistBoardState()
-        lastBoardMessage = "Added task template: \(template.name)"
+        lastBoardMessage = message("Added task template: %@", template.name)
         lastBoardMessageSeverity = .info
         return true
     }
@@ -2428,20 +2428,20 @@ final class KanbanBoardViewModel: ObservableObject {
         storyPoints: Int
     ) -> Bool {
         guard let index = taskTemplates.firstIndex(where: { $0.id == templateID }) else {
-            lastBoardMessage = "Task template not found"
+            lastBoardMessage = message("Task template not found")
             lastBoardMessageSeverity = .warning
             return false
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            lastBoardMessage = "Task template name is required"
+            lastBoardMessage = message("Task template name is required")
             lastBoardMessageSeverity = .warning
             return false
         }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
-            lastBoardMessage = "Task template title is required"
+            lastBoardMessage = message("Task template title is required")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2460,7 +2460,7 @@ final class KanbanBoardViewModel: ObservableObject {
             lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
         persistBoardState()
-        lastBoardMessage = "Updated task template: \(trimmedName)"
+        lastBoardMessage = message("Updated task template: %@", trimmedName)
         lastBoardMessageSeverity = .info
         return true
     }
@@ -2468,14 +2468,14 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func removeTaskTemplate(_ templateID: UUID) -> Bool {
         guard let index = taskTemplates.firstIndex(where: { $0.id == templateID }) else {
-            lastBoardMessage = "Task template not found"
+            lastBoardMessage = message("Task template not found")
             lastBoardMessageSeverity = .warning
             return false
         }
         let removedName = taskTemplates[index].name
         taskTemplates.remove(at: index)
         persistBoardState()
-        lastBoardMessage = "Deleted task template: \(removedName)"
+        lastBoardMessage = message("Deleted task template: %@", removedName)
         lastBoardMessageSeverity = .info
         return true
     }
@@ -2486,7 +2486,7 @@ final class KanbanBoardViewModel: ObservableObject {
         autoAssign: Bool = false
     ) -> Bool {
         guard let template = taskTemplate(templateID) else {
-            lastBoardMessage = "Task template not found"
+            lastBoardMessage = message("Task template not found")
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -2512,7 +2512,7 @@ final class KanbanBoardViewModel: ObservableObject {
             retryableErrorTypes: retryableErrorTypes
         )
         persistBoardState()
-        lastBoardMessage = "Updated execution auto-retry settings"
+        lastBoardMessage = message("Updated execution auto-retry settings")
         lastBoardMessageSeverity = .info
     }
 

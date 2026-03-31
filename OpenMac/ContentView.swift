@@ -394,11 +394,11 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("e", modifiers: [.command, .shift])
 
-                        Button("Export Execution Report JSON...") {
+                        Button(L10n.string("Export Execution Report JSON...")) {
                             exportExecutionReportJSONFromToolbar()
                         }
 
-                        Button("Export Execution Report Markdown...") {
+                        Button(L10n.string("Export Execution Report Markdown...")) {
                             exportExecutionReportMarkdownFromToolbar()
                         }
 
@@ -452,19 +452,19 @@ struct ContentView: View {
                 Menu(L10n.string("Developer")) {
                     Toggle(L10n.string("Developer Mode"), isOn: $developerModeEnabled)
                     Divider()
-                    Text("Execution Auto Retry")
-                    Toggle("Enabled", isOn: $autoRetryEnabled)
-                    Stepper("Max Retries: \(autoRetryMaxRetries)", value: $autoRetryMaxRetries, in: 0 ... 5)
+                    Text(L10n.string("Execution Auto Retry"))
+                    Toggle(L10n.string("Enabled"), isOn: $autoRetryEnabled)
+                    Stepper(L10n.format("Max Retries: %d", autoRetryMaxRetries), value: $autoRetryMaxRetries, in: 0 ... 5)
                     Stepper(
-                        "Backoff Seconds: \(String(format: "%.1f", autoRetryBackoffSeconds))",
+                        L10n.format("Backoff Seconds: %.1f", autoRetryBackoffSeconds),
                         value: $autoRetryBackoffSeconds,
                         in: 0 ... 10,
                         step: 0.5
                     )
-                    Toggle("Retry Network Errors", isOn: $autoRetryRetryNetwork)
-                    Toggle("Retry Rate Limit Errors", isOn: $autoRetryRetryRateLimit)
-                    Toggle("Retry Server Errors", isOn: $autoRetryRetryServer)
-                    Button("Apply Auto-Retry Settings") {
+                    Toggle(L10n.string("Retry Network Errors"), isOn: $autoRetryRetryNetwork)
+                    Toggle(L10n.string("Retry Rate Limit Errors"), isOn: $autoRetryRetryRateLimit)
+                    Toggle(L10n.string("Retry Server Errors"), isOn: $autoRetryRetryServer)
+                    Button(L10n.string("Apply Auto-Retry Settings")) {
                         applyAutoRetrySettings()
                     }
                     Divider()
@@ -737,7 +737,7 @@ struct ContentView: View {
 
     private func saveCurrentTaskAsTemplateFromSheet() {
         let proposedName = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let templateName = proposedName.isEmpty ? "Task Template" : proposedName
+        let templateName = proposedName.isEmpty ? L10n.string("Task Template") : proposedName
         let added = viewModel.addTaskTemplate(
             name: templateName,
             title: newTaskTitle,
@@ -1341,8 +1341,8 @@ struct ContentView: View {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = defaultFileName
-        panel.title = "Export Execution Report (JSON)"
-        panel.message = "Save execution report for current board as JSON."
+        panel.title = L10n.string("Export Execution Report (JSON)")
+        panel.message = L10n.string("Save execution report for current board as JSON.")
         return panel
     }
 
@@ -1352,8 +1352,8 @@ struct ContentView: View {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = defaultFileName
-        panel.title = "Export Execution Report (Markdown)"
-        panel.message = "Save execution report for current board as Markdown."
+        panel.title = L10n.string("Export Execution Report (Markdown)")
+        panel.message = L10n.string("Save execution report for current board as Markdown.")
         return panel
     }
 
@@ -4400,8 +4400,8 @@ private struct NewTaskSheet: View {
                 BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
             }
 
-            Picker("Task Template", selection: $selectedTemplateID) {
-                Text("No Template").tag(UUID?.none)
+            Picker(L10n.string("Task Template"), selection: $selectedTemplateID) {
+                Text(L10n.string("No Template")).tag(UUID?.none)
                 ForEach(templates) { template in
                     Text(template.name).tag(Optional(template.id))
                 }
@@ -4422,7 +4422,7 @@ private struct NewTaskSheet: View {
                 Button(L10n.string("Cancel"), action: onCancel)
                 Button(L10n.string("Create"), action: onCreate)
                     .keyboardShortcut(.defaultAction)
-                Button("Save as Template", action: onSaveAsTemplate)
+                Button(L10n.string("Save as Template"), action: onSaveAsTemplate)
                 Button(L10n.string("Create + Auto Assign"), action: onCreateAutoAssign)
             }
         }
