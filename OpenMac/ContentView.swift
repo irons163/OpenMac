@@ -5206,7 +5206,9 @@ private extension ContentView {
 
         let viewModel = KanbanBoardViewModel(
             tasks: [todoAssigned, todoUnassigned, doneTask, failedInProgressTask],
-            agents: [agentA, agentB]
+            agents: [agentA, agentB],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
         )
         let initialBoardID = viewModel.selectedBoardID
         _ = viewModel.createBoard(name: "Coverage Secondary")
@@ -5388,6 +5390,99 @@ private extension ContentView {
         hit { view.openWIPSettings() }
         hit { fallbackWIPView.openWIPSettings() }
         hit { view.applyWIPSettings() }
+        hit { _ = view.pmTemplateOptions.count }
+        hit {
+            view.developerModeEnabled = false
+            _ = view.boardMessageSection("Coverage board message")
+        }
+        hit {
+            view.developerModeEnabled = true
+            _ = view.boardMessageSection("Coverage board message")
+        }
+
+        hit { view.openPMPlannerSheet() }
+        hit {
+            view.pmProjectName = "Coverage PM Project"
+            view.pmProjectBrief = "Create an execution-ready PM plan for coverage validation."
+            view.generatePMPlanFromSheet()
+        }
+        hit {
+            view.pmPlannedTickets = [
+                PMPlannedTicket(
+                    title: "Coverage Acceptance Ticket",
+                    details: "Acceptance:\n- keep coverage green",
+                    requiredSkills: ["swiftui"],
+                    storyPoints: 1,
+                    epic: "Coverage",
+                    milestone: "M1"
+                )
+            ]
+            view.applyPMAutoAcceptanceCriteriaForAllTickets()
+        }
+        hit { view.generatePMTestPlanFromSheet() }
+        hit { view.applyPMAutoAcceptanceCriteriaForTicket(0) }
+        hit { view.applyPMAutoAcceptanceCriteriaForTicket(999) }
+        hit { view.applyPMDependencyChainFromSheet() }
+        hit { view.copyPMPlanFromSheet() }
+        hit { view.copyPMTestPlanFromSheet() }
+        hit { view.createMissingAgentsFromPMPlanFromSheet() }
+        hit {
+            view.pmCreateNewBoardForPlan = false
+            view.pmAutoAssignAfterCreate = false
+            view.createPMTicketsFromSheet()
+        }
+        hit { view.openPMPlannerSheet() }
+        hit {
+            view.pmSelectedTemplateID = view.pmTemplateOptions.first(where: { $0.id != Self.pmCustomTemplateID })?.id
+                ?? Self.pmCustomTemplateID
+            view.applyPMTemplateFromSheet()
+        }
+        hit { view.applyAndGeneratePMTemplateFromSheet() }
+        hit { view.applyPMBlueprintFromSheet() }
+        hit {
+            view.pmBlueprintVision = "Ship a reliable kanban automation workspace."
+            view.pmBlueprintTargetUsers = "macOS solo builders"
+            view.pmBlueprintCoreFeatures = "Planner, execution logs, automation"
+            view.pmBlueprintTechScope = "SwiftUI + tests"
+            view.pmBlueprintConstraints = "No regressions"
+            view.pmBlueprintQualityBar = "Strong unit coverage"
+            view.applyAndGeneratePMBlueprintFromSheet()
+        }
+        hit {
+            view.pmCreateNewBoardForPlan = false
+            view.createAndRunPMTicketsFromSheet()
+        }
+        hit { view.closePMPlannerSheet() }
+        hit {
+            view.openPMPlannerSheet()
+            view.isBatchRunning = false
+            view.isAutoCycleRunning = false
+            view.pmProjectName = "Coverage PM Autopilot"
+            view.pmProjectBrief = "Plan and execute a compact PM flow."
+            view.pmCreateNewBoardForPlan = false
+            view.pmPlannedTickets = [
+                PMPlannedTicket(
+                    title: "Coverage PM Autopilot Ticket",
+                    details: "Execute an autopilot-compatible coverage task.",
+                    requiredSkills: ["swiftui"],
+                    storyPoints: 1,
+                    epic: "Coverage",
+                    milestone: "M1"
+                )
+            ]
+            view.pmTestPlanText = ""
+            view.runPMAutopilotFromSheet()
+        }
+        hit {
+            view.isAutoCycleRunning = true
+            view.runPMAutopilotFromSheet()
+            view.isAutoCycleRunning = false
+        }
+        hit {
+            view.isBatchRunning = true
+            view.runPMAutopilotFromSheet()
+            view.isBatchRunning = false
+        }
 
         hit {
             view.newTaskTitle = "Created by coverage hook"
@@ -5404,6 +5499,32 @@ private extension ContentView {
         hit { view.rebalanceTodoAssignments() }
         hit { view.runAutoAssignFromToolbar() }
         hit { view.runAssignedExecutionsFromToolbar() }
+        hit { view.cancelAssignedExecutionsFromToolbar() }
+        hit {
+            view.isBatchRunning = true
+            view.cancelAssignedExecutionsFromToolbar()
+            view.isBatchRunning = false
+        }
+        hit { view.runAutoCycleFromToolbar() }
+        hit {
+            view.isAutoCycleRunning = true
+            view.cancelAutoCycleFromToolbar()
+            view.isAutoCycleRunning = false
+        }
+        hit {
+            view.isBatchRunning = true
+            view.runAutoCycleFromToolbar()
+            view.isBatchRunning = false
+        }
+        hit {
+            view.autoRetryEnabled = true
+            view.autoRetryMaxRetries = 3
+            view.autoRetryBackoffSeconds = 2.0
+            view.autoRetryRetryNetwork = true
+            view.autoRetryRetryRateLimit = false
+            view.autoRetryRetryServer = true
+            view.applyAutoRetrySettings()
+        }
         hit { view.applyHealthRecommendation(.openManualTriage) }
         hit { view.applyHealthRecommendation(.autoAssignUnassignedTodo) }
         hit { view.applyHealthRecommendation(.createMissingDependencyTasks) }
@@ -5415,6 +5536,8 @@ private extension ContentView {
         hit { view.openNewAgentSheet() }
         hit { view.exportWorkspaceFromToolbar() }
         hit { view.exportSelectedBoardFromToolbar() }
+        hit { view.exportExecutionReportJSONFromToolbar() }
+        hit { view.exportExecutionReportMarkdownFromToolbar() }
         hit { view.importWorkspaceFromToolbar() }
         hit { view.chooseCodexProjectsDirectory() }
         hit { view.openCodexProjectsDirectoryInFinder() }
