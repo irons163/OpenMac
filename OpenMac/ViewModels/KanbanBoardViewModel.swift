@@ -1291,11 +1291,6 @@ final class KanbanBoardViewModel: ObservableObject {
         let epic: String
     }
 
-    private struct ExecutionAttemptResult {
-        let outcome: AgentTaskExecutionOutcome
-        let retriesPerformed: Int
-    }
-
     private struct ExecutionReportTaskEntry: Codable {
         let id: UUID
         let title: String
@@ -3540,12 +3535,6 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
-    private struct PreparedTaskExecution {
-        let taskID: UUID
-        let taskSnapshot: WorkTask
-        let agent: AgentProfile
-    }
-
     private func retryableErrorType(for message: String) -> RetryableExecutionErrorType? {
         let normalized = message.lowercased()
 
@@ -3624,92 +3613,102 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
+    private func performTaskExecution(_ taskID: UUID, requiresTaskDetails: Bool) -> Bool {
+        ExecutionCoordinator.runTaskExecution(
+            taskID: taskID,
+            requiresTaskDetails: requiresTaskDetails,
+            prepareTaskExecution: { taskID, requiresTaskDetails in
+                self.prepareTaskExecution(taskID, requiresTaskDetails: requiresTaskDetails)
+            },
+            executeWithAutoRetry: { task, agent, onProgress in
+                self.executeWithAutoRetry(task: task, agent: agent, onProgress: onProgress)
+            },
+            captureExecutionProgress: { update, prepared in
+                self.captureExecutionProgress(update, for: prepared)
+            },
+            applyRetryRunCount: { taskID, additionalAttempts in
+                self.applyRetryRunCount(for: taskID, additionalAttempts: additionalAttempts)
+            },
+            finalizeTaskExecution: { prepared, outcome in
+                self.finalizeTaskExecution(prepared, outcome: outcome)
+            }
+        )
+    }
+
+    private func performTaskExecutionInBackground(
+        _ taskID: UUID,
+        requiresTaskDetails: Bool,
+        completion: @escaping (Bool) -> Void
+    ) {
+        ExecutionCoordinator.runTaskExecutionInBackground(
+            taskID: taskID,
+            requiresTaskDetails: requiresTaskDetails,
+            prepareTaskExecution: { taskID, requiresTaskDetails in
+                self.prepareTaskExecution(taskID, requiresTaskDetails: requiresTaskDetails)
+            },
+            executeWithAutoRetry: { task, agent, onProgress in
+                self.executeWithAutoRetry(task: task, agent: agent, onProgress: onProgress)
+            },
+            runOnBackground: runOnBackground,
+            runOnMain: runOnMain,
+            captureExecutionProgress: { update, prepared in
+                self.captureExecutionProgress(update, for: prepared)
+            },
+            applyRetryRunCount: { taskID, additionalAttempts in
+                self.applyRetryRunCount(for: taskID, additionalAttempts: additionalAttempts)
+            },
+            finalizeTaskExecution: { prepared, outcome in
+                self.finalizeTaskExecution(prepared, outcome: outcome)
+            },
+            completion: completion
+        )
+    }
+
+    @discardableResult
     func runTaskExecution(_ taskID: UUID) -> Bool {
-        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
-            return false
-        }
-        let result = executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-            self.captureExecutionProgress(update, for: prepared)
-        }
-        applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
-        finalizeTaskExecution(prepared, outcome: result.outcome)
-        return true
+        performTaskExecution(taskID, requiresTaskDetails: true)
     }
 
     func runTaskExecutionInBackground(_ taskID: UUID, completion: @escaping (Bool) -> Void) {
-        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: true) else {
-            completion(false)
-            return
-        }
-        runOnBackground {
-            let result = self.executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-                self.runOnMain { [weak self] in
-                    self?.captureExecutionProgress(update, for: prepared)
-                }
-            }
-            self.runOnMain { [weak self] in
-                guard let self else {
-                    completion(false)
-                    return
-                }
-                self.applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
-                self.finalizeTaskExecution(prepared, outcome: result.outcome)
-                completion(true)
-            }
-        }
+        performTaskExecutionInBackground(taskID, requiresTaskDetails: true, completion: completion)
     }
 
     @discardableResult
     func retryTaskExecution(_ taskID: UUID) -> Bool {
-        guard let record = executionRecord(for: taskID), record.status == .failed else {
-            lastBoardMessage = message("Only failed executions can be retried")
-            lastBoardMessageSeverity = .warning
-            return false
-        }
-        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
-            return false
-        }
-        let result = executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-            self.captureExecutionProgress(update, for: prepared)
-        }
-        applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
-        finalizeTaskExecution(prepared, outcome: result.outcome)
-        return true
+        ExecutionCoordinator.retryTaskExecution(
+            taskID: taskID,
+            canRetryTask: { taskID in
+                self.executionRecord(for: taskID)?.status == .failed
+            },
+            onRetryRejected: {
+                self.lastBoardMessage = self.message("Only failed executions can be retried")
+                self.lastBoardMessageSeverity = .warning
+            },
+            runTaskExecution: { taskID, requiresTaskDetails in
+                self.performTaskExecution(taskID, requiresTaskDetails: requiresTaskDetails)
+            }
+        )
     }
 
     func retryTaskExecutionInBackground(_ taskID: UUID, completion: @escaping (Bool) -> Void) {
-        guard let record = executionRecord(for: taskID), record.status == .failed else {
-            lastBoardMessage = message("Only failed executions can be retried")
-            lastBoardMessageSeverity = .warning
-            completion(false)
-            return
-        }
-        guard let prepared = prepareTaskExecution(taskID, requiresTaskDetails: false) else {
-            completion(false)
-            return
-        }
-        runOnBackground {
-            let result = self.executeWithAutoRetry(task: prepared.taskSnapshot, agent: prepared.agent) { update in
-                self.runOnMain { [weak self] in
-                    self?.captureExecutionProgress(update, for: prepared)
-                }
-            }
-            self.runOnMain { [weak self] in
-                guard let self else {
-                    completion(false)
-                    return
-                }
-                self.applyRetryRunCount(for: prepared.taskID, additionalAttempts: result.retriesPerformed)
-                self.finalizeTaskExecution(prepared, outcome: result.outcome)
-                completion(true)
-            }
-        }
-    }
-
-    private struct BatchRunPreparation {
-        let runnableTaskIDs: [UUID]
-        let detailsMissingCount: Int
-        let dependencyBlockedCount: Int
+        ExecutionCoordinator.retryTaskExecutionInBackground(
+            taskID: taskID,
+            canRetryTask: { taskID in
+                self.executionRecord(for: taskID)?.status == .failed
+            },
+            onRetryRejected: {
+                self.lastBoardMessage = self.message("Only failed executions can be retried")
+                self.lastBoardMessageSeverity = .warning
+            },
+            runTaskExecutionInBackground: { taskID, requiresTaskDetails, completion in
+                self.performTaskExecutionInBackground(
+                    taskID,
+                    requiresTaskDetails: requiresTaskDetails,
+                    completion: completion
+                )
+            },
+            completion: completion
+        )
     }
 
     private struct DependencyReference {
@@ -3900,7 +3899,7 @@ final class KanbanBoardViewModel: ObservableObject {
         return message("Blocked by dependencies: %@", unresolved.joined(separator: ", "))
     }
 
-    private func prepareAssignedBatchRunQueue(excluding attemptedTaskIDs: Set<UUID> = []) -> BatchRunPreparation {
+    private func prepareAssignedBatchRunQueue(excluding attemptedTaskIDs: Set<UUID> = []) -> AssignedBatchRunPreparation {
         let assignedQueue = tasks
             .filter { task in
                 (task.status == .todo || task.status == .inProgress) &&
@@ -3949,7 +3948,7 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         }
 
-        return BatchRunPreparation(
+        return AssignedBatchRunPreparation(
             runnableTaskIDs: runnableTaskIDs,
             detailsMissingCount: detailsMissingCount,
             dependencyBlockedCount: dependencyBlockedCount
@@ -3983,191 +3982,107 @@ final class KanbanBoardViewModel: ObservableObject {
 
     @discardableResult
     func runAssignedTaskExecutions() -> Int {
-        var attemptedTaskIDs: Set<UUID> = []
-        var batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
-
-        guard !batchPreparation.runnableTaskIDs.isEmpty else {
-            lastBoardMessage = noRunnableAssignedBatchMessage(
-                detailsMissingCount: batchPreparation.detailsMissingCount,
-                dependencyBlockedCount: batchPreparation.dependencyBlockedCount
-            )
-            lastBoardMessageSeverity = .warning
-            return 0
-        }
-
-        var startedCount = 0
-        var succeededCount = 0
-        var failedCount = 0
-        var skippedCount = 0
-
-        while !batchPreparation.runnableTaskIDs.isEmpty {
-            for taskID in batchPreparation.runnableTaskIDs {
-                attemptedTaskIDs.insert(taskID)
-
-                let didRun = runTaskExecution(taskID)
-                guard didRun else {
-                    skippedCount += 1
-                    continue
+        ExecutionCoordinator.runAssignedTaskExecutions(
+            prepareQueue: { attemptedTaskIDs in
+                self.prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
+            },
+            runTaskExecution: { taskID in
+                self.runTaskExecution(taskID)
+            },
+            executionStatusForTask: { taskID in
+                self.executionRecord(for: taskID)?.status
+            },
+            handleNoRunnable: { preparation in
+                self.lastBoardMessage = self.noRunnableAssignedBatchMessage(
+                    detailsMissingCount: preparation.detailsMissingCount,
+                    dependencyBlockedCount: preparation.dependencyBlockedCount
+                )
+                self.lastBoardMessageSeverity = .warning
+            },
+            handleFinished: { state in
+                let counters = state.counters
+                let detailsMissingCount = state.finalPreparation.detailsMissingCount
+                let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
+                var summaryParts = [
+                    self.message("Batch run finished"),
+                    self.message("%d started", counters.startedCount),
+                    self.message("%d succeeded", counters.succeededCount),
+                    self.message("%d failed", counters.failedCount)
+                ]
+                if counters.skippedCount > 0 {
+                    summaryParts.append(self.message("%d skipped", counters.skippedCount))
+                }
+                if detailsMissingCount > 0 {
+                    summaryParts.append(self.message("%d missing details", detailsMissingCount))
+                }
+                if dependencyBlockedCount > 0 {
+                    summaryParts.append(self.message("%d blocked by dependencies", dependencyBlockedCount))
                 }
 
-                startedCount += 1
-                if let record = executionRecord(for: taskID) {
-                    switch record.status {
-                    case .succeeded:
-                        succeededCount += 1
-                    case .failed:
-                        failedCount += 1
-                    case .running:
-                        break
-                    }
-                }
+                self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                self.lastBoardMessageSeverity = (
+                    counters.failedCount > 0 ||
+                        counters.skippedCount > 0 ||
+                        detailsMissingCount > 0 ||
+                        dependencyBlockedCount > 0
+                ) ? .warning : .info
             }
-
-            batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
-        }
-
-        let detailsMissingCount = batchPreparation.detailsMissingCount
-        let dependencyBlockedCount = batchPreparation.dependencyBlockedCount
-        var summaryParts = [
-            message("Batch run finished"),
-            message("%d started", startedCount),
-            message("%d succeeded", succeededCount),
-            message("%d failed", failedCount)
-        ]
-        if skippedCount > 0 {
-            summaryParts.append(message("%d skipped", skippedCount))
-        }
-        if detailsMissingCount > 0 {
-            summaryParts.append(message("%d missing details", detailsMissingCount))
-        }
-        if dependencyBlockedCount > 0 {
-            summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
-        }
-
-        lastBoardMessage = summaryParts.joined(separator: " · ")
-        lastBoardMessageSeverity = (
-            failedCount > 0 ||
-                skippedCount > 0 ||
-                detailsMissingCount > 0 ||
-                dependencyBlockedCount > 0
-        ) ? .warning : .info
-        return startedCount
+        )
     }
 
     func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
-        isBatchRunCancelRequested = false
-        var attemptedTaskIDs: Set<UUID> = []
-        var batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
-        var wasCancelled = false
-        var hasFinished = false
-
-        guard !batchPreparation.runnableTaskIDs.isEmpty else {
-            lastBoardMessage = noRunnableAssignedBatchMessage(
-                detailsMissingCount: batchPreparation.detailsMissingCount,
-                dependencyBlockedCount: batchPreparation.dependencyBlockedCount
-            )
-            lastBoardMessageSeverity = .warning
-            isBatchRunCancelRequested = false
-            completion(0)
-            return
-        }
-
-        var startedCount = 0
-        var succeededCount = 0
-        var failedCount = 0
-        var skippedCount = 0
-
-        func finish(_ finalPreparation: BatchRunPreparation) {
-            guard !hasFinished else { return }
-            hasFinished = true
-            let detailsMissingCount = finalPreparation.detailsMissingCount
-            let dependencyBlockedCount = finalPreparation.dependencyBlockedCount
-            var summaryParts = [
-                message("Batch run finished"),
-                message("%d started", startedCount),
-                message("%d succeeded", succeededCount),
-                message("%d failed", failedCount)
-            ]
-            if wasCancelled {
-                summaryParts.append(message("Cancelled"))
-            }
-            if skippedCount > 0 {
-                summaryParts.append(message("%d skipped", skippedCount))
-            }
-            if detailsMissingCount > 0 {
-                summaryParts.append(message("%d missing details", detailsMissingCount))
-            }
-            if dependencyBlockedCount > 0 {
-                summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
-            }
-            lastBoardMessage = summaryParts.joined(separator: " · ")
-            lastBoardMessageSeverity = (
-                failedCount > 0 ||
-                    wasCancelled ||
-                    skippedCount > 0 ||
-                    detailsMissingCount > 0 ||
-                    dependencyBlockedCount > 0
-            ) ? .warning : .info
-            isBatchRunCancelRequested = false
-            completion(startedCount)
-        }
-
-        func runNextRunnableBatch() {
-            batchPreparation = prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
-            if self.isBatchRunCancelRequested {
-                wasCancelled = true
-                finish(batchPreparation)
-                return
-            }
-            guard !batchPreparation.runnableTaskIDs.isEmpty else {
-                finish(batchPreparation)
-                return
-            }
-            runBatch(batchPreparation.runnableTaskIDs, at: 0)
-        }
-
-        func runBatch(_ runnableTaskIDs: [UUID], at index: Int) {
-            if self.isBatchRunCancelRequested {
-                wasCancelled = true
-                finish(batchPreparation)
-                return
-            }
-            guard index < runnableTaskIDs.count else {
-                runNextRunnableBatch()
-                return
-            }
-
-            let taskID = runnableTaskIDs[index]
-            attemptedTaskIDs.insert(taskID)
-            runTaskExecutionInBackground(taskID) { didRun in
-                if !didRun {
-                    skippedCount += 1
-                    runBatch(runnableTaskIDs, at: index + 1)
-                    return
+        ExecutionCoordinator.runAssignedTaskExecutionsInBackground(
+            setCancelRequested: { self.isBatchRunCancelRequested = $0 },
+            isCancelRequested: { self.isBatchRunCancelRequested },
+            prepareQueue: { attemptedTaskIDs in
+                self.prepareAssignedBatchRunQueue(excluding: attemptedTaskIDs)
+            },
+            runTaskExecutionInBackground: { taskID, completion in
+                self.runTaskExecutionInBackground(taskID, completion: completion)
+            },
+            executionStatusForTask: { taskID in
+                self.executionRecord(for: taskID)?.status
+            },
+            handleNoRunnable: { preparation in
+                self.lastBoardMessage = self.noRunnableAssignedBatchMessage(
+                    detailsMissingCount: preparation.detailsMissingCount,
+                    dependencyBlockedCount: preparation.dependencyBlockedCount
+                )
+                self.lastBoardMessageSeverity = .warning
+            },
+            handleFinished: { state in
+                let counters = state.counters
+                let detailsMissingCount = state.finalPreparation.detailsMissingCount
+                let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
+                var summaryParts = [
+                    self.message("Batch run finished"),
+                    self.message("%d started", counters.startedCount),
+                    self.message("%d succeeded", counters.succeededCount),
+                    self.message("%d failed", counters.failedCount)
+                ]
+                if state.wasCancelled {
+                    summaryParts.append(self.message("Cancelled"))
                 }
-
-                startedCount += 1
-                if let record = self.executionRecord(for: taskID) {
-                    switch record.status {
-                    case .succeeded:
-                        succeededCount += 1
-                    case .failed:
-                        failedCount += 1
-                    case .running:
-                        break
-                    }
+                if counters.skippedCount > 0 {
+                    summaryParts.append(self.message("%d skipped", counters.skippedCount))
                 }
-
-                if self.isBatchRunCancelRequested {
-                    wasCancelled = true
-                    finish(batchPreparation)
-                    return
+                if detailsMissingCount > 0 {
+                    summaryParts.append(self.message("%d missing details", detailsMissingCount))
                 }
-                runBatch(runnableTaskIDs, at: index + 1)
-            }
-        }
-
-        runBatch(batchPreparation.runnableTaskIDs, at: 0)
+                if dependencyBlockedCount > 0 {
+                    summaryParts.append(self.message("%d blocked by dependencies", dependencyBlockedCount))
+                }
+                self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                self.lastBoardMessageSeverity = (
+                    counters.failedCount > 0 ||
+                        state.wasCancelled ||
+                        counters.skippedCount > 0 ||
+                        detailsMissingCount > 0 ||
+                        dependencyBlockedCount > 0
+                ) ? .warning : .info
+            },
+            completion: completion
+        )
     }
 
     func runAutoDispatchCycleInBackground(
@@ -4176,96 +4091,70 @@ final class KanbanBoardViewModel: ObservableObject {
         autoAssignBeforeRun: Bool = true,
         completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
     ) {
-        isAutoCycleCancelRequested = false
-        let cappedPasses = min(12, max(1, maxPasses))
-        var totalStarted = 0
-        var completedPasses = 0
-        var hadWarning = false
-        var createdDependencyTaskCount = 0
-        var wasCancelled = false
-        var hasFinished = false
-        lastAutoCycleCreatedDependencyTaskCount = 0
-
-        func finish() {
-            guard !hasFinished else { return }
-            hasFinished = true
-            self.lastAutoCycleCreatedDependencyTaskCount = createdDependencyTaskCount
-            if totalStarted > 0 || wasCancelled {
-                let remainingPreparation = prepareAssignedBatchRunQueue()
-                let remainingDetailsMissing = remainingPreparation.detailsMissingCount
-                let remainingDependencyBlocked = remainingPreparation.dependencyBlockedCount
-
-                var summaryParts: [String] = [
-                    message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
-                ]
-                if wasCancelled {
-                    summaryParts.append(message("Cancelled"))
-                }
-                if createdDependencyTaskCount > 0 {
-                    summaryParts.append(message("Created %d dependency placeholder task(s)", createdDependencyTaskCount))
-                }
-                if remainingDetailsMissing > 0 {
-                    summaryParts.append(message("%d missing details", remainingDetailsMissing))
-                }
-                if remainingDependencyBlocked > 0 {
-                    summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))
-                }
-                lastBoardMessage = summaryParts.joined(separator: " · ")
-                lastBoardMessageSeverity = (
-                    hadWarning ||
-                        wasCancelled ||
-                        remainingDetailsMissing > 0 ||
-                        remainingDependencyBlocked > 0
-                ) ? .warning : .info
-            } else if lastBoardMessage == nil {
-                lastBoardMessage = message("Auto cycle finished with no runnable assigned tasks")
-                lastBoardMessageSeverity = .warning
-            }
-            self.isAutoCycleCancelRequested = false
-            completion(totalStarted, completedPasses)
-        }
-
-        func runPass(_ passIndex: Int) {
-            guard passIndex < cappedPasses else {
-                finish()
-                return
-            }
-            if self.isAutoCycleCancelRequested {
-                wasCancelled = true
-                finish()
-                return
-            }
-
-            completedPasses += 1
-            if autoCreateMissingDependencies {
-                createdDependencyTaskCount += createMissingDependencyTasks()
-            }
-            if autoAssignBeforeRun {
-                autoAssignTasks()
-            }
-            runAssignedTaskExecutionsInBackground { started in
-                totalStarted += started
-                let isTerminalNoRunnable =
-                    started == 0 &&
+        ExecutionCoordinator.runAutoDispatchCycleInBackground(
+            maxPasses: maxPasses,
+            autoCreateMissingDependencies: autoCreateMissingDependencies,
+            autoAssignBeforeRun: autoAssignBeforeRun,
+            setCancelRequested: { self.isAutoCycleCancelRequested = $0 },
+            isCancelRequested: { self.isAutoCycleCancelRequested },
+            setCreatedDependencyTaskCount: { self.lastAutoCycleCreatedDependencyTaskCount = $0 },
+            createMissingDependencyTasks: { self.createMissingDependencyTasks() },
+            autoAssignTasks: { self.autoAssignTasks() },
+            runAssignedTaskExecutionsInBackground: { completion in
+                self.runAssignedTaskExecutionsInBackground(completion: completion)
+            },
+            boardMessageSeverity: { self.lastBoardMessageSeverity },
+            isTerminalNoRunnablePass: { started, totalStarted in
+                started == 0 &&
                     totalStarted > 0 &&
                     self.lastBoardMessage == self.message("No assigned tasks are ready to run")
-                if self.lastBoardMessageSeverity == .warning && !isTerminalNoRunnable {
-                    hadWarning = true
-                }
-                if self.isAutoCycleCancelRequested {
-                    wasCancelled = true
-                    finish()
-                    return
-                }
-                guard started > 0 else {
-                    finish()
-                    return
-                }
-                runPass(passIndex + 1)
-            }
-        }
+            },
+            prepareRemainingQueue: { self.prepareAssignedBatchRunQueue() },
+            handleFinished: { state in
+                if state.totalStarted > 0 || state.wasCancelled {
+                    let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
+                    let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
 
-        runPass(0)
+                    var summaryParts: [String] = [
+                        self.message(
+                            "Auto cycle finished · %d pass(es) · %d started",
+                            state.completedPasses,
+                            state.totalStarted
+                        )
+                    ]
+                    if state.wasCancelled {
+                        summaryParts.append(self.message("Cancelled"))
+                    }
+                    if state.createdDependencyTaskCount > 0 {
+                        summaryParts.append(
+                            self.message(
+                                "Created %d dependency placeholder task(s)",
+                                state.createdDependencyTaskCount
+                            )
+                        )
+                    }
+                    if remainingDetailsMissing > 0 {
+                        summaryParts.append(self.message("%d missing details", remainingDetailsMissing))
+                    }
+                    if remainingDependencyBlocked > 0 {
+                        summaryParts.append(
+                            self.message("%d blocked by dependencies", remainingDependencyBlocked)
+                        )
+                    }
+                    self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                    self.lastBoardMessageSeverity = (
+                        state.hadWarning ||
+                            state.wasCancelled ||
+                            remainingDetailsMissing > 0 ||
+                            remainingDependencyBlocked > 0
+                    ) ? .warning : .info
+                } else if self.lastBoardMessage == nil {
+                    self.lastBoardMessage = self.message("Auto cycle finished with no runnable assigned tasks")
+                    self.lastBoardMessageSeverity = .warning
+                }
+            },
+            completion: completion
+        )
     }
 
     func requestCancelAssignedTaskExecutions() {
