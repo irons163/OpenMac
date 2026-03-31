@@ -166,102 +166,105 @@ struct ContentView: View {
             }
             .navigationTitle(L10n.string("AI Agents"))
         } detail: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.string("AI Agent Kanban Dispatch"))
-                            .font(.title2.weight(.semibold))
-                        Text(L10n.format("Board: %@", viewModel.selectedBoardName))
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.string("AI Agent Kanban Dispatch"))
+                                .font(.title2.weight(.semibold))
+                            Text(L10n.format("Board: %@", viewModel.selectedBoardName))
+                                .font(.caption)
+                                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                        }
+                        Spacer()
+                        if !viewModel.triageCandidates().isEmpty {
+                            Text(L10n.format("%d task(s) need manual triage", viewModel.triageCandidates().count))
+                                .font(.callout)
+                                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+                        }
+                        if viewModel.pendingApprovalTaskCount > 0 {
+                            Text(L10n.format("Pending approvals: %d", viewModel.pendingApprovalTaskCount))
+                                .font(.callout)
+                                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+                        }
+                    }
+
+                    BoardHealthSummaryView(
+                        totalTasks: viewModel.totalTaskCount,
+                        todoTasks: viewModel.todoTaskCount,
+                        unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
+                        overloadedAgents: viewModel.overloadedAgentCount,
+                        healthScore: viewModel.boardHealthScore,
+                        healthLabel: viewModel.boardHealthLabel,
+                        healthBreakdownText: viewModel.boardHealthBreakdownText,
+                        inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
+                        reviewPressure: viewModel.wipPressurePercent(for: .review),
+                        blockedTasks: selectedBoardDependencyInsights.blockedTaskCount,
+                        criticalPathStoryPoints: selectedBoardDependencyInsights.criticalPathStoryPoints
+                    )
+
+                    BoardHealthRecommendationsView(
+                        recommendations: viewModel.healthRecommendations(),
+                        onAction: applyHealthRecommendation,
+                        onApplyAll: applyAllHealthRecommendations
+                    )
+
+                    BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
+
+                    HStack(spacing: 12) {
+                        TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
+
+                        Picker(L10n.string("Assignee"), selection: $selectedAssigneeFilterKey) {
+                            ForEach(assigneeFilterOptions, id: \.key) { option in
+                                Text(option.label).tag(option.key)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Text(L10n.format("Showing %d / %d", filteredTaskCount, viewModel.tasks.count))
                             .font(.caption)
                             .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-                    }
-                    Spacer()
-                    if !viewModel.triageCandidates().isEmpty {
-                        Text(L10n.format("%d task(s) need manual triage", viewModel.triageCandidates().count))
-                            .font(.callout)
-                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
-                    }
-                    if viewModel.pendingApprovalTaskCount > 0 {
-                        Text(L10n.format("Pending approvals: %d", viewModel.pendingApprovalTaskCount))
-                            .font(.callout)
-                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
-                    }
-                }
 
-                BoardHealthSummaryView(
-                    totalTasks: viewModel.totalTaskCount,
-                    todoTasks: viewModel.todoTaskCount,
-                    unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
-                    overloadedAgents: viewModel.overloadedAgentCount,
-                    healthScore: viewModel.boardHealthScore,
-                    healthLabel: viewModel.boardHealthLabel,
-                    healthBreakdownText: viewModel.boardHealthBreakdownText,
-                    inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
-                    reviewPressure: viewModel.wipPressurePercent(for: .review),
-                    blockedTasks: selectedBoardDependencyInsights.blockedTaskCount,
-                    criticalPathStoryPoints: selectedBoardDependencyInsights.criticalPathStoryPoints
-                )
-
-                BoardHealthRecommendationsView(
-                    recommendations: viewModel.healthRecommendations(),
-                    onAction: applyHealthRecommendation,
-                    onApplyAll: applyAllHealthRecommendations
-                )
-
-                BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
-
-                HStack(spacing: 12) {
-                    TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 300)
-
-                    Picker(L10n.string("Assignee"), selection: $selectedAssigneeFilterKey) {
-                        ForEach(assigneeFilterOptions, id: \.key) { option in
-                            Text(option.label).tag(option.key)
+                        Button(L10n.string("Reset Filters")) {
+                            resetTaskFilters()
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(taskSearchQuery.isEmpty && selectedAssigneeFilterKey == "all")
+
+                        Spacer()
                     }
-                    .pickerStyle(.menu)
 
-                    Text(L10n.format("Showing %d / %d", filteredTaskCount, viewModel.tasks.count))
-                        .font(.caption)
-                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-
-                    Button(L10n.string("Reset Filters")) {
-                        resetTaskFilters()
+                    if let message = viewModel.lastBoardMessage {
+                        boardMessageSection(message)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(taskSearchQuery.isEmpty && selectedAssigneeFilterKey == "all")
 
-                    Spacer()
-                }
+                    if let selectedAgent = selectedAgentForConsole {
+                        AgentLiveConsoleView(
+                            agentName: selectedAgent.name,
+                            isRunning: viewModel.isAgentExecutionRunning(selectedAgent.id),
+                            events: viewModel.executionEvents(for: selectedAgent.id),
+                            onCopy: copyToPasteboard,
+                            onClear: {
+                                viewModel.clearExecutionEvents(for: selectedAgent.id)
+                            }
+                        )
+                    }
 
-                if let message = viewModel.lastBoardMessage {
-                    boardMessageSection(message)
-                }
-
-                if let selectedAgent = selectedAgentForConsole {
-                    AgentLiveConsoleView(
-                        agentName: selectedAgent.name,
-                        isRunning: viewModel.isAgentExecutionRunning(selectedAgent.id),
-                        events: viewModel.executionEvents(for: selectedAgent.id),
-                        onCopy: copyToPasteboard,
-                        onClear: {
-                            viewModel.clearExecutionEvents(for: selectedAgent.id)
+                    ScrollView(.horizontal) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(KanbanStatus.allCases) { status in
+                                kanbanColumn(for: status)
+                            }
                         }
-                    )
-                }
-
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 14) {
-                        ForEach(KanbanStatus.allCases) { status in
-                            kanbanColumn(for: status)
-                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
             }
-            .padding(20)
             .background(
                 LinearGradient(
                     colors: detailBackgroundColors,
