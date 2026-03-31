@@ -298,6 +298,51 @@ struct ExecutionQuotaUsage: Equatable, Codable {
     }
 }
 
+struct ExecutionParallelizationPolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var maxConcurrentAgents: Int
+
+    init(
+        isEnabled: Bool = false,
+        maxConcurrentAgents: Int = 2
+    ) {
+        self.isEnabled = isEnabled
+        self.maxConcurrentAgents = max(1, maxConcurrentAgents)
+    }
+}
+
+struct GitHubPRQualityGatePolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var commands: [String]
+
+    init(
+        isEnabled: Bool = false,
+        commands: [String] = Self.defaultCommands
+    ) {
+        self.isEnabled = isEnabled
+        self.commands = Self.normalizedCommands(commands)
+    }
+
+    nonisolated static var defaultCommands: [String] {
+        [
+            "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project OpenMac.xcodeproj -scheme OpenMac -destination 'platform=macOS' -only-testing:OpenMacTests"
+        ]
+    }
+
+    nonisolated private static func normalizedCommands(_ rawCommands: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for command in rawCommands {
+            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            normalized.append(trimmed)
+        }
+        return normalized.isEmpty ? defaultCommands : normalized
+    }
+}
+
 struct TaskTemplate: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String

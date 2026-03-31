@@ -523,3 +523,17 @@
 "%d assigned %@ blocked by quota limits. Increase quota or reset usage before batch run." = "%d 個已指派%@受配額限制阻擋。請提高配額或重設用量後再進行批次執行。";
 "%d awaiting approval" = "%d 個待核准";
 "%d blocked by quota" = "%d 個受配額阻擋";
+"Create Acceptance E2E Tasks" = "建立驗收 E2E 任務";
+"Parallel Scheduler" = "並行排程器";
+"Enable multi-agent parallel background execution" = "啟用多代理背景並行執行";
+"Max Parallel Agents: %d" = "最大並行代理數：%d";
+"Apply Scheduler Settings" = "套用排程設定";
+"PR Quality Gate" = "PR 品質閘門";
+"Enable quality gate before GitHub PR flow" = "在 GitHub PR 流程前啟用品質閘門";
+"Apply PR Quality Gate Settings" = "套用 PR 品質閘門設定";
+"Updated parallel scheduler settings" = "已更新並行排程設定";
+"Updated PR quality gate settings" = "已更新 PR 品質閘門設定";
+"PR quality gate commands: %d" = "PR 品質閘門指令：%d";
+"Created %d acceptance E2E task(s)" = "已建立 %d 個驗收 E2E 任務";
+"No acceptance criteria found for E2E task generation" = "找不到可產生 E2E 任務的驗收標準";
+"PM planner created %d ticket(s) + %d acceptance E2E task(s)" = "PM 規劃已建立 %d 張票 + %d 個驗收 E2E 任務";

@@ -121,6 +121,9 @@ struct ContentView: View {
     @State private var quotaMaxEstimatedTokens = 12000
     @State private var quotaMaxEstimatedCostUSD = 0.60
     @State private var quotaCostPer1KTokensUSD = 0.05
+    @State private var parallelSchedulerEnabled = false
+    @State private var parallelSchedulerMaxAgents = 2
+    @State private var prQualityGateEnabled = false
     @State private var isGitHubFlowRunning = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
@@ -421,6 +424,10 @@ struct ContentView: View {
                         .keyboardShortcut("t", modifiers: [.command, .shift])
                         .disabled(viewModel.triageCandidates().isEmpty)
 
+                        Button(L10n.string("Create Acceptance E2E Tasks")) {
+                            createAcceptanceE2ETasksFromToolbar()
+                        }
+
                         Divider()
 
                         Button(L10n.string("Export Current Board JSON...")) {
@@ -549,6 +556,25 @@ struct ContentView: View {
                         .font(.caption2.monospaced())
                     Button(L10n.string("Reset Quota Usage")) {
                         viewModel.resetExecutionQuotaUsage()
+                    }
+                    Divider()
+                    Text(L10n.string("Parallel Scheduler"))
+                    Toggle(L10n.string("Enable multi-agent parallel background execution"), isOn: $parallelSchedulerEnabled)
+                    Stepper(
+                        L10n.format("Max Parallel Agents: %d", parallelSchedulerMaxAgents),
+                        value: $parallelSchedulerMaxAgents,
+                        in: 1 ... 12
+                    )
+                    Button(L10n.string("Apply Scheduler Settings")) {
+                        applyParallelSchedulerSettings()
+                    }
+                    Divider()
+                    Text(L10n.string("PR Quality Gate"))
+                    Toggle(L10n.string("Enable quality gate before GitHub PR flow"), isOn: $prQualityGateEnabled)
+                    Text(viewModel.gitHubPRQualityGateSummaryText())
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Apply PR Quality Gate Settings")) {
+                        applyPRQualityGateSettings()
                     }
                     Divider()
                     Text(L10n.string("Projects Folder"))
@@ -804,6 +830,8 @@ struct ContentView: View {
             syncAutoRetryDraftFromViewModel()
             syncApprovalGateDraftFromViewModel()
             syncQuotaGovernanceDraftFromViewModel()
+            syncParallelSchedulerDraftFromViewModel()
+            syncPRQualityGateDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
         }
         .onChange(of: appLanguageOverrideRawValue) { _, newValue in
@@ -1321,6 +1349,13 @@ struct ContentView: View {
         )
     }
 
+    private func createAcceptanceE2ETasksFromToolbar() {
+        _ = Self.handlePositiveCountResult(
+            viewModel.createAcceptanceE2ETasks(autoAssign: true),
+            onPositive: refreshTriageSelections
+        )
+    }
+
     private func runAutoAssignFromToolbar() {
         viewModel.autoAssignTasks()
         Self.postAutoAssign(
@@ -1457,6 +1492,26 @@ struct ContentView: View {
             maxEstimatedCostUSD: quotaMaxEstimatedCostUSD,
             costPer1KTokensUSD: quotaCostPer1KTokensUSD
         )
+    }
+
+    private func syncParallelSchedulerDraftFromViewModel() {
+        parallelSchedulerEnabled = viewModel.executionParallelizationPolicy.isEnabled
+        parallelSchedulerMaxAgents = viewModel.executionParallelizationPolicy.maxConcurrentAgents
+    }
+
+    private func applyParallelSchedulerSettings() {
+        viewModel.updateExecutionParallelizationPolicy(
+            isEnabled: parallelSchedulerEnabled,
+            maxConcurrentAgents: parallelSchedulerMaxAgents
+        )
+    }
+
+    private func syncPRQualityGateDraftFromViewModel() {
+        prQualityGateEnabled = viewModel.gitHubPRQualityGatePolicy.isEnabled
+    }
+
+    private func applyPRQualityGateSettings() {
+        viewModel.updateGitHubPRQualityGatePolicy(isEnabled: prQualityGateEnabled)
     }
 
     private func applyAutoRetrySettings() {

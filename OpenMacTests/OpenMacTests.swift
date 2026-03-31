@@ -5844,6 +5844,79 @@ struct GitHubPRFlowUseCaseTests {
         #expect(!result.succeeded)
         #expect(result.message == "No staged changes to commit")
     }
+
+    @Test("github PR flow quality gate runs before branch and blocks on failure")
+    func githubPRFlowQualityGateBlocksOnFailure() {
+        var invokedCommands: [[String]] = []
+        let result = GitHubPRFlowUseCase.run(
+            request: GitHubPRFlowRequest(
+                repositoryPath: "/repo",
+                boardName: "Board",
+                baseBranch: "main",
+                remoteName: "origin",
+                branchPrefix: "openmac",
+                commitMessage: "chore: sync",
+                prTitle: "PR",
+                prBody: "Body",
+                qualityGateEnabled: true,
+                qualityGateCommands: ["swift test"]
+            ),
+            commandRunner: { executablePath, arguments, _ in
+                invokedCommands.append([executablePath] + arguments)
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if executablePath == "/bin/zsh", arguments == ["-lc", "swift test"] {
+                    return (2, "failing test")
+                }
+                return (0, "ok")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Quality gate failed: swift test")
+        #expect(invokedCommands.contains(where: { $0 == ["/bin/zsh", "-lc", "swift test"] }))
+        #expect(!invokedCommands.contains(where: { $0 == ["/usr/bin/env", "git", "checkout", "-b", result.branchName] }))
+    }
+
+    @Test("github PR flow quality gate passes then continues normal git and gh flow")
+    func githubPRFlowQualityGatePassesAndContinues() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        var invokedCommands: [[String]] = []
+        let result = GitHubPRFlowUseCase.run(
+            request: GitHubPRFlowRequest(
+                repositoryPath: "/repo",
+                boardName: "Board",
+                baseBranch: "main",
+                remoteName: "origin",
+                branchPrefix: "openmac",
+                commitMessage: "chore: sync",
+                prTitle: "PR",
+                prBody: "Body",
+                qualityGateEnabled: true,
+                qualityGateCommands: ["swift test", "swiftlint"]
+            ),
+            now: fixedDate,
+            commandRunner: { executablePath, arguments, _ in
+                invokedCommands.append([executablePath] + arguments)
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments.starts(with: ["gh", "pr", "create"]) {
+                    return (0, "https://github.com/acme/openmac/pull/456")
+                }
+                return (0, "ok")
+            }
+        )
+
+        #expect(result.succeeded)
+        #expect(invokedCommands.contains(where: { $0 == ["/bin/zsh", "-lc", "swift test"] }))
+        #expect(invokedCommands.contains(where: { $0 == ["/bin/zsh", "-lc", "swiftlint"] }))
+        #expect(invokedCommands.count == 9)
+    }
 }
 
 @Suite(.serialized)
@@ -10539,6 +10612,64 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains("1 failed") == true)
     }
 
+    @Test("background batch run executes across agents in parallel when scheduler is enabled")
+    func runAssignedTaskExecutionsInBackgroundRunsParallelAcrossAgents() {
+        let agentA = AgentProfile(name: "A", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let agentB = AgentProfile(name: "B", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let taskA = WorkTask(
+            title: "Parallel A",
+            details: "Detailed task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agentA.id
+        )
+        let taskB = WorkTask(
+            title: "Parallel B",
+            details: "Detailed task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agentB.id
+        )
+        let executor = ConcurrentProbeTaskExecutor(
+            outcomesByTaskID: [
+                taskA.id: .success(summary: "ok"),
+                taskB.id: .success(summary: "ok")
+            ],
+            delaySeconds: 0.15
+        )
+        let callbackQueue = DispatchQueue(label: "tests.parallel-callback-queue")
+        let viewModel = KanbanBoardViewModel(
+            tasks: [taskA, taskB],
+            agents: [agentA, agentB],
+            taskExecutor: executor,
+            runOnBackground: { work in
+                let operation: @Sendable () -> Void = { work() }
+                DispatchQueue.global(qos: .userInitiated).async(execute: operation)
+            },
+            runOnMain: { work in
+                let callback: @Sendable () -> Void = { work() }
+                callbackQueue.async(execute: callback)
+            }
+        )
+        viewModel.updateExecutionParallelizationPolicy(
+            isEnabled: true,
+            maxConcurrentAgents: 2
+        )
+
+        var startedCount: Int?
+        let completionSignal = DispatchSemaphore(value: 0)
+        viewModel.runAssignedTaskExecutionsInBackground { started in
+            startedCount = started
+            completionSignal.signal()
+        }
+
+        #expect(completionSignal.wait(timeout: .now() + 15.0) == .success)
+        #expect(startedCount == 2)
+        #expect(executor.maxActiveExecutions >= 2)
+    }
+
     @Test("run assigned executions in background warns when assigned tasks have empty details")
     func runAssignedTaskExecutionsInBackgroundWarnsForEmptyDetails() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -10565,6 +10696,45 @@ struct KanbanPersistenceTests {
         #expect(startedCount == 0)
         #expect(viewModel.lastBoardMessage == "1 assigned task with empty details. Fill details before batch run.")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("creates acceptance E2E tasks from tasks with acceptance criteria")
+    func createAcceptanceE2ETasksFromCriteria() {
+        let qaAgent = AgentProfile(name: "QA", skills: ["qa", "testing"], maxConcurrentTasks: 2)
+        let sourceTask = WorkTask(
+            title: "Profile Setup",
+            details: """
+            Implement signup flow.
+            Acceptance Criteria:
+            - User can create profile.
+            - Required fields are validated.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [sourceTask],
+            agents: [qaAgent]
+        )
+
+        let created = viewModel.createAcceptanceE2ETasks(autoAssign: true)
+        #expect(created == 1)
+        #expect(viewModel.tasks.count == 2)
+
+        let generated = viewModel.tasks.first(where: { $0.title == "E2E Verify · Profile Setup" })
+        #expect(generated != nil)
+        #expect(generated?.details.contains("Depends on: Profile Setup") == true)
+        #expect(generated?.details.contains("User can create profile.") == true)
+        #expect(generated?.details.contains("Required fields are validated.") == true)
+        #expect(generated?.requiredSkills.contains("swiftui") == false)
+        #expect(generated?.requiredSkills.contains("qa") == true)
+        #expect(generated?.requiredSkills.contains("testing") == true)
+        #expect(generated?.assignedAgentID == qaAgent.id)
+
+        let createdAgain = viewModel.createAcceptanceE2ETasks(autoAssign: true)
+        #expect(createdAgain == 0)
     }
 
     @Test("background batch run includes skipped count when assignment is invalid")
@@ -12164,6 +12334,50 @@ private final class HookedTaskExecutor: AgentTaskExecuting {
         task: WorkTask,
         agent: AgentProfile,
         onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent)
+    }
+}
+
+private final class ConcurrentProbeTaskExecutor: AgentTaskExecuting {
+    let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
+    let fallbackOutcome: AgentTaskExecutionOutcome
+    let delaySeconds: TimeInterval
+
+    private let lock = NSLock()
+    private(set) var maxActiveExecutions = 0
+    private var activeExecutions = 0
+
+    init(
+        outcomesByTaskID: [UUID: AgentTaskExecutionOutcome] = [:],
+        fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok"),
+        delaySeconds: TimeInterval = 0.1
+    ) {
+        self.outcomesByTaskID = outcomesByTaskID
+        self.fallbackOutcome = fallbackOutcome
+        self.delaySeconds = max(0, delaySeconds)
+    }
+
+    func execute(task: WorkTask, agent _: AgentProfile) -> AgentTaskExecutionOutcome {
+        lock.lock()
+        activeExecutions += 1
+        maxActiveExecutions = max(maxActiveExecutions, activeExecutions)
+        lock.unlock()
+
+        if delaySeconds > 0 {
+            Thread.sleep(forTimeInterval: delaySeconds)
+        }
+
+        lock.lock()
+        activeExecutions = max(0, activeExecutions - 1)
+        lock.unlock()
+        return outcomesByTaskID[task.id] ?? fallbackOutcome
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress _: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
         execute(task: task, agent: agent)
     }

@@ -13,6 +13,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]?
     var executionQuotaPolicy: ExecutionQuotaPolicy?
     var executionQuotaUsage: ExecutionQuotaUsage?
+    var executionParallelizationPolicy: ExecutionParallelizationPolicy?
+    var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy?
 
     init(
         tasks: [WorkTask],
@@ -26,7 +28,9 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         executionApprovalPolicy: ExecutionApprovalPolicy? = nil,
         taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]? = nil,
         executionQuotaPolicy: ExecutionQuotaPolicy? = nil,
-        executionQuotaUsage: ExecutionQuotaUsage? = nil
+        executionQuotaUsage: ExecutionQuotaUsage? = nil,
+        executionParallelizationPolicy: ExecutionParallelizationPolicy? = nil,
+        gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy? = nil
     ) {
         self.tasks = tasks
         self.agents = agents
@@ -40,6 +44,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
         self.executionQuotaPolicy = executionQuotaPolicy
         self.executionQuotaUsage = executionQuotaUsage
+        self.executionParallelizationPolicy = executionParallelizationPolicy
+        self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
     }
 
     init(
@@ -59,7 +65,9 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             executionApprovalPolicy: nil,
             taskExecutionApprovalsByTaskID: nil,
             executionQuotaPolicy: nil,
-            executionQuotaUsage: nil
+            executionQuotaUsage: nil,
+            executionParallelizationPolicy: nil,
+            gitHubPRQualityGatePolicy: nil
         )
     }
 }

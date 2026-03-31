@@ -218,12 +218,15 @@ enum ExecutionCoordinator {
         isCancelRequested: @escaping () -> Bool,
         prepareQueue: @escaping (Set<UUID>) -> AssignedBatchRunPreparation,
         runTaskExecutionInBackground: @escaping (UUID, @escaping (Bool) -> Void) -> Void,
+        maxConcurrentExecutions: Int,
+        groupKeyForTask: @escaping (UUID) -> UUID?,
         executionStatusForTask: @escaping (UUID) -> TaskExecutionStatus?,
         handleNoRunnable: @escaping (AssignedBatchRunPreparation) -> Void,
         handleFinished: @escaping (BatchRunCompletionState) -> Void,
         completion: @escaping (Int) -> Void
     ) {
         setCancelRequested(false)
+        let concurrencyLimit = max(1, maxConcurrentExecutions)
 
         var attemptedTaskIDs: Set<UUID> = []
         var batchPreparation = prepareQueue(attemptedTaskIDs)
@@ -263,49 +266,88 @@ enum ExecutionCoordinator {
                 finish(batchPreparation)
                 return
             }
-            runBatch(batchPreparation.runnableTaskIDs, at: 0)
+            runBatch(batchPreparation.runnableTaskIDs)
         }
 
-        func runBatch(_ runnableTaskIDs: [UUID], at index: Int) {
+        func nextWave(from runnableTaskIDs: [UUID]) -> (wave: [UUID], deferred: [UUID]) {
+            var wave: [UUID] = []
+            var deferred: [UUID] = []
+            var occupiedGroups = Set<UUID>()
+
+            for taskID in runnableTaskIDs {
+                if wave.count >= concurrencyLimit {
+                    deferred.append(taskID)
+                    continue
+                }
+
+                if let groupID = groupKeyForTask(taskID) {
+                    if occupiedGroups.contains(groupID) {
+                        deferred.append(taskID)
+                        continue
+                    }
+                    occupiedGroups.insert(groupID)
+                }
+
+                wave.append(taskID)
+            }
+
+            if wave.isEmpty, let fallbackTaskID = runnableTaskIDs.first {
+                return ([fallbackTaskID], Array(runnableTaskIDs.dropFirst()))
+            }
+            return (wave, deferred)
+        }
+
+        func runBatch(_ runnableTaskIDs: [UUID]) {
             if isCancelRequested() {
                 wasCancelled = true
                 finish(batchPreparation)
                 return
             }
-            guard index < runnableTaskIDs.count else {
+            guard !runnableTaskIDs.isEmpty else {
                 runNextRunnableBatch()
                 return
             }
 
-            let taskID = runnableTaskIDs[index]
-            attemptedTaskIDs.insert(taskID)
-            runTaskExecutionInBackground(taskID) { didRun in
-                if !didRun {
-                    counters.skippedCount += 1
-                    runBatch(runnableTaskIDs, at: index + 1)
-                    return
-                }
+            let wave = nextWave(from: runnableTaskIDs)
+            let waveTaskIDs = wave.wave
+            guard !waveTaskIDs.isEmpty else {
+                runNextRunnableBatch()
+                return
+            }
 
-                counters.startedCount += 1
-                switch executionStatusForTask(taskID) {
-                case .succeeded:
-                    counters.succeededCount += 1
-                case .failed:
-                    counters.failedCount += 1
-                case .running, .none:
-                    break
-                }
+            var completedInWave = 0
+            for taskID in waveTaskIDs {
+                attemptedTaskIDs.insert(taskID)
+                runTaskExecutionInBackground(taskID) { didRun in
+                    if !didRun {
+                        counters.skippedCount += 1
+                    } else {
+                        counters.startedCount += 1
+                        switch executionStatusForTask(taskID) {
+                        case .succeeded:
+                            counters.succeededCount += 1
+                        case .failed:
+                            counters.failedCount += 1
+                        case .running, .none:
+                            break
+                        }
+                    }
 
-                if isCancelRequested() {
-                    wasCancelled = true
-                    finish(batchPreparation)
-                    return
+                    completedInWave += 1
+                    guard completedInWave == waveTaskIDs.count else { return }
+
+                    if isCancelRequested() {
+                        wasCancelled = true
+                        finish(batchPreparation)
+                        return
+                    }
+
+                    runBatch(wave.deferred)
                 }
-                runBatch(runnableTaskIDs, at: index + 1)
             }
         }
 
-        runBatch(batchPreparation.runnableTaskIDs, at: 0)
+        runBatch(batchPreparation.runnableTaskIDs)
     }
 
     static func runAutoDispatchCycleInBackground(

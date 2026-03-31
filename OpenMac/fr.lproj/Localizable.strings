@@ -524,3 +524,17 @@
 "%d assigned %@ blocked by quota limits. Increase quota or reset usage before batch run." = "%d %@ assigné(s) sont bloqué(s) par les limites de quota. Augmentez le quota ou réinitialisez l'utilisation avant l'exécution par lot.";
 "%d awaiting approval" = "%d en attente de validation";
 "%d blocked by quota" = "%d bloqué(s) par quota";
+"Create Acceptance E2E Tasks" = "Create Acceptance E2E Tasks";
+"Parallel Scheduler" = "Parallel Scheduler";
+"Enable multi-agent parallel background execution" = "Enable multi-agent parallel background execution";
+"Max Parallel Agents: %d" = "Max Parallel Agents: %d";
+"Apply Scheduler Settings" = "Apply Scheduler Settings";
+"PR Quality Gate" = "PR Quality Gate";
+"Enable quality gate before GitHub PR flow" = "Enable quality gate before GitHub PR flow";
+"Apply PR Quality Gate Settings" = "Apply PR Quality Gate Settings";
+"Updated parallel scheduler settings" = "Updated parallel scheduler settings";
+"Updated PR quality gate settings" = "Updated PR quality gate settings";
+"PR quality gate commands: %d" = "PR quality gate commands: %d";
+"Created %d acceptance E2E task(s)" = "Created %d acceptance E2E task(s)";
+"No acceptance criteria found for E2E task generation" = "No acceptance criteria found for E2E task generation";
+"PM planner created %d ticket(s) + %d acceptance E2E task(s)" = "PM planner created %d ticket(s) + %d acceptance E2E task(s)";

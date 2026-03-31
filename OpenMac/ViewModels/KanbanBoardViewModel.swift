@@ -1361,6 +1361,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]
     @Published private(set) var executionQuotaPolicy: ExecutionQuotaPolicy
     @Published private(set) var executionQuotaUsage: ExecutionQuotaUsage
+    @Published private(set) var executionParallelizationPolicy: ExecutionParallelizationPolicy
+    @Published private(set) var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1555,6 +1557,8 @@ final class KanbanBoardViewModel: ObservableObject {
         taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval] = [:],
         executionQuotaPolicy: ExecutionQuotaPolicy = .init(),
         executionQuotaUsage: ExecutionQuotaUsage = .init(),
+        executionParallelizationPolicy: ExecutionParallelizationPolicy = .init(),
+        gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1588,6 +1592,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
         self.executionQuotaPolicy = executionQuotaPolicy
         self.executionQuotaUsage = executionQuotaUsage
+        self.executionParallelizationPolicy = executionParallelizationPolicy
+        self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1608,6 +1614,8 @@ final class KanbanBoardViewModel: ObservableObject {
         taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval] = [:],
         executionQuotaPolicy: ExecutionQuotaPolicy = .init(),
         executionQuotaUsage: ExecutionQuotaUsage = .init(),
+        executionParallelizationPolicy: ExecutionParallelizationPolicy = .init(),
+        gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1641,6 +1649,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
         self.executionQuotaPolicy = executionQuotaPolicy
         self.executionQuotaUsage = executionQuotaUsage
+        self.executionParallelizationPolicy = executionParallelizationPolicy
+        self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1919,7 +1929,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     executionApprovalPolicy: executionApprovalPolicy,
                     taskExecutionApprovalsByTaskID: taskExecutionApprovalsByTaskID,
                     executionQuotaPolicy: executionQuotaPolicy,
-                    executionQuotaUsage: executionQuotaUsage
+                    executionQuotaUsage: executionQuotaUsage,
+                    executionParallelizationPolicy: executionParallelizationPolicy,
+                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
                 )
             )
         } catch {
@@ -1954,7 +1966,9 @@ final class KanbanBoardViewModel: ObservableObject {
                         selectedBoard.tasks.contains(where: { $0.id == approvalEntry.key })
                     },
                     executionQuotaPolicy: executionQuotaPolicy,
-                    executionQuotaUsage: executionQuotaUsage
+                    executionQuotaUsage: executionQuotaUsage,
+                    executionParallelizationPolicy: executionParallelizationPolicy,
+                    gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
                 )
             )
         } catch {
@@ -2233,6 +2247,8 @@ final class KanbanBoardViewModel: ObservableObject {
             executionApprovalPolicy = snapshot.executionApprovalPolicy ?? .init()
             executionQuotaPolicy = snapshot.executionQuotaPolicy ?? .init()
             executionQuotaUsage = snapshot.executionQuotaUsage ?? .init()
+            executionParallelizationPolicy = snapshot.executionParallelizationPolicy ?? .init()
+            gitHubPRQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy ?? .init()
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
                 importedBoards.contains { board in
                     board.tasks.contains(where: { $0.id == approvalEntry.key })
@@ -2263,6 +2279,12 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedQuotaUsage = snapshot.executionQuotaUsage {
                 executionQuotaUsage = importedQuotaUsage
+            }
+            if let importedParallelizationPolicy = snapshot.executionParallelizationPolicy {
+                executionParallelizationPolicy = importedParallelizationPolicy
+            }
+            if let importedQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy {
+                gitHubPRQualityGatePolicy = importedQualityGatePolicy
             }
             if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
                 taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
@@ -2658,7 +2680,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @discardableResult
     func addPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
-        autoAssign: Bool
+        autoAssign: Bool,
+        generateAcceptanceE2ETasks: Bool = false
     ) -> Int {
         let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
         guard !normalizedTickets.isEmpty else {
@@ -2666,7 +2689,22 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return 0
         }
-        return addNormalizedPlannedTickets(normalizedTickets, autoAssign: autoAssign).count
+        let createdTaskDescriptors = addNormalizedPlannedTickets(normalizedTickets, autoAssign: autoAssign)
+        if generateAcceptanceE2ETasks {
+            let sourceTaskIDs = Set(createdTaskDescriptors.map(\.taskID))
+            let createdAcceptanceTasks = createAcceptanceE2ETasks(
+                autoAssign: autoAssign,
+                sourceTaskIDs: sourceTaskIDs,
+                updateBoardMessage: false
+            )
+            lastBoardMessage = message(
+                "PM planner created %d ticket(s) + %d acceptance E2E task(s)",
+                createdTaskDescriptors.count,
+                createdAcceptanceTasks
+            )
+            lastBoardMessageSeverity = .info
+        }
+        return createdTaskDescriptors.count
     }
 
     private func addNormalizedPlannedTickets(
@@ -2726,6 +2764,88 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessage = message("PM planner created %d ticket(s)", createdTasks.count)
         lastBoardMessageSeverity = .info
         return createdTasks
+    }
+
+    @discardableResult
+    func createAcceptanceE2ETasks(
+        autoAssign: Bool = true,
+        sourceTaskIDs: Set<UUID>? = nil,
+        updateBoardMessage: Bool = true
+    ) -> Int {
+        let normalizedExistingTitles = Set(tasks.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        var generatedTasks: [WorkTask] = []
+        generatedTasks.reserveCapacity(tasks.count)
+
+        for sourceTask in tasks {
+            if let sourceTaskIDs, !sourceTaskIDs.contains(sourceTask.id) {
+                continue
+            }
+
+            let sourceTitle = sourceTask.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sourceTitle.isEmpty else { continue }
+            guard !sourceTitle.localizedCaseInsensitiveContains("e2e verify ·") else { continue }
+
+            let acceptanceCriteria = Self.acceptanceCriteriaLines(from: sourceTask.details)
+            guard !acceptanceCriteria.isEmpty else { continue }
+
+            let generatedTitle = "E2E Verify · \(sourceTitle)"
+            guard !normalizedExistingTitles.contains(generatedTitle.lowercased()) else { continue }
+            guard !generatedTasks.contains(where: { $0.title.localizedCaseInsensitiveCompare(generatedTitle) == .orderedSame }) else {
+                continue
+            }
+
+            let generatedDetails = Self.acceptanceE2EDetails(
+                sourceTitle: sourceTitle,
+                acceptanceCriteria: acceptanceCriteria
+            )
+            let qaBaselineSkills: Set<String> = ["qa", "testing"]
+            let requiredSkills = qaBaselineSkills.union(sourceTask.requiredSkills.intersection(qaBaselineSkills))
+            let generatedTask = WorkTask(
+                title: generatedTitle,
+                details: generatedDetails,
+                requiredSkills: requiredSkills.sorted(),
+                storyPoints: max(1, min(5, max(1, sourceTask.storyPoints / 2))),
+                status: .todo,
+                assignedAgentID: nil
+            )
+            generatedTasks.append(generatedTask)
+        }
+
+        guard !generatedTasks.isEmpty else {
+            if updateBoardMessage {
+                lastBoardMessage = message("No acceptance criteria found for E2E task generation")
+                lastBoardMessageSeverity = .warning
+            }
+            return 0
+        }
+
+        for generatedTask in generatedTasks {
+            tasks.append(generatedTask)
+            lastUnassignedTaskIDs.insert(generatedTask.id)
+            lastAssignmentReasons[generatedTask.id] = nil
+        }
+
+        if autoAssign {
+            for generatedTask in generatedTasks {
+                guard let taskIndex = tasks.firstIndex(where: { $0.id == generatedTask.id }) else { continue }
+                if let decision = assignmentEngine.bestAgent(
+                    for: tasks[taskIndex],
+                    among: tasks,
+                    agents: agents
+                ) {
+                    tasks[taskIndex].assignedAgentID = decision.agentID
+                    lastAssignmentReasons[generatedTask.id] = decision.reason
+                    lastUnassignedTaskIDs.remove(generatedTask.id)
+                }
+            }
+        }
+
+        persistBoardState()
+        if updateBoardMessage {
+            lastBoardMessage = message("Created %d acceptance E2E task(s)", generatedTasks.count)
+            lastBoardMessageSeverity = .info
+        }
+        return generatedTasks.count
     }
 
     @discardableResult
@@ -3642,6 +3762,37 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessageSeverity = .info
     }
 
+    func updateExecutionParallelizationPolicy(
+        isEnabled: Bool,
+        maxConcurrentAgents: Int
+    ) {
+        executionParallelizationPolicy = ExecutionParallelizationPolicy(
+            isEnabled: isEnabled,
+            maxConcurrentAgents: maxConcurrentAgents
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated parallel scheduler settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func updateGitHubPRQualityGatePolicy(
+        isEnabled: Bool,
+        commands: [String]? = nil
+    ) {
+        let resolvedCommands = commands ?? gitHubPRQualityGatePolicy.commands
+        gitHubPRQualityGatePolicy = GitHubPRQualityGatePolicy(
+            isEnabled: isEnabled,
+            commands: resolvedCommands
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated PR quality gate settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func gitHubPRQualityGateSummaryText() -> String {
+        message("PR quality gate commands: %d", gitHubPRQualityGatePolicy.commands.count)
+    }
+
     func resetExecutionQuotaUsage() {
         executionQuotaUsage = ExecutionQuotaUsage()
         persistBoardState()
@@ -3969,6 +4120,93 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    private static func acceptanceCriteriaLines(from details: String) -> [String] {
+        let lines = details
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var started = false
+        var criteria: [String] = []
+        for line in lines {
+            guard !line.isEmpty else {
+                if started, !criteria.isEmpty {
+                    break
+                }
+                continue
+            }
+
+            let normalized = line.lowercased()
+            if !started {
+                let isAcceptanceHeader =
+                    normalized.hasPrefix("acceptance criteria") ||
+                    normalized.hasPrefix("acceptance:") ||
+                    normalized.hasPrefix("acceptance criteria:") ||
+                    normalized.hasPrefix("驗收標準") ||
+                    normalized.hasPrefix("验收标准")
+                if isAcceptanceHeader {
+                    started = true
+                }
+                continue
+            }
+
+            if normalized.hasPrefix("depends on:") ||
+                normalized.hasPrefix("milestone:") ||
+                normalized.hasPrefix("epic:") {
+                break
+            }
+
+            let bulletPrefixes = ["- ", "• ", "* "]
+            if let bulletPrefix = bulletPrefixes.first(where: { line.hasPrefix($0) }) {
+                let trimmed = line.dropFirst(bulletPrefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    criteria.append(trimmed)
+                }
+                continue
+            }
+
+            if line.hasPrefix("-") || line.hasPrefix("•") || line.hasPrefix("*") {
+                let trimmed = line.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    criteria.append(trimmed)
+                }
+                continue
+            }
+
+            if !criteria.isEmpty {
+                break
+            }
+            criteria.append(line)
+        }
+
+        var uniqueCriteria: [String] = []
+        var seen = Set<String>()
+        for criterion in criteria {
+            let normalized = criterion.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            let lowercased = normalized.lowercased()
+            guard !seen.contains(lowercased) else { continue }
+            seen.insert(lowercased)
+            uniqueCriteria.append(normalized)
+        }
+        return uniqueCriteria
+    }
+
+    private static func acceptanceE2EDetails(
+        sourceTitle: String,
+        acceptanceCriteria: [String]
+    ) -> String {
+        var lines: [String] = []
+        lines.append("Validate end-to-end acceptance outcomes for \"\(sourceTitle)\".")
+        lines.append("Depends on: \(sourceTitle)")
+        lines.append("Acceptance Criteria:")
+        lines.append(contentsOf: acceptanceCriteria.map { "- \($0)" })
+        lines.append("")
+        lines.append("Test Focus:")
+        lines.append("- Cover happy-path and critical edge-path behavior.")
+        lines.append("- Report pass/fail evidence for each acceptance line.")
+        return lines.joined(separator: "\n")
+    }
+
     private static func isDependencyCompleted(_ task: WorkTask) -> Bool {
         if task.status == .review || task.status == .done {
             return true
@@ -4210,6 +4448,12 @@ final class KanbanBoardViewModel: ObservableObject {
             runTaskExecutionInBackground: { taskID, completion in
                 self.runTaskExecutionInBackground(taskID, completion: completion)
             },
+            maxConcurrentExecutions: executionParallelizationPolicy.isEnabled
+                ? executionParallelizationPolicy.maxConcurrentAgents
+                : 1,
+            groupKeyForTask: { taskID in
+                self.tasks.first(where: { $0.id == taskID })?.assignedAgentID
+            },
             executionStatusForTask: { taskID in
                 self.executionRecord(for: taskID)?.status
             },
@@ -4393,7 +4637,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 boardName: resolvedBoardName,
                 executionReportMarkdown: executionReportMarkdown,
                 dependencyInsights: dependencyInsights
-            )
+            ),
+            qualityGateEnabled: gitHubPRQualityGatePolicy.isEnabled,
+            qualityGateCommands: gitHubPRQualityGatePolicy.commands
         )
 
         runOnBackground {
@@ -4433,7 +4679,8 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private func preparePMAutopilot(
         plannedTickets: [PMPlannedTicket],
-        autoAssign: Bool
+        autoAssign: Bool,
+        generateAcceptanceE2ETasks: Bool
     ) -> PMAutopilotPreparation<PMCreatedTaskDescriptor>? {
         let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
         guard !normalizedTickets.isEmpty else {
@@ -4447,6 +4694,13 @@ final class KanbanBoardViewModel: ObservableObject {
             normalizedTickets,
             autoAssign: autoAssign
         )
+        if generateAcceptanceE2ETasks {
+            _ = createAcceptanceE2ETasks(
+                autoAssign: autoAssign,
+                sourceTaskIDs: Set(createdTaskDescriptors.map(\.taskID)),
+                updateBoardMessage: false
+            )
+        }
         let roadmapMilestoneCount = Self.plannedTicketMilestoneCount(normalizedTickets)
         let roadmapEpicCount = Self.plannedTicketEpicCount(normalizedTickets)
 
@@ -4461,6 +4715,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func runPMAutopilotInBackground(
         plannedTickets: [PMPlannedTicket],
         autoAssign: Bool = true,
+        autoCreateAcceptanceE2ETasks: Bool = false,
         autoCreateMissingDependenciesDuringCycle: Bool = true,
         maxAutoCyclePasses: Int = 3,
         completion: @escaping (_ createdAgents: Int, _ createdTickets: Int, _ startedExecutions: Int, _ completedPasses: Int) -> Void
@@ -4471,7 +4726,11 @@ final class KanbanBoardViewModel: ObservableObject {
             autoCreateMissingDependenciesDuringCycle: autoCreateMissingDependenciesDuringCycle,
             maxAutoCyclePasses: maxAutoCyclePasses,
             preparePMAutopilot: { plannedTickets, autoAssign in
-                self.preparePMAutopilot(plannedTickets: plannedTickets, autoAssign: autoAssign)
+                self.preparePMAutopilot(
+                    plannedTickets: plannedTickets,
+                    autoAssign: autoAssign,
+                    generateAcceptanceE2ETasks: autoCreateAcceptanceE2ETasks
+                )
             },
             runAutoDispatchCycleInBackground: { maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun, completion in
                 self.runAutoDispatchCycleInBackground(
@@ -5376,7 +5635,9 @@ final class KanbanBoardViewModel: ObservableObject {
             executionApprovalPolicy: executionApprovalPolicy,
             taskExecutionApprovalsByTaskID: taskExecutionApprovalsByTaskID,
             executionQuotaPolicy: executionQuotaPolicy,
-            executionQuotaUsage: executionQuotaUsage
+            executionQuotaUsage: executionQuotaUsage,
+            executionParallelizationPolicy: executionParallelizationPolicy,
+            gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy
         )
         try? boardStore.save(snapshot)
     }
@@ -5409,6 +5670,8 @@ extension KanbanBoardViewModel {
                     taskExecutionApprovalsByTaskID: snapshot.taskExecutionApprovalsByTaskID ?? [:],
                     executionQuotaPolicy: snapshot.executionQuotaPolicy ?? .init(),
                     executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
+                    executionParallelizationPolicy: snapshot.executionParallelizationPolicy ?? .init(),
+                    gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
                     taskExecutor: taskExecutor,
@@ -5429,6 +5692,8 @@ extension KanbanBoardViewModel {
                 taskExecutionApprovalsByTaskID: snapshot.taskExecutionApprovalsByTaskID ?? [:],
                 executionQuotaPolicy: snapshot.executionQuotaPolicy ?? .init(),
                 executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
+                executionParallelizationPolicy: snapshot.executionParallelizationPolicy ?? .init(),
+                gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
                 taskExecutor: taskExecutor,

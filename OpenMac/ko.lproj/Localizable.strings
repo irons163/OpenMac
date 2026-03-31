@@ -524,3 +524,17 @@
 "%d assigned %@ blocked by quota limits. Increase quota or reset usage before batch run." = "%d건의 할당된 %@가 할당량 제한으로 차단되었습니다. 배치 실행 전에 할당량을 늘리거나 사용량을 초기화하세요.";
 "%d awaiting approval" = "%d건 승인 대기";
 "%d blocked by quota" = "%d건 할당량 차단";
+"Create Acceptance E2E Tasks" = "Create Acceptance E2E Tasks";
+"Parallel Scheduler" = "Parallel Scheduler";
+"Enable multi-agent parallel background execution" = "Enable multi-agent parallel background execution";
+"Max Parallel Agents: %d" = "Max Parallel Agents: %d";
+"Apply Scheduler Settings" = "Apply Scheduler Settings";
+"PR Quality Gate" = "PR Quality Gate";
+"Enable quality gate before GitHub PR flow" = "Enable quality gate before GitHub PR flow";
+"Apply PR Quality Gate Settings" = "Apply PR Quality Gate Settings";
+"Updated parallel scheduler settings" = "Updated parallel scheduler settings";
+"Updated PR quality gate settings" = "Updated PR quality gate settings";
+"PR quality gate commands: %d" = "PR quality gate commands: %d";
+"Created %d acceptance E2E task(s)" = "Created %d acceptance E2E task(s)";
+"No acceptance criteria found for E2E task generation" = "No acceptance criteria found for E2E task generation";
+"PM planner created %d ticket(s) + %d acceptance E2E task(s)" = "PM planner created %d ticket(s) + %d acceptance E2E task(s)";

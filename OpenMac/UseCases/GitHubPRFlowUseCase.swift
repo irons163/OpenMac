@@ -9,6 +9,32 @@ struct GitHubPRFlowRequest: Equatable {
     var commitMessage: String
     var prTitle: String
     var prBody: String
+    var qualityGateEnabled: Bool
+    var qualityGateCommands: [String]
+
+    init(
+        repositoryPath: String,
+        boardName: String,
+        baseBranch: String,
+        remoteName: String,
+        branchPrefix: String,
+        commitMessage: String,
+        prTitle: String,
+        prBody: String,
+        qualityGateEnabled: Bool = false,
+        qualityGateCommands: [String] = []
+    ) {
+        self.repositoryPath = repositoryPath
+        self.boardName = boardName
+        self.baseBranch = baseBranch
+        self.remoteName = remoteName
+        self.branchPrefix = branchPrefix
+        self.commitMessage = commitMessage
+        self.prTitle = prTitle
+        self.prBody = prBody
+        self.qualityGateEnabled = qualityGateEnabled
+        self.qualityGateCommands = qualityGateCommands
+    }
 }
 
 struct GitHubPRFlowResult: Equatable {
@@ -52,6 +78,9 @@ enum GitHubPRFlowUseCase {
         let trimmedCommitMessage = normalizedValue(request.commitMessage, fallback: "chore: update board")
         let trimmedPRTitle = normalizedValue(request.prTitle, fallback: "[OpenMac] Board update")
         let trimmedPRBody = request.prBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        let qualityGateCommands = request.qualityGateCommands
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
         var debugLines: [String] = []
 
@@ -69,6 +98,33 @@ enum GitHubPRFlowUseCase {
                     message: "Folder is not a git repository",
                     debugLines: debugLines
                 )
+            }
+
+            if request.qualityGateEnabled {
+                guard !qualityGateCommands.isEmpty else {
+                    return failure(
+                        branchName: "",
+                        message: "Quality gate is enabled but no commands configured",
+                        debugLines: debugLines
+                    )
+                }
+
+                for gateCommand in qualityGateCommands {
+                    let qualityGateResult = try run(
+                        executablePath: "/bin/zsh",
+                        arguments: ["-lc", gateCommand],
+                        workingDirectoryPath: repositoryPath,
+                        commandRunner: commandRunner
+                    )
+                    debugLines.append(qualityGateResult.log)
+                    guard qualityGateResult.code == 0 else {
+                        return failure(
+                            branchName: "",
+                            message: "Quality gate failed: \(gateCommand)",
+                            debugLines: debugLines
+                        )
+                    }
+                }
             }
 
             let branchCreate = try run(
