@@ -39,6 +39,25 @@ struct AutoCycleCompletionState {
     let remainingPreparation: AssignedBatchRunPreparation
 }
 
+struct PMAutopilotPreparation<CreatedTaskDescriptor> {
+    let createdAgents: Int
+    let createdTaskDescriptors: [CreatedTaskDescriptor]
+    let roadmapMilestoneCount: Int
+    let roadmapEpicCount: Int
+}
+
+struct PMAutopilotCompletionState<CreatedTaskDescriptor> {
+    let createdAgents: Int
+    let createdTaskDescriptors: [CreatedTaskDescriptor]
+    let roadmapMilestoneCount: Int
+    let roadmapEpicCount: Int
+    let startedExecutions: Int
+    let completedPasses: Int
+    let cycleHadWarning: Bool
+    let remainingPreparation: AssignedBatchRunPreparation
+    let autoCycleCreatedDependencyTaskCount: Int
+}
+
 @MainActor
 enum ExecutionCoordinator {
     @discardableResult
@@ -362,5 +381,60 @@ enum ExecutionCoordinator {
         }
 
         runPass(0)
+    }
+
+    static func runPMAutopilotInBackground<CreatedTaskDescriptor>(
+        plannedTickets: [PMPlannedTicket],
+        autoAssign: Bool,
+        autoCreateMissingDependenciesDuringCycle: Bool,
+        maxAutoCyclePasses: Int,
+        preparePMAutopilot: ([PMPlannedTicket], Bool) -> PMAutopilotPreparation<CreatedTaskDescriptor>?,
+        runAutoDispatchCycleInBackground: (
+            _ maxPasses: Int,
+            _ autoCreateMissingDependencies: Bool,
+            _ autoAssignBeforeRun: Bool,
+            _ completion: @escaping (_ totalStarted: Int, _ completedPasses: Int) -> Void
+        ) -> Void,
+        boardMessageSeverity: @escaping () -> BoardMessageSeverity?,
+        prepareAssignedBatchRunQueue: @escaping () -> AssignedBatchRunPreparation,
+        lastAutoCycleCreatedDependencyTaskCount: @escaping () -> Int,
+        handleFinished: @escaping (PMAutopilotCompletionState<CreatedTaskDescriptor>) -> Void,
+        completion: @escaping (
+            _ createdAgents: Int,
+            _ createdTickets: Int,
+            _ startedExecutions: Int,
+            _ completedPasses: Int
+        ) -> Void
+    ) {
+        guard let preparation = preparePMAutopilot(plannedTickets, autoAssign) else {
+            completion(0, 0, 0, 0)
+            return
+        }
+
+        let createdTickets = preparation.createdTaskDescriptors.count
+        guard createdTickets > 0 else {
+            completion(preparation.createdAgents, 0, 0, 0)
+            return
+        }
+
+        runAutoDispatchCycleInBackground(
+            maxAutoCyclePasses,
+            autoCreateMissingDependenciesDuringCycle,
+            autoAssign
+        ) { startedExecutions, completedPasses in
+            let state = PMAutopilotCompletionState(
+                createdAgents: preparation.createdAgents,
+                createdTaskDescriptors: preparation.createdTaskDescriptors,
+                roadmapMilestoneCount: preparation.roadmapMilestoneCount,
+                roadmapEpicCount: preparation.roadmapEpicCount,
+                startedExecutions: startedExecutions,
+                completedPasses: completedPasses,
+                cycleHadWarning: boardMessageSeverity() == .warning,
+                remainingPreparation: prepareAssignedBatchRunQueue(),
+                autoCycleCreatedDependencyTaskCount: lastAutoCycleCreatedDependencyTaskCount()
+            )
+            handleFinished(state)
+            completion(preparation.createdAgents, createdTickets, startedExecutions, completedPasses)
+        }
     }
 }

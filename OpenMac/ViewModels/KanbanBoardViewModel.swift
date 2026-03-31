@@ -3959,25 +3959,10 @@ final class KanbanBoardViewModel: ObservableObject {
         detailsMissingCount: Int,
         dependencyBlockedCount: Int
     ) -> String {
-        if detailsMissingCount > 0 {
-            let label = detailsMissingCount == 1 ? message("task") : message("tasks")
-            return message(
-                "%d assigned %@ with empty details. Fill details before batch run.",
-                detailsMissingCount,
-                label
-            )
-        }
-
-        if dependencyBlockedCount > 0 {
-            let label = dependencyBlockedCount == 1 ? message("task") : message("tasks")
-            return message(
-                "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
-                dependencyBlockedCount,
-                label
-            )
-        }
-
-        return message("No assigned tasks are ready to run")
+        ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: detailsMissingCount,
+            dependencyBlockedCount: dependencyBlockedCount
+        )
     }
 
     @discardableResult
@@ -4003,23 +3988,12 @@ final class KanbanBoardViewModel: ObservableObject {
                 let counters = state.counters
                 let detailsMissingCount = state.finalPreparation.detailsMissingCount
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
-                var summaryParts = [
-                    self.message("Batch run finished"),
-                    self.message("%d started", counters.startedCount),
-                    self.message("%d succeeded", counters.succeededCount),
-                    self.message("%d failed", counters.failedCount)
-                ]
-                if counters.skippedCount > 0 {
-                    summaryParts.append(self.message("%d skipped", counters.skippedCount))
-                }
-                if detailsMissingCount > 0 {
-                    summaryParts.append(self.message("%d missing details", detailsMissingCount))
-                }
-                if dependencyBlockedCount > 0 {
-                    summaryParts.append(self.message("%d blocked by dependencies", dependencyBlockedCount))
-                }
-
-                self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
+                    counters: counters,
+                    detailsMissingCount: detailsMissingCount,
+                    dependencyBlockedCount: dependencyBlockedCount,
+                    wasCancelled: false
+                )
                 self.lastBoardMessageSeverity = (
                     counters.failedCount > 0 ||
                         counters.skippedCount > 0 ||
@@ -4054,25 +4028,12 @@ final class KanbanBoardViewModel: ObservableObject {
                 let counters = state.counters
                 let detailsMissingCount = state.finalPreparation.detailsMissingCount
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
-                var summaryParts = [
-                    self.message("Batch run finished"),
-                    self.message("%d started", counters.startedCount),
-                    self.message("%d succeeded", counters.succeededCount),
-                    self.message("%d failed", counters.failedCount)
-                ]
-                if state.wasCancelled {
-                    summaryParts.append(self.message("Cancelled"))
-                }
-                if counters.skippedCount > 0 {
-                    summaryParts.append(self.message("%d skipped", counters.skippedCount))
-                }
-                if detailsMissingCount > 0 {
-                    summaryParts.append(self.message("%d missing details", detailsMissingCount))
-                }
-                if dependencyBlockedCount > 0 {
-                    summaryParts.append(self.message("%d blocked by dependencies", dependencyBlockedCount))
-                }
-                self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
+                    counters: counters,
+                    detailsMissingCount: detailsMissingCount,
+                    dependencyBlockedCount: dependencyBlockedCount,
+                    wasCancelled: state.wasCancelled
+                )
                 self.lastBoardMessageSeverity = (
                     counters.failedCount > 0 ||
                         state.wasCancelled ||
@@ -4107,41 +4068,21 @@ final class KanbanBoardViewModel: ObservableObject {
             isTerminalNoRunnablePass: { started, totalStarted in
                 started == 0 &&
                     totalStarted > 0 &&
-                    self.lastBoardMessage == self.message("No assigned tasks are ready to run")
+                    self.lastBoardMessage == ExecutionSummaryBuilder.noRunnableAssignedTasksMessage
             },
             prepareRemainingQueue: { self.prepareAssignedBatchRunQueue() },
             handleFinished: { state in
                 if state.totalStarted > 0 || state.wasCancelled {
                     let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
                     let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
-
-                    var summaryParts: [String] = [
-                        self.message(
-                            "Auto cycle finished · %d pass(es) · %d started",
-                            state.completedPasses,
-                            state.totalStarted
-                        )
-                    ]
-                    if state.wasCancelled {
-                        summaryParts.append(self.message("Cancelled"))
-                    }
-                    if state.createdDependencyTaskCount > 0 {
-                        summaryParts.append(
-                            self.message(
-                                "Created %d dependency placeholder task(s)",
-                                state.createdDependencyTaskCount
-                            )
-                        )
-                    }
-                    if remainingDetailsMissing > 0 {
-                        summaryParts.append(self.message("%d missing details", remainingDetailsMissing))
-                    }
-                    if remainingDependencyBlocked > 0 {
-                        summaryParts.append(
-                            self.message("%d blocked by dependencies", remainingDependencyBlocked)
-                        )
-                    }
-                    self.lastBoardMessage = summaryParts.joined(separator: " · ")
+                    self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleFinishedMessage(
+                        completedPasses: state.completedPasses,
+                        totalStarted: state.totalStarted,
+                        wasCancelled: state.wasCancelled,
+                        createdDependencyTaskCount: state.createdDependencyTaskCount,
+                        remainingDetailsMissing: remainingDetailsMissing,
+                        remainingDependencyBlocked: remainingDependencyBlocked
+                    )
                     self.lastBoardMessageSeverity = (
                         state.hadWarning ||
                             state.wasCancelled ||
@@ -4149,7 +4090,7 @@ final class KanbanBoardViewModel: ObservableObject {
                             remainingDependencyBlocked > 0
                     ) ? .warning : .info
                 } else if self.lastBoardMessage == nil {
-                    self.lastBoardMessage = self.message("Auto cycle finished with no runnable assigned tasks")
+                    self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleNoRunnableMessage
                     self.lastBoardMessageSeverity = .warning
                 }
             },
@@ -4166,19 +4107,15 @@ final class KanbanBoardViewModel: ObservableObject {
         requestCancelAssignedTaskExecutions()
     }
 
-    func runPMAutopilotInBackground(
+    private func preparePMAutopilot(
         plannedTickets: [PMPlannedTicket],
-        autoAssign: Bool = true,
-        autoCreateMissingDependenciesDuringCycle: Bool = true,
-        maxAutoCyclePasses: Int = 3,
-        completion: @escaping (_ createdAgents: Int, _ createdTickets: Int, _ startedExecutions: Int, _ completedPasses: Int) -> Void
-    ) {
+        autoAssign: Bool
+    ) -> PMAutopilotPreparation<PMCreatedTaskDescriptor>? {
         let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
         guard !normalizedTickets.isEmpty else {
             lastBoardMessage = message("PM autopilot requires at least one planned ticket")
             lastBoardMessageSeverity = .warning
-            completion(0, 0, 0, 0)
-            return
+            return nil
         }
 
         let createdAgents = createMissingAgentsForPlannedTickets(normalizedTickets)
@@ -4186,77 +4123,88 @@ final class KanbanBoardViewModel: ObservableObject {
             normalizedTickets,
             autoAssign: autoAssign
         )
-        let createdTickets = createdTaskDescriptors.count
-        guard createdTickets > 0 else {
-            completion(createdAgents, 0, 0, 0)
-            return
-        }
         let roadmapMilestoneCount = Self.plannedTicketMilestoneCount(normalizedTickets)
         let roadmapEpicCount = Self.plannedTicketEpicCount(normalizedTickets)
 
-        runAutoDispatchCycleInBackground(
-            maxPasses: maxAutoCyclePasses,
-            autoCreateMissingDependencies: autoCreateMissingDependenciesDuringCycle,
-            autoAssignBeforeRun: autoAssign
-        ) { startedExecutions, completedPasses in
-            let cycleHadWarning = self.lastBoardMessageSeverity == .warning
-            let remainingPreparation = self.prepareAssignedBatchRunQueue()
-            let remainingDetailsMissing = remainingPreparation.detailsMissingCount
-            let remainingDependencyBlocked = remainingPreparation.dependencyBlockedCount
+        return PMAutopilotPreparation(
+            createdAgents: createdAgents,
+            createdTaskDescriptors: createdTaskDescriptors,
+            roadmapMilestoneCount: roadmapMilestoneCount,
+            roadmapEpicCount: roadmapEpicCount
+        )
+    }
 
-            var summaryParts: [String] = [
-                self.message(
-                "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)",
-                createdAgents,
-                createdTickets,
-                startedExecutions,
-                completedPasses
+    func runPMAutopilotInBackground(
+        plannedTickets: [PMPlannedTicket],
+        autoAssign: Bool = true,
+        autoCreateMissingDependenciesDuringCycle: Bool = true,
+        maxAutoCyclePasses: Int = 3,
+        completion: @escaping (_ createdAgents: Int, _ createdTickets: Int, _ startedExecutions: Int, _ completedPasses: Int) -> Void
+    ) {
+        ExecutionCoordinator.runPMAutopilotInBackground(
+            plannedTickets: plannedTickets,
+            autoAssign: autoAssign,
+            autoCreateMissingDependenciesDuringCycle: autoCreateMissingDependenciesDuringCycle,
+            maxAutoCyclePasses: maxAutoCyclePasses,
+            preparePMAutopilot: { plannedTickets, autoAssign in
+                self.preparePMAutopilot(plannedTickets: plannedTickets, autoAssign: autoAssign)
+            },
+            runAutoDispatchCycleInBackground: { maxPasses, autoCreateMissingDependencies, autoAssignBeforeRun, completion in
+                self.runAutoDispatchCycleInBackground(
+                    maxPasses: maxPasses,
+                    autoCreateMissingDependencies: autoCreateMissingDependencies,
+                    autoAssignBeforeRun: autoAssignBeforeRun,
+                    completion: completion
                 )
-            ]
-            summaryParts.append(self.message("Total Milestones: %d", roadmapMilestoneCount))
-            summaryParts.append(self.message("Total Epics: %d", roadmapEpicCount))
-            if let overallProgress = self.pmAutopilotOverallProgressSummary(createdTaskDescriptors) {
-                summaryParts.append(overallProgress)
-            }
-            if let unassignedSummary = self.pmAutopilotUnassignedSummary(createdTaskDescriptors) {
-                summaryParts.append(unassignedSummary)
-            }
-            if let statusDistribution = self.pmAutopilotStatusDistributionSummary(createdTaskDescriptors) {
-                summaryParts.append(statusDistribution)
-            }
-            if let executionOutcomes = self.pmAutopilotExecutionOutcomeSummary(createdTaskDescriptors) {
-                summaryParts.append(executionOutcomes)
-            }
-            if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(createdTaskDescriptors) {
-                summaryParts.append(milestoneProgress)
-            }
-            if let epicProgress = self.pmAutopilotEpicProgressSummary(createdTaskDescriptors) {
-                summaryParts.append(epicProgress)
-            }
-            if self.lastAutoCycleCreatedDependencyTaskCount > 0 {
-                summaryParts.append(
-                    self.message(
-                        "Created %d dependency placeholder task(s)",
-                        self.lastAutoCycleCreatedDependencyTaskCount
-                    )
-                )
-            }
-            if remainingDetailsMissing > 0 {
-                summaryParts.append(self.message("%d missing details", remainingDetailsMissing))
-            }
-            if remainingDependencyBlocked > 0 {
-                summaryParts.append(self.message("%d blocked by dependencies", remainingDependencyBlocked))
-            }
+            },
+            boardMessageSeverity: { self.lastBoardMessageSeverity },
+            prepareAssignedBatchRunQueue: { self.prepareAssignedBatchRunQueue() },
+            lastAutoCycleCreatedDependencyTaskCount: { self.lastAutoCycleCreatedDependencyTaskCount },
+            handleFinished: { state in
+                let createdTickets = state.createdTaskDescriptors.count
+                let remainingDetailsMissing = state.remainingPreparation.detailsMissingCount
+                let remainingDependencyBlocked = state.remainingPreparation.dependencyBlockedCount
 
-            self.lastBoardMessage = summaryParts.joined(separator: " · ")
-            self.lastBoardMessageSeverity = (
-                cycleHadWarning ||
-                    startedExecutions == 0 ||
-                    remainingDetailsMissing > 0 ||
-                    remainingDependencyBlocked > 0
-            ) ? .warning : .info
-            completion(createdAgents, createdTickets, startedExecutions, completedPasses)
-        }
+                var roadmapSections: [String] = []
+                if let overallProgress = self.pmAutopilotOverallProgressSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(overallProgress)
+                }
+                if let unassignedSummary = self.pmAutopilotUnassignedSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(unassignedSummary)
+                }
+                if let statusDistribution = self.pmAutopilotStatusDistributionSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(statusDistribution)
+                }
+                if let executionOutcomes = self.pmAutopilotExecutionOutcomeSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(executionOutcomes)
+                }
+                if let milestoneProgress = self.pmAutopilotMilestoneProgressSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(milestoneProgress)
+                }
+                if let epicProgress = self.pmAutopilotEpicProgressSummary(state.createdTaskDescriptors) {
+                    roadmapSections.append(epicProgress)
+                }
+                self.lastBoardMessage = ExecutionSummaryBuilder.pmAutopilotFinishedMessage(
+                    createdAgents: state.createdAgents,
+                    createdTickets: createdTickets,
+                    startedExecutions: state.startedExecutions,
+                    completedPasses: state.completedPasses,
+                    roadmapMilestoneCount: state.roadmapMilestoneCount,
+                    roadmapEpicCount: state.roadmapEpicCount,
+                    roadmapSections: roadmapSections,
+                    autoCycleCreatedDependencyTaskCount: state.autoCycleCreatedDependencyTaskCount,
+                    remainingDetailsMissing: remainingDetailsMissing,
+                    remainingDependencyBlocked: remainingDependencyBlocked
+                )
+                self.lastBoardMessageSeverity = (
+                    state.cycleHadWarning ||
+                        state.startedExecutions == 0 ||
+                        remainingDetailsMissing > 0 ||
+                        remainingDependencyBlocked > 0
+                ) ? .warning : .info
+            },
+            completion: completion
+        )
     }
 
     func triageCandidates() -> [WorkTask] {
