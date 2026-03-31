@@ -2517,6 +2517,103 @@ struct KanbanFlowTests {
         #expect(plan.tickets[2].details.contains("Depends on:"))
     }
 
+    @Test("pm planner derives project name from brief when explicit name is blank")
+    func pmPlannerDerivesProjectNameFromBriefWhenEmpty() {
+        let planner = RuleBasedProjectPlanner()
+
+        guard let plan = planner.generatePlan(
+            projectName: "  ",
+            projectBrief: "Build cross platform chat service with moderation and analytics dashboards.",
+            availableAgents: []
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        #expect(plan.projectName == "Build cross platform chat service")
+        #expect(plan.tickets.first?.title.hasPrefix("Build cross platform chat service · ") == true)
+    }
+
+    @Test("pm planner truncates long brief snippet and replaces newlines")
+    func pmPlannerSummarizesLongBriefForTicketDetails() {
+        let planner = RuleBasedProjectPlanner()
+        let longTail = Array(repeating: "workflow", count: 70).joined(separator: " ")
+
+        guard let plan = planner.generatePlan(
+            projectName: "",
+            projectBrief: "line1\nline2 \(longTail)",
+            availableAgents: []
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        let details = plan.tickets.first?.details ?? ""
+        #expect(details.contains("Source brief: line1 line2 "))
+        #expect(details.contains("..."))
+        #expect(!details.contains("Source brief: line1\nline2"))
+    }
+
+    @Test("pm planner adds risk spike ticket for high complexity briefs")
+    func pmPlannerAddsRiskSpikeForHighComplexity() {
+        let planner = RuleBasedProjectPlanner()
+
+        guard let plan = planner.generatePlan(
+            projectName: "Critical Platform",
+            projectBrief: """
+            Build a multi-tenant API platform with OAuth security, permission controls, payment billing,
+            realtime sync, migration strategy, offline support, encryption, AI agent workflow automation,
+            and deep integration observability.
+            """,
+            availableAgents: []
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        #expect(plan.tickets.count >= 6)
+        #expect(plan.tickets.contains { $0.title.contains("Risk Spike & Mitigation") })
+    }
+
+    @Test("pm planner filters inferred skills against available agent skills")
+    func pmPlannerFiltersInferredSkillsByAvailableAgents() {
+        let planner = RuleBasedProjectPlanner()
+        let unrelatedAgent = AgentProfile(name: "iOS", skills: ["swift"], maxConcurrentTasks: 2)
+
+        guard let plan = planner.generatePlan(
+            projectName: "Filtered Skills",
+            projectBrief: "Build backend api server database integration pipeline for a service.",
+            availableAgents: [unrelatedAgent]
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        let coreImplementation = plan.tickets.first { $0.title.contains("Core Implementation") }
+        let scopeTicket = plan.tickets.first { $0.title.contains("Scope & Success Criteria") }
+
+        #expect(coreImplementation?.requiredSkills.isEmpty == true)
+        #expect(scopeTicket?.requiredSkills.contains("planning") == true)
+    }
+
+    @Test("pm planner falls back to planning skill when no domain keywords are found")
+    func pmPlannerFallsBackToPlanningSkillWithoutKeywords() {
+        let planner = RuleBasedProjectPlanner()
+
+        guard let plan = planner.generatePlan(
+            projectName: "Narrative Launch",
+            projectBrief: "Craft brand storytelling narratives for stakeholder kickoff.",
+            availableAgents: []
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        let coreImplementation = plan.tickets.first { $0.title.contains("Core Implementation") }
+        #expect(coreImplementation?.requiredSkills.contains("planning") == true)
+        #expect(!(coreImplementation?.requiredSkills.isEmpty ?? true))
+    }
+
     @Test("pm planner preview requires non-empty project brief")
     func pmPlannerPreviewRequiresBrief() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
@@ -4528,6 +4625,41 @@ struct ContentViewLogicTests {
         let buttonTitles = importAlert.buttons.map(\.title)
         #expect(importAlert.messageText == "Import Workspace")
         #expect(buttonTitles == ["Merge", "Replace", "Cancel"])
+    }
+
+    @Test("execution report panels and filename helpers configure expected defaults")
+    func executionReportPanelAndFilenameCoverage() {
+        let reportJSONPanel = ContentViewTestHooks.configuredExecutionReportJSONPanel(
+            defaultFileName: "openmac-default-board-execution-report.json"
+        )
+        #expect(reportJSONPanel.canCreateDirectories)
+        #expect(!reportJSONPanel.isExtensionHidden)
+        #expect(reportJSONPanel.nameFieldStringValue == "openmac-default-board-execution-report.json")
+        #expect(reportJSONPanel.title == "Export Execution Report (JSON)")
+        #expect(reportJSONPanel.message == "Save execution report for current board as JSON.")
+
+        let reportMarkdownPanel = ContentViewTestHooks.configuredExecutionReportMarkdownPanel(
+            defaultFileName: "openmac-default-board-execution-report.md"
+        )
+        #expect(reportMarkdownPanel.canCreateDirectories)
+        #expect(!reportMarkdownPanel.isExtensionHidden)
+        #expect(reportMarkdownPanel.nameFieldStringValue == "openmac-default-board-execution-report.md")
+        #expect(reportMarkdownPanel.title == "Export Execution Report (Markdown)")
+        #expect(reportMarkdownPanel.message == "Save execution report for current board as Markdown.")
+
+        let names = ContentViewTestHooks.selectedBoardExportAndExecutionReportFileNames(
+            boardName: "🚀 Board QA / 2026"
+        )
+        #expect(names.boardExport == "openmac-board-qa-2026-board.json")
+        #expect(names.reportJSON == "openmac-board-qa-2026-execution-report.json")
+        #expect(names.reportMarkdown == "openmac-board-qa-2026-execution-report.md")
+
+        let fallbackNames = ContentViewTestHooks.selectedBoardExportAndExecutionReportFileNames(
+            boardName: "!!!"
+        )
+        #expect(fallbackNames.boardExport == "openmac-board-board.json")
+        #expect(fallbackNames.reportJSON == "openmac-board-execution-report.json")
+        #expect(fallbackNames.reportMarkdown == "openmac-board-execution-report.md")
     }
 
     @Test("pm board naming helper resolves default and duplicate names")

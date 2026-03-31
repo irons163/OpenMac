@@ -1410,7 +1410,7 @@ struct ContentView: View {
         return Self.workspaceImportStrategy(for: Self.alertRunner(alert))
     }
 
-    private func selectedBoardExportFileName() -> String {
+    fileprivate func selectedBoardExportFileName() -> String {
         let rawTokens = viewModel.selectedBoardName
             .lowercased()
             .split { character in
@@ -1421,7 +1421,7 @@ struct ContentView: View {
         return "openmac-\(resolvedSlug)-board.json"
     }
 
-    private func selectedBoardExecutionReportJSONFileName() -> String {
+    fileprivate func selectedBoardExecutionReportJSONFileName() -> String {
         let rawTokens = viewModel.selectedBoardName
             .lowercased()
             .split { character in
@@ -1432,7 +1432,7 @@ struct ContentView: View {
         return "openmac-\(resolvedSlug)-execution-report.json"
     }
 
-    private func selectedBoardExecutionReportMarkdownFileName() -> String {
+    fileprivate func selectedBoardExecutionReportMarkdownFileName() -> String {
         let rawTokens = viewModel.selectedBoardName
             .lowercased()
             .split { character in
@@ -6195,6 +6195,25 @@ enum ContentViewTestHooks {
 
     static func configuredSelectedBoardExportPanel(defaultFileName: String) -> NSSavePanel {
         ContentView.configuredSelectedBoardExportPanel(defaultFileName: defaultFileName)
+    }
+
+    static func configuredExecutionReportJSONPanel(defaultFileName: String) -> NSSavePanel {
+        ContentView.configuredExecutionReportJSONPanel(defaultFileName: defaultFileName)
+    }
+
+    static func configuredExecutionReportMarkdownPanel(defaultFileName: String) -> NSSavePanel {
+        ContentView.configuredExecutionReportMarkdownPanel(defaultFileName: defaultFileName)
+    }
+
+    static func selectedBoardExportAndExecutionReportFileNames(boardName: String) -> (boardExport: String, reportJSON: String, reportMarkdown: String) {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        _ = viewModel.createBoard(name: boardName)
+        let view = ContentView(viewModel: viewModel)
+        return (
+            boardExport: view.selectedBoardExportFileName(),
+            reportJSON: view.selectedBoardExecutionReportJSONFileName(),
+            reportMarkdown: view.selectedBoardExecutionReportMarkdownFileName()
+        )
     }
 
     static func configuredWorkspaceImportPanel() -> NSOpenPanel {
