@@ -10628,6 +10628,153 @@ struct KanbanPersistenceTests {
     }
 }
 
+@MainActor
+struct ExecutionSummaryBuilderTests {
+    @Test("no runnable assigned tasks message returns localized default")
+    func noRunnableAssignedTasksMessageDefault() {
+        #expect(ExecutionSummaryBuilder.noRunnableAssignedTasksMessage == L10n.string("No assigned tasks are ready to run"))
+    }
+
+    @Test("no runnable batch message prefers empty-details branch with singular label")
+    func noRunnableBatchMessageDetailsSingular() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 1,
+            dependencyBlockedCount: 3
+        )
+
+        #expect(message == L10n.format(
+            "%d assigned %@ with empty details. Fill details before batch run.",
+            1,
+            L10n.string("task")
+        ))
+    }
+
+    @Test("no runnable batch message uses blocked-dependency branch when details are clear")
+    func noRunnableBatchMessageDependencyBlocked() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 2
+        )
+
+        #expect(message == L10n.format(
+            "%d assigned %@ blocked by dependencies. Resolve dependencies before batch run.",
+            2,
+            L10n.string("tasks")
+        ))
+    }
+
+    @Test("no runnable batch message falls back to generic text")
+    func noRunnableBatchMessageFallback() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 0
+        )
+
+        #expect(message == ExecutionSummaryBuilder.noRunnableAssignedTasksMessage)
+    }
+
+    @Test("batch finished message includes optional summary segments when present")
+    func batchFinishedMessageIncludesOptionalSegments() {
+        var counters = BatchRunCounters()
+        counters.startedCount = 5
+        counters.succeededCount = 3
+        counters.failedCount = 1
+        counters.skippedCount = 1
+
+        let message = ExecutionSummaryBuilder.batchRunFinishedMessage(
+            counters: counters,
+            detailsMissingCount: 2,
+            dependencyBlockedCount: 1,
+            wasCancelled: true
+        )
+
+        #expect(message.contains(L10n.string("Batch run finished")))
+        #expect(message.contains(L10n.format("%d started", 5)))
+        #expect(message.contains(L10n.format("%d succeeded", 3)))
+        #expect(message.contains(L10n.format("%d failed", 1)))
+        #expect(message.contains(L10n.string("Cancelled")))
+        #expect(message.contains(L10n.format("%d skipped", 1)))
+        #expect(message.contains(L10n.format("%d missing details", 2)))
+        #expect(message.contains(L10n.format("%d blocked by dependencies", 1)))
+    }
+
+    @Test("batch finished message omits optional segments when values are zero")
+    func batchFinishedMessageOmitsOptionalSegments() {
+        var counters = BatchRunCounters()
+        counters.startedCount = 1
+        counters.succeededCount = 1
+        counters.failedCount = 0
+        counters.skippedCount = 0
+
+        let message = ExecutionSummaryBuilder.batchRunFinishedMessage(
+            counters: counters,
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 0,
+            wasCancelled: false
+        )
+
+        #expect(message.contains(L10n.string("Batch run finished")))
+        #expect(message.contains(L10n.string("Cancelled")) == false)
+        #expect(message.contains(L10n.format("%d skipped", 0)) == false)
+        #expect(message.contains(L10n.format("%d missing details", 0)) == false)
+        #expect(message.contains(L10n.format("%d blocked by dependencies", 0)) == false)
+    }
+
+    @Test("auto cycle no-runnable message returns localized default")
+    func autoCycleNoRunnableMessageDefault() {
+        #expect(ExecutionSummaryBuilder.autoCycleNoRunnableMessage == L10n.string("Auto cycle finished with no runnable assigned tasks"))
+    }
+
+    @Test("auto cycle finished message includes optional segments when present")
+    func autoCycleFinishedMessageIncludesOptionalSegments() {
+        let message = ExecutionSummaryBuilder.autoCycleFinishedMessage(
+            completedPasses: 3,
+            totalStarted: 4,
+            wasCancelled: true,
+            createdDependencyTaskCount: 2,
+            remainingDetailsMissing: 1,
+            remainingDependencyBlocked: 5
+        )
+
+        #expect(message.contains(L10n.format("Auto cycle finished · %d pass(es) · %d started", 3, 4)))
+        #expect(message.contains(L10n.string("Cancelled")))
+        #expect(message.contains(L10n.format("Created %d dependency placeholder task(s)", 2)))
+        #expect(message.contains(L10n.format("%d missing details", 1)))
+        #expect(message.contains(L10n.format("%d blocked by dependencies", 5)))
+    }
+
+    @Test("pm autopilot finished message includes roadmap and optional segments")
+    func pmAutopilotFinishedMessageIncludesRoadmapAndOptionalSegments() {
+        let message = ExecutionSummaryBuilder.pmAutopilotFinishedMessage(
+            createdAgents: 2,
+            createdTickets: 6,
+            startedExecutions: 4,
+            completedPasses: 3,
+            roadmapMilestoneCount: 2,
+            roadmapEpicCount: 4,
+            roadmapSections: ["Roadmap A", "Roadmap B"],
+            autoCycleCreatedDependencyTaskCount: 1,
+            remainingDetailsMissing: 2,
+            remainingDependencyBlocked: 3
+        )
+
+        #expect(message.contains(L10n.format(
+            "PM autopilot finished · %d agent(s) · %d ticket(s) · %d execution(s) · %d pass(es)",
+            2,
+            6,
+            4,
+            3
+        )))
+        #expect(message.contains(L10n.format("Total Milestones: %d", 2)))
+        #expect(message.contains(L10n.format("Total Epics: %d", 4)))
+        #expect(message.contains("Roadmap A"))
+        #expect(message.contains("Roadmap B"))
+        #expect(message.contains(L10n.format("Created %d dependency placeholder task(s)", 1)))
+        #expect(message.contains(L10n.format("%d missing details", 2)))
+        #expect(message.contains(L10n.format("%d blocked by dependencies", 3)))
+    }
+}
+
 struct AppLanguageResolverTests {
     private static let userDefaultsMutationLock = NSLock()
     private static let runtimeLocaleMutationLock = NSLock()
