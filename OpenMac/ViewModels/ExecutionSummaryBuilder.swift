@@ -16,13 +16,33 @@ enum ExecutionSummaryBuilder {
 
     static func noRunnableAssignedBatchMessage(
         detailsMissingCount: Int,
-        dependencyBlockedCount: Int
+        dependencyBlockedCount: Int,
+        approvalBlockedCount: Int,
+        quotaBlockedCount: Int
     ) -> String {
         if detailsMissingCount > 0 {
             let label = detailsMissingCount == 1 ? message("task") : message("tasks")
             return message(
                 "%d assigned %@ with empty details. Fill details before batch run.",
                 detailsMissingCount,
+                label
+            )
+        }
+
+        if approvalBlockedCount > 0 {
+            let label = approvalBlockedCount == 1 ? message("task") : message("tasks")
+            return message(
+                "%d assigned %@ awaiting human approval before batch run.",
+                approvalBlockedCount,
+                label
+            )
+        }
+
+        if quotaBlockedCount > 0 {
+            let label = quotaBlockedCount == 1 ? message("task") : message("tasks")
+            return message(
+                "%d assigned %@ blocked by quota limits. Increase quota or reset usage before batch run.",
+                quotaBlockedCount,
                 label
             )
         }
@@ -43,6 +63,8 @@ enum ExecutionSummaryBuilder {
         counters: BatchRunCounters,
         detailsMissingCount: Int,
         dependencyBlockedCount: Int,
+        approvalBlockedCount: Int,
+        quotaBlockedCount: Int,
         wasCancelled: Bool
     ) -> String {
         var summaryParts = [
@@ -61,6 +83,12 @@ enum ExecutionSummaryBuilder {
         if detailsMissingCount > 0 {
             summaryParts.append(message("%d missing details", detailsMissingCount))
         }
+        if approvalBlockedCount > 0 {
+            summaryParts.append(message("%d awaiting approval", approvalBlockedCount))
+        }
+        if quotaBlockedCount > 0 {
+            summaryParts.append(message("%d blocked by quota", quotaBlockedCount))
+        }
         if dependencyBlockedCount > 0 {
             summaryParts.append(message("%d blocked by dependencies", dependencyBlockedCount))
         }
@@ -78,7 +106,9 @@ enum ExecutionSummaryBuilder {
         wasCancelled: Bool,
         createdDependencyTaskCount: Int,
         remainingDetailsMissing: Int,
-        remainingDependencyBlocked: Int
+        remainingDependencyBlocked: Int,
+        remainingApprovalBlocked: Int,
+        remainingQuotaBlocked: Int
     ) -> String {
         var summaryParts: [String] = [
             message("Auto cycle finished · %d pass(es) · %d started", completedPasses, totalStarted)
@@ -92,6 +122,12 @@ enum ExecutionSummaryBuilder {
         }
         if remainingDetailsMissing > 0 {
             summaryParts.append(message("%d missing details", remainingDetailsMissing))
+        }
+        if remainingApprovalBlocked > 0 {
+            summaryParts.append(message("%d awaiting approval", remainingApprovalBlocked))
+        }
+        if remainingQuotaBlocked > 0 {
+            summaryParts.append(message("%d blocked by quota", remainingQuotaBlocked))
         }
         if remainingDependencyBlocked > 0 {
             summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))
@@ -110,7 +146,9 @@ enum ExecutionSummaryBuilder {
         roadmapSections: [String],
         autoCycleCreatedDependencyTaskCount: Int,
         remainingDetailsMissing: Int,
-        remainingDependencyBlocked: Int
+        remainingDependencyBlocked: Int,
+        remainingApprovalBlocked: Int,
+        remainingQuotaBlocked: Int
     ) -> String {
         var summaryParts: [String] = [
             message(
@@ -136,6 +174,12 @@ enum ExecutionSummaryBuilder {
         }
         if remainingDetailsMissing > 0 {
             summaryParts.append(message("%d missing details", remainingDetailsMissing))
+        }
+        if remainingApprovalBlocked > 0 {
+            summaryParts.append(message("%d awaiting approval", remainingApprovalBlocked))
+        }
+        if remainingQuotaBlocked > 0 {
+            summaryParts.append(message("%d blocked by quota", remainingQuotaBlocked))
         }
         if remainingDependencyBlocked > 0 {
             summaryParts.append(message("%d blocked by dependencies", remainingDependencyBlocked))

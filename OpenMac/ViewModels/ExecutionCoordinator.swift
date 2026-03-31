@@ -15,6 +15,22 @@ struct AssignedBatchRunPreparation {
     let runnableTaskIDs: [UUID]
     let detailsMissingCount: Int
     let dependencyBlockedCount: Int
+    let approvalBlockedCount: Int
+    let quotaBlockedCount: Int
+
+    init(
+        runnableTaskIDs: [UUID],
+        detailsMissingCount: Int,
+        dependencyBlockedCount: Int,
+        approvalBlockedCount: Int = 0,
+        quotaBlockedCount: Int = 0
+    ) {
+        self.runnableTaskIDs = runnableTaskIDs
+        self.detailsMissingCount = detailsMissingCount
+        self.dependencyBlockedCount = dependencyBlockedCount
+        self.approvalBlockedCount = approvalBlockedCount
+        self.quotaBlockedCount = quotaBlockedCount
+    }
 }
 
 struct BatchRunCounters {

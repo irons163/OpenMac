@@ -216,6 +216,31 @@ enum RetryableExecutionErrorType: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 }
 
+struct TaskExecutionApproval: Equatable, Codable {
+    var approvedAt: Date
+    var approvedBy: String
+
+    init(approvedAt: Date = Date(), approvedBy: String = "Human") {
+        self.approvedAt = approvedAt
+        self.approvedBy = approvedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Human"
+            : approvedBy.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct ExecutionApprovalPolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var minimumStoryPoints: Int
+
+    init(
+        isEnabled: Bool = false,
+        minimumStoryPoints: Int = 3
+    ) {
+        self.isEnabled = isEnabled
+        self.minimumStoryPoints = max(1, minimumStoryPoints)
+    }
+}
+
 struct ExecutionAutoRetryConfiguration: Equatable, Codable {
     var isEnabled: Bool
     var maxRetryCount: Int
@@ -232,6 +257,44 @@ struct ExecutionAutoRetryConfiguration: Equatable, Codable {
         self.maxRetryCount = max(0, maxRetryCount)
         self.backoffSeconds = max(0, backoffSeconds)
         self.retryableErrorTypes = retryableErrorTypes
+    }
+}
+
+struct ExecutionQuotaPolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var maxEstimatedTokens: Int
+    var maxEstimatedCostUSD: Double
+    var costPer1KTokensUSD: Double
+
+    init(
+        isEnabled: Bool = false,
+        maxEstimatedTokens: Int = 12000,
+        maxEstimatedCostUSD: Double = 0.60,
+        costPer1KTokensUSD: Double = 0.05
+    ) {
+        self.isEnabled = isEnabled
+        self.maxEstimatedTokens = max(1, maxEstimatedTokens)
+        self.maxEstimatedCostUSD = max(0, maxEstimatedCostUSD)
+        self.costPer1KTokensUSD = max(0.0001, costPer1KTokensUSD)
+    }
+}
+
+struct ExecutionQuotaUsage: Equatable, Codable {
+    var consumedRuns: Int
+    var estimatedTokensUsed: Int
+    var estimatedCostUSD: Double
+    var lastUpdatedAt: Date?
+
+    init(
+        consumedRuns: Int = 0,
+        estimatedTokensUsed: Int = 0,
+        estimatedCostUSD: Double = 0,
+        lastUpdatedAt: Date? = nil
+    ) {
+        self.consumedRuns = max(0, consumedRuns)
+        self.estimatedTokensUsed = max(0, estimatedTokensUsed)
+        self.estimatedCostUSD = max(0, estimatedCostUSD)
+        self.lastUpdatedAt = lastUpdatedAt
     }
 }
 

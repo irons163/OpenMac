@@ -9,6 +9,10 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var taskTemplates: [TaskTemplate]?
     var executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration?
     var executionCheckpoint: ExecutionCheckpoint?
+    var executionApprovalPolicy: ExecutionApprovalPolicy?
+    var taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]?
+    var executionQuotaPolicy: ExecutionQuotaPolicy?
+    var executionQuotaUsage: ExecutionQuotaUsage?
 
     init(
         tasks: [WorkTask],
@@ -18,7 +22,11 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         selectedBoardID: UUID? = nil,
         taskTemplates: [TaskTemplate]? = nil,
         executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration? = nil,
-        executionCheckpoint: ExecutionCheckpoint? = nil
+        executionCheckpoint: ExecutionCheckpoint? = nil,
+        executionApprovalPolicy: ExecutionApprovalPolicy? = nil,
+        taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]? = nil,
+        executionQuotaPolicy: ExecutionQuotaPolicy? = nil,
+        executionQuotaUsage: ExecutionQuotaUsage? = nil
     ) {
         self.tasks = tasks
         self.agents = agents
@@ -28,6 +36,10 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.taskTemplates = taskTemplates
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
         self.executionCheckpoint = executionCheckpoint
+        self.executionApprovalPolicy = executionApprovalPolicy
+        self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
+        self.executionQuotaPolicy = executionQuotaPolicy
+        self.executionQuotaUsage = executionQuotaUsage
     }
 
     init(
@@ -43,7 +55,11 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             selectedBoardID: nil,
             taskTemplates: nil,
             executionAutoRetryConfiguration: nil,
-            executionCheckpoint: nil
+            executionCheckpoint: nil,
+            executionApprovalPolicy: nil,
+            taskExecutionApprovalsByTaskID: nil,
+            executionQuotaPolicy: nil,
+            executionQuotaUsage: nil
         )
     }
 }

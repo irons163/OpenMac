@@ -8889,6 +8889,129 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("run task execution blocks when approval gate is enabled and task is not approved")
+    func runTaskExecutionBlockedByApprovalGate() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Needs Approval",
+            details: "Implement secure flow",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+        viewModel.updateExecutionApprovalPolicy(isEnabled: true, minimumStoryPoints: 3)
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(!executed)
+        #expect(viewModel.lastBoardMessage == "Execution requires human approval for this task")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("approve all pending runs unlocks approval-gated execution")
+    func approveAllPendingRunsUnlocksExecution() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Needs Approval",
+            details: "Implement secure flow",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: "done")])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+        viewModel.updateExecutionApprovalPolicy(isEnabled: true, minimumStoryPoints: 3)
+
+        let approved = viewModel.approveAllPendingTaskExecutions()
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(approved == 1)
+        #expect(executed)
+        #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("run task execution blocks when projected quota exceeds configured cap")
+    func runTaskExecutionBlockedByQuotaPolicy() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Quota check",
+            details: "Implement heavy workload",
+            requiredSkills: ["swiftui"],
+            storyPoints: 8,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+        viewModel.updateExecutionQuotaPolicy(
+            isEnabled: true,
+            maxEstimatedTokens: 500,
+            maxEstimatedCostUSD: 0.01,
+            costPer1KTokensUSD: 0.02
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(!executed)
+        #expect(viewModel.lastBoardMessage?.contains("Execution blocked by quota limit") == true)
+        #expect(viewModel.executionQuotaUsage.consumedRuns == 0)
+    }
+
+    @Test("run task execution records timeline and increments quota usage when enabled")
+    func runTaskExecutionRecordsTimelineAndQuotaUsage() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Timeline",
+            details: "Track timeline phases",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "done")],
+            progressUpdatesByTaskID: [task.id: ["step-1", "step-2"]]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+        viewModel.updateExecutionQuotaPolicy(
+            isEnabled: true,
+            maxEstimatedTokens: 50_000,
+            maxEstimatedCostUSD: 50,
+            costPer1KTokensUSD: 0.05
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let timeline = viewModel.executionTimeline(for: task.id)
+        let replay = viewModel.replayExecutionTimeline(for: task.id)
+
+        #expect(executed)
+        #expect(viewModel.executionQuotaUsage.consumedRuns == 1)
+        #expect(viewModel.executionQuotaUsage.estimatedTokensUsed > 0)
+        #expect(timeline.contains(where: { $0.phase == .lifecycle }))
+        #expect(timeline.contains(where: { $0.phase == .progress }))
+        #expect(timeline.contains(where: { $0.phase == .result }))
+        #expect(replay?.contains("[lifecycle]") == true)
+        #expect(replay?.contains("[result]") == true)
+    }
+
     @Test("run task execution blocks when unresolved dependencies remain")
     func runTaskExecutionBlocksOnUnresolvedDependencies() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -11173,7 +11296,9 @@ struct ExecutionSummaryBuilderTests {
     func noRunnableBatchMessageDetailsSingular() {
         let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
             detailsMissingCount: 1,
-            dependencyBlockedCount: 3
+            dependencyBlockedCount: 3,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0
         )
 
         #expect(message == L10n.format(
@@ -11187,7 +11312,9 @@ struct ExecutionSummaryBuilderTests {
     func noRunnableBatchMessageDependencyBlocked() {
         let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
             detailsMissingCount: 0,
-            dependencyBlockedCount: 2
+            dependencyBlockedCount: 2,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0
         )
 
         #expect(message == L10n.format(
@@ -11201,7 +11328,9 @@ struct ExecutionSummaryBuilderTests {
     func noRunnableBatchMessageFallback() {
         let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
             detailsMissingCount: 0,
-            dependencyBlockedCount: 0
+            dependencyBlockedCount: 0,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0
         )
 
         #expect(message == ExecutionSummaryBuilder.noRunnableAssignedTasksMessage)
@@ -11219,6 +11348,8 @@ struct ExecutionSummaryBuilderTests {
             counters: counters,
             detailsMissingCount: 2,
             dependencyBlockedCount: 1,
+            approvalBlockedCount: 1,
+            quotaBlockedCount: 1,
             wasCancelled: true
         )
 
@@ -11229,6 +11360,8 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains(L10n.string("Cancelled")))
         #expect(message.contains(L10n.format("%d skipped", 1)))
         #expect(message.contains(L10n.format("%d missing details", 2)))
+        #expect(message.contains(L10n.format("%d awaiting approval", 1)))
+        #expect(message.contains(L10n.format("%d blocked by quota", 1)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 1)))
     }
 
@@ -11244,6 +11377,8 @@ struct ExecutionSummaryBuilderTests {
             counters: counters,
             detailsMissingCount: 0,
             dependencyBlockedCount: 0,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0,
             wasCancelled: false
         )
 
@@ -11267,13 +11402,17 @@ struct ExecutionSummaryBuilderTests {
             wasCancelled: true,
             createdDependencyTaskCount: 2,
             remainingDetailsMissing: 1,
-            remainingDependencyBlocked: 5
+            remainingDependencyBlocked: 5,
+            remainingApprovalBlocked: 1,
+            remainingQuotaBlocked: 2
         )
 
         #expect(message.contains(L10n.format("Auto cycle finished · %d pass(es) · %d started", 3, 4)))
         #expect(message.contains(L10n.string("Cancelled")))
         #expect(message.contains(L10n.format("Created %d dependency placeholder task(s)", 2)))
         #expect(message.contains(L10n.format("%d missing details", 1)))
+        #expect(message.contains(L10n.format("%d awaiting approval", 1)))
+        #expect(message.contains(L10n.format("%d blocked by quota", 2)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 5)))
     }
 
@@ -11289,7 +11428,9 @@ struct ExecutionSummaryBuilderTests {
             roadmapSections: ["Roadmap A", "Roadmap B"],
             autoCycleCreatedDependencyTaskCount: 1,
             remainingDetailsMissing: 2,
-            remainingDependencyBlocked: 3
+            remainingDependencyBlocked: 3,
+            remainingApprovalBlocked: 1,
+            remainingQuotaBlocked: 2
         )
 
         #expect(message.contains(L10n.format(
@@ -11305,6 +11446,8 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains("Roadmap B"))
         #expect(message.contains(L10n.format("Created %d dependency placeholder task(s)", 1)))
         #expect(message.contains(L10n.format("%d missing details", 2)))
+        #expect(message.contains(L10n.format("%d awaiting approval", 1)))
+        #expect(message.contains(L10n.format("%d blocked by quota", 2)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 3)))
     }
 }
@@ -11323,7 +11466,9 @@ struct ExecutionSeverityPolicyTests {
             counters: counters,
             wasCancelled: false,
             detailsMissingCount: 0,
-            dependencyBlockedCount: 0
+            dependencyBlockedCount: 0,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0
         )
 
         #expect(severity == .info)
@@ -11341,7 +11486,9 @@ struct ExecutionSeverityPolicyTests {
             counters: counters,
             wasCancelled: true,
             detailsMissingCount: 1,
-            dependencyBlockedCount: 0
+            dependencyBlockedCount: 0,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 1
         )
 
         #expect(severity == .warning)
@@ -11353,13 +11500,17 @@ struct ExecutionSeverityPolicyTests {
             hadWarning: false,
             wasCancelled: false,
             remainingDetailsMissing: 0,
-            remainingDependencyBlocked: 1
+            remainingDependencyBlocked: 1,
+            remainingApprovalBlocked: 0,
+            remainingQuotaBlocked: 0
         )
         let infoSeverity = ExecutionSeverityPolicy.autoCycleFinished(
             hadWarning: false,
             wasCancelled: false,
             remainingDetailsMissing: 0,
-            remainingDependencyBlocked: 0
+            remainingDependencyBlocked: 0,
+            remainingApprovalBlocked: 0,
+            remainingQuotaBlocked: 0
         )
 
         #expect(warningSeverity == .warning)
@@ -11374,13 +11525,17 @@ struct ExecutionSeverityPolicyTests {
             cycleHadWarning: false,
             startedExecutions: 0,
             remainingDetailsMissing: 0,
-            remainingDependencyBlocked: 0
+            remainingDependencyBlocked: 0,
+            remainingApprovalBlocked: 0,
+            remainingQuotaBlocked: 0
         )
         let infoSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
             cycleHadWarning: false,
             startedExecutions: 2,
             remainingDetailsMissing: 0,
-            remainingDependencyBlocked: 0
+            remainingDependencyBlocked: 0,
+            remainingApprovalBlocked: 0,
+            remainingQuotaBlocked: 0
         )
 
         #expect(warningSeverity == .warning)

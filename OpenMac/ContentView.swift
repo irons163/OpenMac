@@ -115,6 +115,12 @@ struct ContentView: View {
     @State private var autoRetryRetryNetwork = true
     @State private var autoRetryRetryRateLimit = true
     @State private var autoRetryRetryServer = true
+    @State private var approvalGateEnabled = false
+    @State private var approvalGateMinStoryPoints = 3
+    @State private var quotaGovernanceEnabled = false
+    @State private var quotaMaxEstimatedTokens = 12000
+    @State private var quotaMaxEstimatedCostUSD = 0.60
+    @State private var quotaCostPer1KTokensUSD = 0.05
     @State private var isGitHubFlowRunning = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
@@ -158,6 +164,11 @@ struct ContentView: View {
                     Spacer()
                     if !viewModel.triageCandidates().isEmpty {
                         Text(L10n.format("%d task(s) need manual triage", viewModel.triageCandidates().count))
+                            .font(.callout)
+                            .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+                    }
+                    if viewModel.pendingApprovalTaskCount > 0 {
+                        Text(L10n.format("Pending approvals: %d", viewModel.pendingApprovalTaskCount))
                             .font(.callout)
                             .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
                     }
@@ -345,6 +356,11 @@ struct ContentView: View {
                             runPMOneClickFromToolbar()
                         }
 
+                        Button(L10n.string("Approve Pending Runs")) {
+                            approveAllPendingRunsFromToolbar()
+                        }
+                        .disabled(viewModel.pendingApprovalTaskCount == 0)
+
                         Divider()
 
                         Button(isBatchRunning ? L10n.string("Cancel") : L10n.string("Run Assigned Tasks")) {
@@ -489,6 +505,50 @@ struct ContentView: View {
                     Toggle(L10n.string("Retry Server Errors"), isOn: $autoRetryRetryServer)
                     Button(L10n.string("Apply Auto-Retry Settings")) {
                         applyAutoRetrySettings()
+                    }
+                    Divider()
+                    Text(L10n.string("Human Approval Gate"))
+                    Toggle(L10n.string("Enable approval before execution for higher-impact tasks"), isOn: $approvalGateEnabled)
+                    Stepper(
+                        L10n.format("Require approval for SP >= %d", approvalGateMinStoryPoints),
+                        value: $approvalGateMinStoryPoints,
+                        in: 1 ... 13
+                    )
+                    Button(L10n.string("Apply Approval Settings")) {
+                        applyApprovalGateSettings()
+                    }
+                    Button(L10n.string("Approve Pending Runs")) {
+                        approveAllPendingRunsFromToolbar()
+                    }
+                    .disabled(viewModel.pendingApprovalTaskCount == 0)
+                    Divider()
+                    Text(L10n.string("Cost & Quota Governance"))
+                    Toggle(L10n.string("Enable execution quota limits (tokens/cost)"), isOn: $quotaGovernanceEnabled)
+                    Stepper(
+                        L10n.format("Max Estimated Tokens: %d", quotaMaxEstimatedTokens),
+                        value: $quotaMaxEstimatedTokens,
+                        in: 500 ... 500_000,
+                        step: 500
+                    )
+                    Stepper(
+                        L10n.format("Max Estimated Cost (USD): %.2f", quotaMaxEstimatedCostUSD),
+                        value: $quotaMaxEstimatedCostUSD,
+                        in: 0.05 ... 500,
+                        step: 0.05
+                    )
+                    Stepper(
+                        L10n.format("Cost per 1K tokens (USD): %.3f", quotaCostPer1KTokensUSD),
+                        value: $quotaCostPer1KTokensUSD,
+                        in: 0.001 ... 5,
+                        step: 0.001
+                    )
+                    Button(L10n.string("Apply Quota Settings")) {
+                        applyQuotaGovernanceSettings()
+                    }
+                    Text(viewModel.executionQuotaUsageSummaryText())
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Reset Quota Usage")) {
+                        viewModel.resetExecutionQuotaUsage()
                     }
                     Divider()
                     Text(L10n.string("Projects Folder"))
@@ -742,6 +802,8 @@ struct ContentView: View {
             )
             syncSelectedAgentConsoleSelection()
             syncAutoRetryDraftFromViewModel()
+            syncApprovalGateDraftFromViewModel()
+            syncQuotaGovernanceDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
         }
         .onChange(of: appLanguageOverrideRawValue) { _, newValue in
@@ -813,7 +875,8 @@ struct ContentView: View {
         selectedExecutionDetails = ExecutionDetailsPresentation(
             taskTitle: task.title,
             assigneeName: viewModel.agentName(for: task.assignedAgentID),
-            executionRecord: executionRecord
+            executionRecord: executionRecord,
+            timelineText: viewModel.replayExecutionTimeline(for: task.id)
         )
     }
 
@@ -1244,6 +1307,13 @@ struct ContentView: View {
         }
     }
 
+    private func approveAllPendingRunsFromToolbar() {
+        _ = Self.handlePositiveCountResult(
+            viewModel.approveAllPendingTaskExecutions(),
+            onPositive: refreshTriageSelections
+        )
+    }
+
     private func rebalanceTodoAssignments() {
         _ = Self.handlePositiveCountResult(
             viewModel.rebalanceTodoAssignments(),
@@ -1359,6 +1429,34 @@ struct ContentView: View {
         autoRetryRetryNetwork = config.retryableErrorTypes.contains(.network)
         autoRetryRetryRateLimit = config.retryableErrorTypes.contains(.rateLimit)
         autoRetryRetryServer = config.retryableErrorTypes.contains(.server)
+    }
+
+    private func syncApprovalGateDraftFromViewModel() {
+        approvalGateEnabled = viewModel.executionApprovalPolicy.isEnabled
+        approvalGateMinStoryPoints = viewModel.executionApprovalPolicy.minimumStoryPoints
+    }
+
+    private func applyApprovalGateSettings() {
+        viewModel.updateExecutionApprovalPolicy(
+            isEnabled: approvalGateEnabled,
+            minimumStoryPoints: approvalGateMinStoryPoints
+        )
+    }
+
+    private func syncQuotaGovernanceDraftFromViewModel() {
+        quotaGovernanceEnabled = viewModel.executionQuotaPolicy.isEnabled
+        quotaMaxEstimatedTokens = viewModel.executionQuotaPolicy.maxEstimatedTokens
+        quotaMaxEstimatedCostUSD = viewModel.executionQuotaPolicy.maxEstimatedCostUSD
+        quotaCostPer1KTokensUSD = viewModel.executionQuotaPolicy.costPer1KTokensUSD
+    }
+
+    private func applyQuotaGovernanceSettings() {
+        viewModel.updateExecutionQuotaPolicy(
+            isEnabled: quotaGovernanceEnabled,
+            maxEstimatedTokens: quotaMaxEstimatedTokens,
+            maxEstimatedCostUSD: quotaMaxEstimatedCostUSD,
+            costPer1KTokensUSD: quotaCostPer1KTokensUSD
+        )
     }
 
     private func applyAutoRetrySettings() {
@@ -2209,6 +2307,11 @@ struct ContentView: View {
         }
     }
 
+    private func copyTaskExecutionTimeline(_ taskID: UUID) {
+        guard let timeline = viewModel.replayExecutionTimeline(for: taskID) else { return }
+        copyToPasteboard(timeline)
+    }
+
     private func assignTaskToAgent(_ taskID: UUID, _ agentID: UUID) {
         _ = Self.handleBoolResult(
             viewModel.manuallyAssignTask(taskID, to: agentID),
@@ -2675,6 +2778,10 @@ struct ContentView: View {
             onMoveTaskToBoard: moveTaskToBoard,
             onCopyTaskToBoard: copyTaskToBoard,
             onShowExecutionDetails: openExecutionDetails,
+            hasExecutionTimeline: { task in
+                viewModel.hasExecutionTimeline(for: task.id)
+            },
+            onCopyExecutionTimeline: copyTaskExecutionTimeline,
             onDropTask: { taskID in
                 viewModel.handleDrop(taskID, to: status)
             }
@@ -3396,6 +3503,8 @@ private struct KanbanColumnView: View {
     let onMoveTaskToBoard: (UUID, UUID) -> Void
     let onCopyTaskToBoard: (UUID, UUID) -> Void
     let onShowExecutionDetails: (WorkTask) -> Void
+    let hasExecutionTimeline: (WorkTask) -> Bool
+    let onCopyExecutionTimeline: (UUID) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -3495,6 +3604,10 @@ private struct KanbanColumnView: View {
             onShowExecutionDetails: {
                 onShowExecutionDetails(task)
             },
+            hasExecutionTimeline: hasExecutionTimeline(task),
+            onCopyExecutionTimeline: {
+                onCopyExecutionTimeline(task.id)
+            },
             onMoveBackward: { moveBackward(task) },
             onMoveForward: { moveForward(task) }
         )
@@ -3545,6 +3658,8 @@ private struct TaskCardView: View {
     let onMoveToBoard: (UUID) -> Void
     let onCopyToBoard: (UUID) -> Void
     let onShowExecutionDetails: () -> Void
+    let hasExecutionTimeline: Bool
+    let onCopyExecutionTimeline: () -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -3678,6 +3793,9 @@ private struct TaskCardView: View {
             if executionRecord?.lastOutputSummary != nil || executionRecord?.lastError != nil {
                 Button(L10n.string("View Execution Details"), action: onShowExecutionDetails)
             }
+            if hasExecutionTimeline {
+                Button(L10n.string("Copy Execution Timeline"), action: onCopyExecutionTimeline)
+            }
             if !manualAssignableAgents.isEmpty {
                 Menu(L10n.string("Assign To Agent")) {
                     ForEach(manualAssignableAgents) { agent in
@@ -3761,6 +3879,7 @@ private struct ExecutionDetailsPresentation: Identifiable {
     let taskTitle: String
     let assigneeName: String
     let executionRecord: TaskExecutionRecord
+    let timelineText: String?
 }
 
 private struct ExecutionDetailsSheet: View {
@@ -3814,6 +3933,19 @@ private struct ExecutionDetailsSheet: View {
                     tint: BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme),
                     copyButtonTitle: L10n.string("Copy Debug Log")
                 )
+            }
+
+            if let timeline = details.timelineText, !timeline.isEmpty {
+                executionTextSection(
+                    title: L10n.string("Execution Timeline"),
+                    value: timeline,
+                    tint: BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme),
+                    copyButtonTitle: L10n.string("Copy Timeline")
+                )
+            } else {
+                Text(L10n.string("No execution timeline yet."))
+                    .font(.caption)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
 
             HStack {
@@ -6104,7 +6236,8 @@ enum ContentViewTestHooks {
         let details = ExecutionDetailsPresentation(
             taskTitle: "Task",
             assigneeName: "Agent",
-            executionRecord: TaskExecutionRecord(status: status)
+            executionRecord: TaskExecutionRecord(status: status),
+            timelineText: nil
         )
         let sheet = ExecutionDetailsSheet(details: details, onCopy: { _ in }, onClose: {})
         return sheet.testStatusLabel
@@ -6204,6 +6337,8 @@ enum ContentViewTestHooks {
             onMoveToBoard: { _ in },
             onCopyToBoard: { _ in },
             onShowExecutionDetails: {},
+            hasExecutionTimeline: false,
+            onCopyExecutionTimeline: {},
             onMoveBackward: {},
             onMoveForward: {}
         )
@@ -6249,6 +6384,8 @@ enum ContentViewTestHooks {
             onMoveToBoard: { _ in },
             onCopyToBoard: { _ in },
             onShowExecutionDetails: {},
+            hasExecutionTimeline: false,
+            onCopyExecutionTimeline: {},
             onMoveBackward: {},
             onMoveForward: {}
         )
@@ -6960,6 +7097,8 @@ enum ContentViewTestHooks {
             onMoveTaskToBoard: { _, _ in },
             onCopyTaskToBoard: { _, _ in },
             onShowExecutionDetails: { _ in },
+            hasExecutionTimeline: { _ in false },
+            onCopyExecutionTimeline: { _ in },
             onDropTask: { _ in true }
         ))
         render(KanbanColumnView(
@@ -6986,6 +7125,8 @@ enum ContentViewTestHooks {
             onMoveTaskToBoard: { _, _ in },
             onCopyTaskToBoard: { _, _ in },
             onShowExecutionDetails: { _ in },
+            hasExecutionTimeline: { _ in true },
+            onCopyExecutionTimeline: { _ in },
             onDropTask: { _ in true }
         ))
 
@@ -7016,6 +7157,8 @@ enum ContentViewTestHooks {
             onMoveToBoard: { _ in },
             onCopyToBoard: { _ in },
             onShowExecutionDetails: {},
+            hasExecutionTimeline: true,
+            onCopyExecutionTimeline: {},
             onMoveBackward: {},
             onMoveForward: {}
         ))
@@ -7046,6 +7189,8 @@ enum ContentViewTestHooks {
             onMoveToBoard: { _ in },
             onCopyToBoard: { _ in },
             onShowExecutionDetails: {},
+            hasExecutionTimeline: true,
+            onCopyExecutionTimeline: {},
             onMoveBackward: {},
             onMoveForward: {}
         ))
@@ -7192,7 +7337,8 @@ enum ContentViewTestHooks {
         let detailsPresentation = ExecutionDetailsPresentation(
             taskTitle: "Task",
             assigneeName: "A",
-            executionRecord: failedRecord
+            executionRecord: failedRecord,
+            timelineText: nil
         )
         render(ExecutionDetailsSheet(
             details: detailsPresentation,

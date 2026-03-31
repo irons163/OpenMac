@@ -9,13 +9,17 @@ enum ExecutionSeverityPolicy {
         counters: BatchRunCounters,
         wasCancelled: Bool,
         detailsMissingCount: Int,
-        dependencyBlockedCount: Int
+        dependencyBlockedCount: Int,
+        approvalBlockedCount: Int,
+        quotaBlockedCount: Int
     ) -> BoardMessageSeverity {
         (
             counters.failedCount > 0 ||
                 wasCancelled ||
                 counters.skippedCount > 0 ||
                 detailsMissingCount > 0 ||
+                approvalBlockedCount > 0 ||
+                quotaBlockedCount > 0 ||
                 dependencyBlockedCount > 0
         ) ? .warning : .info
     }
@@ -24,12 +28,16 @@ enum ExecutionSeverityPolicy {
         hadWarning: Bool,
         wasCancelled: Bool,
         remainingDetailsMissing: Int,
-        remainingDependencyBlocked: Int
+        remainingDependencyBlocked: Int,
+        remainingApprovalBlocked: Int,
+        remainingQuotaBlocked: Int
     ) -> BoardMessageSeverity {
         (
             hadWarning ||
                 wasCancelled ||
                 remainingDetailsMissing > 0 ||
+                remainingApprovalBlocked > 0 ||
+                remainingQuotaBlocked > 0 ||
                 remainingDependencyBlocked > 0
         ) ? .warning : .info
     }
@@ -42,12 +50,16 @@ enum ExecutionSeverityPolicy {
         cycleHadWarning: Bool,
         startedExecutions: Int,
         remainingDetailsMissing: Int,
-        remainingDependencyBlocked: Int
+        remainingDependencyBlocked: Int,
+        remainingApprovalBlocked: Int,
+        remainingQuotaBlocked: Int
     ) -> BoardMessageSeverity {
         (
             cycleHadWarning ||
                 startedExecutions == 0 ||
                 remainingDetailsMissing > 0 ||
+                remainingApprovalBlocked > 0 ||
+                remainingQuotaBlocked > 0 ||
                 remainingDependencyBlocked > 0
         ) ? .warning : .info
     }

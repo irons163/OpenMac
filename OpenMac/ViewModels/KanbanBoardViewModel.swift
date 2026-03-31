@@ -1259,6 +1259,7 @@ struct AgentExecutionEvent: Identifiable, Equatable {
     let taskID: UUID
     let taskTitle: String
     let status: TaskExecutionStatus
+    let phase: ExecutionEventPhase
     let message: String
     let details: String?
 
@@ -1269,6 +1270,7 @@ struct AgentExecutionEvent: Identifiable, Equatable {
         taskID: UUID,
         taskTitle: String,
         status: TaskExecutionStatus,
+        phase: ExecutionEventPhase = .progress,
         message: String,
         details: String? = nil
     ) {
@@ -1278,9 +1280,18 @@ struct AgentExecutionEvent: Identifiable, Equatable {
         self.taskID = taskID
         self.taskTitle = taskTitle
         self.status = status
+        self.phase = phase
         self.message = message
         self.details = details
     }
+}
+
+enum ExecutionEventPhase: String, CaseIterable, Equatable {
+    case lifecycle
+    case progress
+    case result
+    case governance
+    case system
 }
 
 final class KanbanBoardViewModel: ObservableObject {
@@ -1346,7 +1357,12 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var taskTemplates: [TaskTemplate]
     @Published private(set) var executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration
     @Published private(set) var executionCheckpoint: ExecutionCheckpoint?
+    @Published private(set) var executionApprovalPolicy: ExecutionApprovalPolicy
+    @Published private(set) var taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval]
+    @Published private(set) var executionQuotaPolicy: ExecutionQuotaPolicy
+    @Published private(set) var executionQuotaUsage: ExecutionQuotaUsage
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
+    @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
     private let assignmentEngine: AutoAssignmentEngine
     private let projectPlanner: any ProjectPlanning
@@ -1357,6 +1373,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private let gitCommandRunner: GitCommandRunner
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
+    private static let maxTaskTimelineEventsPerTask = 240
 
     private func message(_ key: String) -> String {
         L10n.string(key)
@@ -1520,6 +1537,9 @@ final class KanbanBoardViewModel: ObservableObject {
             selectedBoardID: selectedBoardID
         ) != nil
     }
+    var pendingApprovalTaskCount: Int {
+        tasks.filter { requiresHumanApproval(for: $0.id) && !isTaskApprovedForExecution($0.id) }.count
+    }
     var selectedBoardDependencyInsights: DependencyGraphInsights {
         DependencyGraphInsightsUseCase.build(tasks: tasks)
     }
@@ -1531,6 +1551,10 @@ final class KanbanBoardViewModel: ObservableObject {
         taskTemplates: [TaskTemplate]? = nil,
         executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
         executionCheckpoint: ExecutionCheckpoint? = nil,
+        executionApprovalPolicy: ExecutionApprovalPolicy = .init(),
+        taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval] = [:],
+        executionQuotaPolicy: ExecutionQuotaPolicy = .init(),
+        executionQuotaUsage: ExecutionQuotaUsage = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1560,6 +1584,10 @@ final class KanbanBoardViewModel: ObservableObject {
         self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
         self.executionCheckpoint = executionCheckpoint
+        self.executionApprovalPolicy = executionApprovalPolicy
+        self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
+        self.executionQuotaPolicy = executionQuotaPolicy
+        self.executionQuotaUsage = executionQuotaUsage
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1576,6 +1604,10 @@ final class KanbanBoardViewModel: ObservableObject {
         taskTemplates: [TaskTemplate]? = nil,
         executionAutoRetryConfiguration: ExecutionAutoRetryConfiguration = .init(),
         executionCheckpoint: ExecutionCheckpoint? = nil,
+        executionApprovalPolicy: ExecutionApprovalPolicy = .init(),
+        taskExecutionApprovalsByTaskID: [UUID: TaskExecutionApproval] = [:],
+        executionQuotaPolicy: ExecutionQuotaPolicy = .init(),
+        executionQuotaUsage: ExecutionQuotaUsage = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1605,6 +1637,10 @@ final class KanbanBoardViewModel: ObservableObject {
         self.taskTemplates = taskTemplates ?? Self.defaultTaskTemplates()
         self.executionAutoRetryConfiguration = executionAutoRetryConfiguration
         self.executionCheckpoint = executionCheckpoint
+        self.executionApprovalPolicy = executionApprovalPolicy
+        self.taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID
+        self.executionQuotaPolicy = executionQuotaPolicy
+        self.executionQuotaUsage = executionQuotaUsage
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1879,7 +1915,11 @@ final class KanbanBoardViewModel: ObservableObject {
                     selectedBoardID: selectedBoardID,
                     taskTemplates: taskTemplates,
                     executionAutoRetryConfiguration: executionAutoRetryConfiguration,
-                    executionCheckpoint: executionCheckpoint
+                    executionCheckpoint: executionCheckpoint,
+                    executionApprovalPolicy: executionApprovalPolicy,
+                    taskExecutionApprovalsByTaskID: taskExecutionApprovalsByTaskID,
+                    executionQuotaPolicy: executionQuotaPolicy,
+                    executionQuotaUsage: executionQuotaUsage
                 )
             )
         } catch {
@@ -1908,7 +1948,13 @@ final class KanbanBoardViewModel: ObservableObject {
                     selectedBoardID: selectedBoard.id,
                     taskTemplates: taskTemplates,
                     executionAutoRetryConfiguration: executionAutoRetryConfiguration,
-                    executionCheckpoint: executionCheckpoint?.boardID == selectedBoard.id ? executionCheckpoint : nil
+                    executionCheckpoint: executionCheckpoint?.boardID == selectedBoard.id ? executionCheckpoint : nil,
+                    executionApprovalPolicy: executionApprovalPolicy,
+                    taskExecutionApprovalsByTaskID: taskExecutionApprovalsByTaskID.filter { approvalEntry in
+                        selectedBoard.tasks.contains(where: { $0.id == approvalEntry.key })
+                    },
+                    executionQuotaPolicy: executionQuotaPolicy,
+                    executionQuotaUsage: executionQuotaUsage
                 )
             )
         } catch {
@@ -2184,6 +2230,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 executionAutoRetryConfiguration = importedRetryConfiguration
             }
             executionCheckpoint = snapshot.executionCheckpoint
+            executionApprovalPolicy = snapshot.executionApprovalPolicy ?? .init()
+            executionQuotaPolicy = snapshot.executionQuotaPolicy ?? .init()
+            executionQuotaUsage = snapshot.executionQuotaUsage ?? .init()
+            taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
+                importedBoards.contains { board in
+                    board.tasks.contains(where: { $0.id == approvalEntry.key })
+                }
+            }
             resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
                 importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
             } ?? importedBoards[0].id
@@ -2200,6 +2254,18 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedRetryConfiguration = snapshot.executionAutoRetryConfiguration {
                 executionAutoRetryConfiguration = importedRetryConfiguration
+            }
+            if let importedApprovalPolicy = snapshot.executionApprovalPolicy {
+                executionApprovalPolicy = importedApprovalPolicy
+            }
+            if let importedQuotaPolicy = snapshot.executionQuotaPolicy {
+                executionQuotaPolicy = importedQuotaPolicy
+            }
+            if let importedQuotaUsage = snapshot.executionQuotaUsage {
+                executionQuotaUsage = importedQuotaUsage
+            }
+            if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
+                taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
             }
             resolvedSelectedBoardID = preferredSelectedBoardID.flatMap { candidate in
                 importedBoards.contains(where: { $0.id == candidate }) ? candidate : nil
@@ -2770,6 +2836,7 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks[taskIndex].details = details
         tasks[taskIndex].requiredSkills = Set(skills.map { $0.lowercased() })
         tasks[taskIndex].storyPoints = max(1, storyPoints)
+        taskExecutionApprovalsByTaskID[taskID] = nil
 
         if let agentID = tasks[taskIndex].assignedAgentID {
             guard let agent = agents.first(where: { $0.id == agentID }) else {
@@ -2823,6 +2890,8 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks.remove(at: taskIndex)
         lastUnassignedTaskIDs.remove(taskID)
         lastAssignmentReasons[taskID] = nil
+        taskExecutionApprovalsByTaskID[taskID] = nil
+        executionTimelineByTaskID[taskID] = nil
         persistBoardState()
         lastBoardMessage = nil
         return true
@@ -2882,6 +2951,8 @@ final class KanbanBoardViewModel: ObservableObject {
         for taskID in doneTaskIDs {
             lastUnassignedTaskIDs.remove(taskID)
             lastAssignmentReasons[taskID] = nil
+            taskExecutionApprovalsByTaskID[taskID] = nil
+            executionTimelineByTaskID[taskID] = nil
         }
 
         persistBoardState()
@@ -3421,8 +3492,53 @@ final class KanbanBoardViewModel: ObservableObject {
         return events.suffix(limit).reversed()
     }
 
+    func executionTimeline(for taskID: UUID, limit: Int = 200) -> [AgentExecutionEvent] {
+        let events = executionTimelineByTaskID[taskID] ?? []
+        guard limit > 0, events.count > limit else {
+            return events
+        }
+        return Array(events.suffix(limit))
+    }
+
+    func replayExecutionTimeline(for taskID: UUID, limit: Int = 200) -> String? {
+        let events = executionTimeline(for: taskID, limit: limit)
+        guard !events.isEmpty else { return nil }
+
+        let formatter = ISO8601DateFormatter()
+        return events.map { event in
+            var lines: [String] = []
+            lines.append(
+                "[\(formatter.string(from: event.timestamp))] [\(event.phase.rawValue)] [\(event.status.rawValue)] \(event.message)"
+            )
+            if let details = normalizeExecutionText(event.details) {
+                lines.append(details)
+            }
+            return lines.joined(separator: "\n")
+        }
+        .joined(separator: "\n\n")
+    }
+
+    func hasExecutionTimeline(for taskID: UUID) -> Bool {
+        !(executionTimelineByTaskID[taskID] ?? []).isEmpty
+    }
+
     func clearExecutionEvents(for agentID: UUID) {
+        guard let removedEvents = agentExecutionEventsByAgentID[agentID], !removedEvents.isEmpty else {
+            agentExecutionEventsByAgentID[agentID] = []
+            return
+        }
         agentExecutionEventsByAgentID[agentID] = []
+
+        let removedEventIDs = Set(removedEvents.map(\.id))
+        for (taskID, timelineEvents) in executionTimelineByTaskID {
+            let filtered = timelineEvents.filter { !removedEventIDs.contains($0.id) }
+            executionTimelineByTaskID[taskID] = filtered
+        }
+        executionTimelineByTaskID = executionTimelineByTaskID.filter { !$0.value.isEmpty }
+    }
+
+    func clearExecutionTimeline(for taskID: UUID) {
+        executionTimelineByTaskID[taskID] = []
     }
 
     func clearLocalizedTransientBoardMessage() {
@@ -3435,6 +3551,150 @@ final class KanbanBoardViewModel: ObservableObject {
             guard task.executionRecord?.status == .running else { return false }
             return task.executionRecord?.lastAgentID == agentID || task.assignedAgentID == agentID
         }
+    }
+
+    func requiresHumanApproval(for taskID: UUID) -> Bool {
+        guard executionApprovalPolicy.isEnabled,
+              let task = tasks.first(where: { $0.id == taskID }) else {
+            return false
+        }
+        guard task.status == .todo || task.status == .inProgress else { return false }
+        return task.storyPoints >= executionApprovalPolicy.minimumStoryPoints
+    }
+
+    func isTaskApprovedForExecution(_ taskID: UUID) -> Bool {
+        taskExecutionApprovalsByTaskID[taskID] != nil
+    }
+
+    @discardableResult
+    func approveTaskExecution(_ taskID: UUID, approvedBy: String = "Human") -> Bool {
+        guard requiresHumanApproval(for: taskID) else { return false }
+        taskExecutionApprovalsByTaskID[taskID] = TaskExecutionApproval(approvedBy: approvedBy)
+        persistBoardState()
+        if let task = tasks.first(where: { $0.id == taskID }) {
+            lastBoardMessage = message("Approved run for %@", task.title)
+            lastBoardMessageSeverity = .info
+        }
+        return true
+    }
+
+    @discardableResult
+    func revokeTaskExecutionApproval(_ taskID: UUID) -> Bool {
+        guard taskExecutionApprovalsByTaskID[taskID] != nil else { return false }
+        taskExecutionApprovalsByTaskID[taskID] = nil
+        persistBoardState()
+        if let task = tasks.first(where: { $0.id == taskID }) {
+            lastBoardMessage = message("Revoked run approval for %@", task.title)
+            lastBoardMessageSeverity = .warning
+        }
+        return true
+    }
+
+    @discardableResult
+    func approveAllPendingTaskExecutions(approvedBy: String = "Human") -> Int {
+        let pendingTaskIDs = tasks
+            .filter { requiresHumanApproval(for: $0.id) && !isTaskApprovedForExecution($0.id) }
+            .map(\.id)
+        guard !pendingTaskIDs.isEmpty else { return 0 }
+
+        let approval = TaskExecutionApproval(approvedBy: approvedBy)
+        for taskID in pendingTaskIDs {
+            taskExecutionApprovalsByTaskID[taskID] = approval
+        }
+        persistBoardState()
+        lastBoardMessage = message("Approved %d pending run(s)", pendingTaskIDs.count)
+        lastBoardMessageSeverity = .info
+        return pendingTaskIDs.count
+    }
+
+    func updateExecutionApprovalPolicy(
+        isEnabled: Bool,
+        minimumStoryPoints: Int
+    ) {
+        executionApprovalPolicy = ExecutionApprovalPolicy(
+            isEnabled: isEnabled,
+            minimumStoryPoints: minimumStoryPoints
+        )
+        if !executionApprovalPolicy.isEnabled {
+            taskExecutionApprovalsByTaskID = [:]
+        } else {
+            taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID.filter { requiresHumanApproval(for: $0.key) }
+        }
+        persistBoardState()
+        lastBoardMessage = message("Updated approval gate settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func updateExecutionQuotaPolicy(
+        isEnabled: Bool,
+        maxEstimatedTokens: Int,
+        maxEstimatedCostUSD: Double,
+        costPer1KTokensUSD: Double
+    ) {
+        executionQuotaPolicy = ExecutionQuotaPolicy(
+            isEnabled: isEnabled,
+            maxEstimatedTokens: maxEstimatedTokens,
+            maxEstimatedCostUSD: maxEstimatedCostUSD,
+            costPer1KTokensUSD: costPer1KTokensUSD
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated quota governance settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func resetExecutionQuotaUsage() {
+        executionQuotaUsage = ExecutionQuotaUsage()
+        persistBoardState()
+        lastBoardMessage = message("Reset execution quota usage")
+        lastBoardMessageSeverity = .info
+    }
+
+    func executionQuotaUsageSummaryText() -> String {
+        message(
+            "Quota Usage: %d runs · %d tokens · $%.2f",
+            executionQuotaUsage.consumedRuns,
+            executionQuotaUsage.estimatedTokensUsed,
+            executionQuotaUsage.estimatedCostUSD
+        )
+    }
+
+    private func estimatedTokenUsage(for task: WorkTask) -> Int {
+        let detailLength = task.details.count
+        let skillsWeight = task.requiredSkills.count * 30
+        return max(120, task.storyPoints * 260 + detailLength / 2 + skillsWeight)
+    }
+
+    private func estimatedCostUSD(for tokens: Int) -> Double {
+        (Double(tokens) / 1000.0) * executionQuotaPolicy.costPer1KTokensUSD
+    }
+
+    private func quotaCheckMessage(for task: WorkTask) -> String? {
+        guard executionQuotaPolicy.isEnabled else { return nil }
+
+        let estimatedTokens = estimatedTokenUsage(for: task)
+        let projectedTokens = executionQuotaUsage.estimatedTokensUsed + estimatedTokens
+        let projectedCost = executionQuotaUsage.estimatedCostUSD + estimatedCostUSD(for: estimatedTokens)
+
+        if projectedTokens > executionQuotaPolicy.maxEstimatedTokens ||
+            projectedCost > executionQuotaPolicy.maxEstimatedCostUSD {
+            let details = message(
+                "Estimated quota after run: %d tokens / $%.2f",
+                projectedTokens,
+                projectedCost
+            )
+            return message("Execution blocked by quota limit. %@", details)
+        }
+
+        return nil
+    }
+
+    private func consumeExecutionQuota(for task: WorkTask) {
+        guard executionQuotaPolicy.isEnabled else { return }
+        let estimatedTokens = estimatedTokenUsage(for: task)
+        executionQuotaUsage.consumedRuns += 1
+        executionQuotaUsage.estimatedTokensUsed += estimatedTokens
+        executionQuotaUsage.estimatedCostUSD += estimatedCostUSD(for: estimatedTokens)
+        executionQuotaUsage.lastUpdatedAt = Date()
     }
 
     private func retryableErrorType(for message: String) -> RetryableExecutionErrorType? {
@@ -3829,9 +4089,21 @@ final class KanbanBoardViewModel: ObservableObject {
         var runnableTaskIDs: [UUID] = []
         runnableTaskIDs.reserveCapacity(assignedQueue.count)
         var dependencyBlockedCount = 0
+        var approvalBlockedCount = 0
+        var quotaBlockedCount = 0
 
         for task in assignedQueue {
             guard !task.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+
+            if requiresHumanApproval(for: task.id) && !isTaskApprovedForExecution(task.id) {
+                approvalBlockedCount += 1
+                continue
+            }
+
+            if quotaCheckMessage(for: task) != nil {
+                quotaBlockedCount += 1
                 continue
             }
 
@@ -3858,17 +4130,23 @@ final class KanbanBoardViewModel: ObservableObject {
         return AssignedBatchRunPreparation(
             runnableTaskIDs: runnableTaskIDs,
             detailsMissingCount: detailsMissingCount,
-            dependencyBlockedCount: dependencyBlockedCount
+            dependencyBlockedCount: dependencyBlockedCount,
+            approvalBlockedCount: approvalBlockedCount,
+            quotaBlockedCount: quotaBlockedCount
         )
     }
 
     private func noRunnableAssignedBatchMessage(
         detailsMissingCount: Int,
-        dependencyBlockedCount: Int
+        dependencyBlockedCount: Int,
+        approvalBlockedCount: Int,
+        quotaBlockedCount: Int
     ) -> String {
         ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
             detailsMissingCount: detailsMissingCount,
-            dependencyBlockedCount: dependencyBlockedCount
+            dependencyBlockedCount: dependencyBlockedCount,
+            approvalBlockedCount: approvalBlockedCount,
+            quotaBlockedCount: quotaBlockedCount
         )
     }
 
@@ -3887,7 +4165,9 @@ final class KanbanBoardViewModel: ObservableObject {
             handleNoRunnable: { preparation in
                 self.lastBoardMessage = self.noRunnableAssignedBatchMessage(
                     detailsMissingCount: preparation.detailsMissingCount,
-                    dependencyBlockedCount: preparation.dependencyBlockedCount
+                    dependencyBlockedCount: preparation.dependencyBlockedCount,
+                    approvalBlockedCount: preparation.approvalBlockedCount,
+                    quotaBlockedCount: preparation.quotaBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
@@ -3895,17 +4175,23 @@ final class KanbanBoardViewModel: ObservableObject {
                 let counters = state.counters
                 let detailsMissingCount = state.finalPreparation.detailsMissingCount
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
+                let approvalBlockedCount = state.finalPreparation.approvalBlockedCount
+                let quotaBlockedCount = state.finalPreparation.quotaBlockedCount
                 self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
                     counters: counters,
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
+                    approvalBlockedCount: approvalBlockedCount,
+                    quotaBlockedCount: quotaBlockedCount,
                     wasCancelled: false
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
                     counters: counters,
                     wasCancelled: false,
                     detailsMissingCount: detailsMissingCount,
-                    dependencyBlockedCount: dependencyBlockedCount
+                    dependencyBlockedCount: dependencyBlockedCount,
+                    approvalBlockedCount: approvalBlockedCount,
+                    quotaBlockedCount: quotaBlockedCount
                 )
             }
         )
@@ -3931,7 +4217,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.updateExecutionCheckpoint(nil)
                 self.lastBoardMessage = self.noRunnableAssignedBatchMessage(
                     detailsMissingCount: preparation.detailsMissingCount,
-                    dependencyBlockedCount: preparation.dependencyBlockedCount
+                    dependencyBlockedCount: preparation.dependencyBlockedCount,
+                    approvalBlockedCount: preparation.approvalBlockedCount,
+                    quotaBlockedCount: preparation.quotaBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
             },
@@ -3940,17 +4228,23 @@ final class KanbanBoardViewModel: ObservableObject {
                 let counters = state.counters
                 let detailsMissingCount = state.finalPreparation.detailsMissingCount
                 let dependencyBlockedCount = state.finalPreparation.dependencyBlockedCount
+                let approvalBlockedCount = state.finalPreparation.approvalBlockedCount
+                let quotaBlockedCount = state.finalPreparation.quotaBlockedCount
                 self.lastBoardMessage = ExecutionSummaryBuilder.batchRunFinishedMessage(
                     counters: counters,
                     detailsMissingCount: detailsMissingCount,
                     dependencyBlockedCount: dependencyBlockedCount,
+                    approvalBlockedCount: approvalBlockedCount,
+                    quotaBlockedCount: quotaBlockedCount,
                     wasCancelled: state.wasCancelled
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.batchRunFinished(
                     counters: counters,
                     wasCancelled: state.wasCancelled,
                     detailsMissingCount: detailsMissingCount,
-                    dependencyBlockedCount: dependencyBlockedCount
+                    dependencyBlockedCount: dependencyBlockedCount,
+                    approvalBlockedCount: approvalBlockedCount,
+                    quotaBlockedCount: quotaBlockedCount
                 )
             },
             completion: completion
@@ -4001,13 +4295,17 @@ final class KanbanBoardViewModel: ObservableObject {
                         wasCancelled: state.wasCancelled,
                         createdDependencyTaskCount: state.createdDependencyTaskCount,
                         remainingDetailsMissing: remainingDetailsMissing,
-                        remainingDependencyBlocked: remainingDependencyBlocked
+                        remainingDependencyBlocked: remainingDependencyBlocked,
+                        remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
+                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
                     )
                     self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleFinished(
                         hadWarning: state.hadWarning,
                         wasCancelled: state.wasCancelled,
                         remainingDetailsMissing: remainingDetailsMissing,
-                        remainingDependencyBlocked: remainingDependencyBlocked
+                        remainingDependencyBlocked: remainingDependencyBlocked,
+                        remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
+                        remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
                     )
                 } else if self.lastBoardMessage == nil {
                     self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleNoRunnableMessage
@@ -4208,13 +4506,17 @@ final class KanbanBoardViewModel: ObservableObject {
                     roadmapSections: roadmapSections,
                     autoCycleCreatedDependencyTaskCount: state.autoCycleCreatedDependencyTaskCount,
                     remainingDetailsMissing: remainingDetailsMissing,
-                    remainingDependencyBlocked: remainingDependencyBlocked
+                    remainingDependencyBlocked: remainingDependencyBlocked,
+                    remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
+                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.pmAutopilotFinished(
                     cycleHadWarning: state.cycleHadWarning,
                     startedExecutions: state.startedExecutions,
                     remainingDetailsMissing: remainingDetailsMissing,
-                    remainingDependencyBlocked: remainingDependencyBlocked
+                    remainingDependencyBlocked: remainingDependencyBlocked,
+                    remainingApprovalBlocked: state.remainingPreparation.approvalBlockedCount,
+                    remainingQuotaBlocked: state.remainingPreparation.quotaBlockedCount
                 )
             },
             completion: completion
@@ -4518,6 +4820,7 @@ final class KanbanBoardViewModel: ObservableObject {
         taskID: UUID,
         taskTitle: String,
         status: TaskExecutionStatus,
+        phase: ExecutionEventPhase = .progress,
         message: String,
         details: String? = nil
     ) {
@@ -4526,6 +4829,7 @@ final class KanbanBoardViewModel: ObservableObject {
             taskID: taskID,
             taskTitle: taskTitle,
             status: status,
+            phase: phase,
             message: message,
             details: normalizeExecutionText(details)
         )
@@ -4536,6 +4840,13 @@ final class KanbanBoardViewModel: ObservableObject {
             events.removeFirst(events.count - Self.maxAgentExecutionEventsPerAgent)
         }
         agentExecutionEventsByAgentID[agentID] = events
+
+        var timelineEvents = executionTimelineByTaskID[taskID] ?? []
+        timelineEvents.append(event)
+        if timelineEvents.count > Self.maxTaskTimelineEventsPerTask {
+            timelineEvents.removeFirst(timelineEvents.count - Self.maxTaskTimelineEventsPerTask)
+        }
+        executionTimelineByTaskID[taskID] = timelineEvents
     }
 
     private func captureExecutionProgress(_ update: String, for prepared: PreparedTaskExecution) {
@@ -4553,6 +4864,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 taskID: prepared.taskID,
                 taskTitle: prepared.taskSnapshot.title,
                 status: .running,
+                phase: .progress,
                 message: normalized
             )
             return
@@ -4564,6 +4876,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 taskID: prepared.taskID,
                 taskTitle: prepared.taskSnapshot.title,
                 status: .running,
+                phase: .progress,
                 message: line
             )
         }
@@ -4595,6 +4908,33 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return nil
         }
+        if requiresHumanApproval(for: taskID) && !isTaskApprovedForExecution(taskID) {
+            let blockedMessage = message("Execution requires human approval for this task")
+            lastBoardMessage = blockedMessage
+            lastBoardMessageSeverity = .warning
+            appendAgentExecutionEvent(
+                agentID: agent.id,
+                taskID: taskID,
+                taskTitle: tasks[taskIndex].title,
+                status: .failed,
+                phase: .governance,
+                message: blockedMessage
+            )
+            return nil
+        }
+        if let quotaMessage = quotaCheckMessage(for: tasks[taskIndex]) {
+            lastBoardMessage = quotaMessage
+            lastBoardMessageSeverity = .warning
+            appendAgentExecutionEvent(
+                agentID: agent.id,
+                taskID: taskID,
+                taskTitle: tasks[taskIndex].title,
+                status: .failed,
+                phase: .governance,
+                message: quotaMessage
+            )
+            return nil
+        }
 
         if tasks[taskIndex].status == .todo {
             guard !isWIPLimitReached(for: .inProgress, excluding: taskID) else {
@@ -4616,11 +4956,14 @@ final class KanbanBoardViewModel: ObservableObject {
         record.lastDebugOutput = nil
         record.lastAgentID = agent.id
         tasks[taskIndex].executionRecord = record
+        taskExecutionApprovalsByTaskID[taskID] = nil
+        consumeExecutionQuota(for: tasks[taskIndex])
         appendAgentExecutionEvent(
             agentID: agent.id,
             taskID: taskID,
             taskTitle: tasks[taskIndex].title,
             status: .running,
+            phase: .lifecycle,
             message: message("Started execution · %@", tasks[taskIndex].title),
             details: message("Story points: %d", tasks[taskIndex].storyPoints)
         )
@@ -4658,6 +5001,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     taskID: prepared.taskID,
                     taskTitle: tasks[taskIndex].title,
                     status: .failed,
+                    phase: .result,
                     message: blockerMessage,
                     details: normalizedSummary
                 )
@@ -4692,6 +5036,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     taskID: prepared.taskID,
                     taskTitle: tasks[taskIndex].title,
                     status: .succeeded,
+                    phase: .result,
                     message: message("Execution succeeded · %@", tasks[taskIndex].title),
                     details: normalizedSummary
                 )
@@ -4725,6 +5070,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 taskID: prepared.taskID,
                 taskTitle: tasks[taskIndex].title,
                 status: .failed,
+                phase: .result,
                 message: failedRecord.lastError ?? self.message("Unknown execution error"),
                 details: eventDetails
             )
@@ -4824,6 +5170,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     taskID: tasks[taskIndex].id,
                     taskTitle: tasks[taskIndex].title,
                     status: .failed,
+                    phase: .system,
                     message: record.lastError ?? message("Execution interrupted by app restart. Resume interrupted run to continue.")
                 )
             }
@@ -4849,6 +5196,12 @@ final class KanbanBoardViewModel: ObservableObject {
         boards[selectedBoardIndex].tasks = tasks
         boards[selectedBoardIndex].agents = agents
         boards[selectedBoardIndex].wipLimits = wipLimits
+    }
+
+    private func pruneExecutionGovernanceStateForExistingTasks() {
+        let validTaskIDs = Set(boards.flatMap { $0.tasks.map(\.id) })
+        taskExecutionApprovalsByTaskID = taskExecutionApprovalsByTaskID.filter { validTaskIDs.contains($0.key) }
+        executionTimelineByTaskID = executionTimelineByTaskID.filter { validTaskIDs.contains($0.key) }
     }
 
     private func loadBoard(_ boardID: UUID) {
@@ -5010,6 +5363,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private func persistBoardState() {
         guard let boardStore else { return }
         syncCurrentBoardRecord()
+        pruneExecutionGovernanceStateForExistingTasks()
         let snapshot = KanbanBoardSnapshot(
             tasks: tasks,
             agents: agents,
@@ -5018,7 +5372,11 @@ final class KanbanBoardViewModel: ObservableObject {
             selectedBoardID: selectedBoardID,
             taskTemplates: taskTemplates,
             executionAutoRetryConfiguration: executionAutoRetryConfiguration,
-            executionCheckpoint: executionCheckpoint
+            executionCheckpoint: executionCheckpoint,
+            executionApprovalPolicy: executionApprovalPolicy,
+            taskExecutionApprovalsByTaskID: taskExecutionApprovalsByTaskID,
+            executionQuotaPolicy: executionQuotaPolicy,
+            executionQuotaUsage: executionQuotaUsage
         )
         try? boardStore.save(snapshot)
     }
@@ -5047,6 +5405,10 @@ extension KanbanBoardViewModel {
                     taskTemplates: snapshot.taskTemplates,
                     executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
                     executionCheckpoint: snapshot.executionCheckpoint,
+                    executionApprovalPolicy: snapshot.executionApprovalPolicy ?? .init(),
+                    taskExecutionApprovalsByTaskID: snapshot.taskExecutionApprovalsByTaskID ?? [:],
+                    executionQuotaPolicy: snapshot.executionQuotaPolicy ?? .init(),
+                    executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
                     taskExecutor: taskExecutor,
@@ -5063,6 +5425,10 @@ extension KanbanBoardViewModel {
                 taskTemplates: snapshot.taskTemplates,
                 executionAutoRetryConfiguration: snapshot.executionAutoRetryConfiguration ?? .init(),
                 executionCheckpoint: snapshot.executionCheckpoint,
+                executionApprovalPolicy: snapshot.executionApprovalPolicy ?? .init(),
+                taskExecutionApprovalsByTaskID: snapshot.taskExecutionApprovalsByTaskID ?? [:],
+                executionQuotaPolicy: snapshot.executionQuotaPolicy ?? .init(),
+                executionQuotaUsage: snapshot.executionQuotaUsage ?? .init(),
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
                 taskExecutor: taskExecutor,
