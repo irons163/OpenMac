@@ -9719,6 +9719,7 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Milestones: %d", 1)) == true)
         #expect(viewModel.lastBoardMessage?.contains(L10n.format("Total Epics: %d", 1)) == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Total"))]: 1/1 (100%)") == true)
+        #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Unassigned"))]: 0/1") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("To Do"))/\(L10n.string("In Progress"))/\(L10n.string("Review"))/\(L10n.string("Done"))]: 0/0/0/1") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Succeeded"))/\(L10n.string("Failed"))/\(L10n.string("Running"))]: 1/0/0") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Milestone"))]:") == true)
@@ -9769,10 +9770,44 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
         #expect(viewModel.lastBoardMessage?.contains("1 blocked by dependencies") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Total"))]: 1/2 (50%)") == true)
+        #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Unassigned"))]: 0/2") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("To Do"))/\(L10n.string("In Progress"))/\(L10n.string("Review"))/\(L10n.string("Done"))]: 1/0/0/1") == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Succeeded"))/\(L10n.string("Failed"))/\(L10n.string("Running"))]: 1/0/0") == true)
         #expect(viewModel.lastBoardMessage?.contains(L10n.format("Milestone: %@", L10n.string("Unscheduled"))) == true)
         #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Epic"))]:") == false)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm autopilot summary reports unassigned coverage when auto-assign is disabled")
+    func runPMAutopilotInBackgroundSummaryIncludesUnassignedWhenAutoAssignDisabled() {
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Core UI",
+                details: "Implement views",
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var startedExecutions: Int?
+        viewModel.runPMAutopilotInBackground(
+            plannedTickets: plannedTickets,
+            autoAssign: false
+        ) { _, _, executions, _ in
+            startedExecutions = executions
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { startedExecutions != nil })
+        #expect(startedExecutions == 0)
+        #expect(viewModel.lastBoardMessage?.contains("PM autopilot finished") == true)
+        #expect(viewModel.lastBoardMessage?.contains("\(L10n.string("Roadmap")) [\(L10n.string("Unassigned"))]: 1/1") == true)
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
