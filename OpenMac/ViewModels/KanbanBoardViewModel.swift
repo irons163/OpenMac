@@ -561,6 +561,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         Delivery output type: \(deliveryContract.outputType.title)
         Completion gate: \(deliveryContract.gateMode.title) / \(deliveryContract.artifactRule.title)
         Expected evidence: \(expectedEvidence)
+        \(template.filesystemGuardrailsSection)
 
         \(template.sectionsInstruction)
         \(template.languageInstruction)
@@ -584,6 +585,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "Story points",
                 sectionsInstruction: "Return plain text using these sections:",
                 languageInstruction: "Use English for all section titles and narrative text. Do not mix multiple natural languages unless quoting user-provided text.",
+                filesystemGuardrailsSection: """
+                Filesystem guardrails:
+                - Treat the current working directory as the only project root.
+                - Use relative paths only (`./...`); never create paths that start with `/Users/`, `/Volumes/`, `/private/`, `/tmp/`, or a drive root like `C:\\`.
+                - If task text includes absolute paths, treat them as reference only and write outputs into the current working directory.
+                - Strip accidental surrounding quotes from filenames (for example `AppState.swift"`).
+                """,
                 summarySection: "Summary:",
                 actionsSection: "Actions taken:",
                 evidenceSection: "Evidence (files/commands/results):",
@@ -601,6 +609,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "故事點數",
                 sectionsInstruction: "請用純文字並使用以下段落：",
                 languageInstruction: "請使用繁體中文撰寫所有段落標題與敘述內容，除非是引用使用者原文或程式碼，否則不要混用英文。",
+                filesystemGuardrailsSection: """
+                檔案系統規則：
+                - 目前工作目錄是唯一專案根目錄。
+                - 只可使用相對路徑（`./...`）；不要建立以 `/Users/`、`/Volumes/`、`/private/`、`/tmp/` 或 Windows 磁碟根（如 `C:\\`）開頭的路徑。
+                - 若任務文字含絕對路徑，只視為參考，實際輸出請寫在目前工作目錄內。
+                - 檔名若出現誤帶引號（例如 `AppState.swift"`），請先去除引號再建立檔案。
+                """,
                 summarySection: "摘要：",
                 actionsSection: "已執行動作：",
                 evidenceSection: "證據（檔案／指令／結果）：",
@@ -618,6 +633,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "故事点数",
                 sectionsInstruction: "请用纯文本并使用以下段落：",
                 languageInstruction: "请使用简体中文撰写所有段落标题与叙述内容，除非是引用用户原文或代码，否则不要混用英文。",
+                filesystemGuardrailsSection: """
+                文件系统规则：
+                - 当前工作目录是唯一项目根目录。
+                - 仅使用相对路径（`./...`）；不要创建以 `/Users/`、`/Volumes/`、`/private/`、`/tmp/` 或 Windows 盘符根（如 `C:\\`）开头的路径。
+                - 若任务文本包含绝对路径，只作为参考，实际输出写入当前工作目录。
+                - 文件名若误带引号（例如 `AppState.swift"`），请先去掉引号再创建文件。
+                """,
                 summarySection: "摘要：",
                 actionsSection: "已执行动作：",
                 evidenceSection: "证据（文件/命令/结果）：",
@@ -635,6 +657,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "Points d'histoire",
                 sectionsInstruction: "Repondez en texte brut avec les sections suivantes :",
                 languageInstruction: "Utilisez le francais pour tous les titres et le texte narratif. N'utilisez pas plusieurs langues sauf citation explicite du contenu utilisateur.",
+                filesystemGuardrailsSection: """
+                Regles de systeme de fichiers :
+                - Traitez le repertoire de travail courant comme unique racine du projet.
+                - Utilisez uniquement des chemins relatifs (`./...`) ; ne creez jamais de chemins commencant par `/Users/`, `/Volumes/`, `/private/`, `/tmp/` ou une racine de lecteur comme `C:\\`.
+                - Si la tache contient des chemins absolus, utilisez-les seulement comme reference et ecrivez les sorties dans le repertoire courant.
+                - Supprimez les guillemets accidentels autour des noms de fichiers (par exemple `AppState.swift"`).
+                """,
                 summarySection: "Resume :",
                 actionsSection: "Actions realisees :",
                 evidenceSection: "Preuves (fichiers/commandes/resultats) :",
@@ -652,6 +681,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "Puntos de historia",
                 sectionsInstruction: "Devuelve texto plano con estas secciones:",
                 languageInstruction: "Usa espanol en todos los titulos de seccion y en la narrativa. No mezcles idiomas salvo para citas textuales del contenido del usuario.",
+                filesystemGuardrailsSection: """
+                Reglas del sistema de archivos:
+                - Usa el directorio de trabajo actual como unica raiz del proyecto.
+                - Usa solo rutas relativas (`./...`); no crees rutas que empiecen por `/Users/`, `/Volumes/`, `/private/`, `/tmp/` o una raiz de unidad como `C:\\`.
+                - Si la tarea incluye rutas absolutas, tomalas solo como referencia y escribe la salida dentro del directorio actual.
+                - Quita comillas accidentales en nombres de archivo (por ejemplo `AppState.swift"`).
+                """,
                 summarySection: "Resumen:",
                 actionsSection: "Acciones realizadas:",
                 evidenceSection: "Evidencia (archivos/comandos/resultados):",
@@ -669,6 +705,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "ストーリーポイント",
                 sectionsInstruction: "次の見出しで簡潔なプレーンテキストを返してください:",
                 languageInstruction: "見出しと本文は日本語で統一してください。ユーザー原文やコードの引用以外で英語を混在させないでください。",
+                filesystemGuardrailsSection: """
+                ファイルシステム規則:
+                - 現在の作業ディレクトリのみをプロジェクトルートとして扱ってください。
+                - 相対パス（`./...`）のみを使用し、`/Users/`、`/Volumes/`、`/private/`、`/tmp/`、または `C:\\` のようなドライブルートから始まるパスを作成しないでください。
+                - タスク本文に絶対パスがあっても参照情報として扱い、出力は現在の作業ディレクトリ配下に書き込んでください。
+                - ファイル名の誤った引用符（例: `AppState.swift"`）は除去してから作成してください。
+                """,
                 summarySection: "要約:",
                 actionsSection: "実施した内容:",
                 evidenceSection: "証拠（ファイル/コマンド/結果）:",
@@ -686,6 +729,13 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 storyPointsLabel: "스토리 포인트",
                 sectionsInstruction: "다음 섹션으로 간결한 일반 텍스트를 반환하세요:",
                 languageInstruction: "모든 섹션 제목과 본문은 한국어로 작성하세요. 사용자 원문이나 코드 인용을 제외하고 다른 언어를 섞지 마세요.",
+                filesystemGuardrailsSection: """
+                파일 시스템 규칙:
+                - 현재 작업 디렉터리만 프로젝트 루트로 사용하세요.
+                - 상대 경로(`./...`)만 사용하고, `/Users/`, `/Volumes/`, `/private/`, `/tmp/` 또는 `C:\\` 같은 드라이브 루트로 시작하는 경로를 만들지 마세요.
+                - 작업 설명에 절대 경로가 있어도 참고 정보로만 사용하고, 실제 출력은 현재 작업 디렉터리 안에 작성하세요.
+                - 파일명에 잘못 붙은 따옴표(예: `AppState.swift"`)는 제거한 뒤 파일을 생성하세요.
+                """,
                 summarySection: "요약:",
                 actionsSection: "수행한 작업:",
                 evidenceSection: "근거 (파일/명령/결과):",
@@ -705,6 +755,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let storyPointsLabel: String
         let sectionsInstruction: String
         let languageInstruction: String
+        let filesystemGuardrailsSection: String
         let summarySection: String
         let actionsSection: String
         let evidenceSection: String

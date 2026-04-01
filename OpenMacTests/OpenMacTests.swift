@@ -561,8 +561,57 @@ struct AgentTaskExecutorTests {
         #expect(capturedPrompt.contains("代理: Bridge Agent"))
         #expect(capturedPrompt.contains("任務標題"))
         #expect(capturedPrompt.contains("請使用繁體中文撰寫所有段落標題與敘述內容"))
+        #expect(capturedPrompt.contains("檔案系統規則"))
+        #expect(capturedPrompt.contains("目前工作目錄是唯一專案根目錄"))
         #expect(capturedPrompt.contains("摘要："))
         #expect(capturedPrompt.contains("所需技能: 無"))
+    }
+
+    @Test("default executor codex bridge prompt includes filesystem guardrails in english")
+    func openAICompatibleCodexBridgePromptIncludesFilesystemGuardrailsInEnglish() {
+        let task = WorkTask(
+            title: "Build Todo app",
+            details: "Project path reference: /Users/phil/Library/Application Support/OpenMac/Projects/TodoApp",
+            requiredSkills: [],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5.2",
+                openAIAuthMode: .codexBridge
+            )
+        )
+
+        var capturedPrompt = ""
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            appLanguageOverrideProvider: { AppLanguage.english.rawValue },
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                capturedPrompt = request.prompt
+                return "Bridge run complete"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Bridge run complete")
+        case .failure:
+            #expect(Bool(false), "Expected success for Codex Bridge runtime")
+        }
+        #expect(capturedPrompt.contains("Filesystem guardrails:"))
+        #expect(capturedPrompt.contains("Treat the current working directory as the only project root."))
+        #expect(capturedPrompt.contains("never create paths that start with `/Users/`"))
+        #expect(capturedPrompt.contains("Strip accidental surrounding quotes from filenames"))
     }
 
     @Test("default executor codex bridge request honors projects directory override environment")
