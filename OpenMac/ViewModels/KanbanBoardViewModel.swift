@@ -2910,6 +2910,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func addPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
         autoAssign: Bool,
+        deliveryContract: TaskDeliveryContract = .defaultContract,
         generateAcceptanceE2ETasks: Bool = false
     ) -> Int {
         let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
@@ -2918,7 +2919,11 @@ final class KanbanBoardViewModel: ObservableObject {
             lastBoardMessageSeverity = .warning
             return 0
         }
-        let createdTaskDescriptors = addNormalizedPlannedTickets(normalizedTickets, autoAssign: autoAssign)
+        let createdTaskDescriptors = addNormalizedPlannedTickets(
+            normalizedTickets,
+            autoAssign: autoAssign,
+            deliveryContract: deliveryContract
+        )
         if generateAcceptanceE2ETasks {
             let sourceTaskIDs = Set(createdTaskDescriptors.map(\.taskID))
             let createdAcceptanceTasks = createAcceptanceE2ETasks(
@@ -2938,10 +2943,12 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private func addNormalizedPlannedTickets(
         _ normalizedTickets: [PMPlannedTicket],
-        autoAssign: Bool
+        autoAssign: Bool,
+        deliveryContract: TaskDeliveryContract = .defaultContract
     ) -> [PMCreatedTaskDescriptor] {
         var createdTasks: [PMCreatedTaskDescriptor] = []
         createdTasks.reserveCapacity(normalizedTickets.count)
+        let resolvedDeliveryContract = deliveryContract.normalized
 
         for plannedTicket in normalizedTickets {
             let task = WorkTask(
@@ -2951,8 +2958,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 storyPoints: plannedTicket.storyPoints,
                 status: .todo,
                 assignedAgentID: nil,
-                // PM-generated tickets are planning artifacts first; keep gate flexible by default.
-                deliveryContract: .defaultContract
+                deliveryContract: resolvedDeliveryContract
             )
             tasks.append(task)
             let milestone = plannedTicket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5668,6 +5674,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private func preparePMAutopilot(
         plannedTickets: [PMPlannedTicket],
         autoAssign: Bool,
+        deliveryContract: TaskDeliveryContract,
         generateAcceptanceE2ETasks: Bool
     ) -> PMAutopilotPreparation<PMCreatedTaskDescriptor>? {
         let normalizedTickets = plannedTickets.compactMap(Self.normalizedPlannedTicket(from:))
@@ -5680,7 +5687,8 @@ final class KanbanBoardViewModel: ObservableObject {
         let createdAgents = createMissingAgentsForPlannedTickets(normalizedTickets)
         let createdTaskDescriptors = addNormalizedPlannedTickets(
             normalizedTickets,
-            autoAssign: autoAssign
+            autoAssign: autoAssign,
+            deliveryContract: deliveryContract
         )
         if generateAcceptanceE2ETasks {
             _ = createAcceptanceE2ETasks(
@@ -5703,6 +5711,7 @@ final class KanbanBoardViewModel: ObservableObject {
     func runPMAutopilotInBackground(
         plannedTickets: [PMPlannedTicket],
         autoAssign: Bool = true,
+        deliveryContract: TaskDeliveryContract = .defaultContract,
         autoCreateAcceptanceE2ETasks: Bool = false,
         autoCreateMissingDependenciesDuringCycle: Bool = true,
         maxAutoCyclePasses: Int = 3,
@@ -5717,6 +5726,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.preparePMAutopilot(
                     plannedTickets: plannedTickets,
                     autoAssign: autoAssign,
+                    deliveryContract: deliveryContract,
                     generateAcceptanceE2ETasks: autoCreateAcceptanceE2ETasks
                 )
             },

@@ -104,6 +104,7 @@ struct ContentView: View {
     @State private var pmCreateNewBoardForPlan = true
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
+    @State private var pmTicketDeliveryProfile: PMTicketDeliveryProfile = .balanced
     @State private var pmSelectedTemplateID = "custom"
     @State private var pmBlueprintVision = ""
     @State private var pmBlueprintTargetUsers = ""
@@ -743,6 +744,7 @@ struct ContentView: View {
                 autoCreateMissingDependenciesDuringCycle: $autoCycleAutoCreateMissingDependencies,
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
+                ticketDeliveryProfile: $pmTicketDeliveryProfile,
                 selectedTemplateID: $pmSelectedTemplateID,
                 templateOptions: pmTemplateOptions,
                 blueprintVision: $pmBlueprintVision,
@@ -1116,6 +1118,7 @@ struct ContentView: View {
         pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmTicketDeliveryProfile = .balanced
         pmTestPlanText = ""
         isShowingPMPlannerSheet = true
     }
@@ -1130,6 +1133,7 @@ struct ContentView: View {
         pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmTicketDeliveryProfile = .balanced
         pmTestPlanText = ""
         isShowingPMPlannerSheet = false
     }
@@ -1234,7 +1238,11 @@ struct ContentView: View {
             handleBoardContextChanged()
         }
 
-        let createdCount = viewModel.addPlannedTickets(pmPlannedTickets, autoAssign: pmAutoAssignAfterCreate)
+        let createdCount = viewModel.addPlannedTickets(
+            pmPlannedTickets,
+            autoAssign: pmAutoAssignAfterCreate,
+            deliveryContract: pmTicketDeliveryProfile.contract
+        )
         guard createdCount > 0 else { return }
         refreshTriageSelections()
         closePMPlannerSheet()
@@ -1325,6 +1333,7 @@ struct ContentView: View {
         viewModel.runPMAutopilotInBackground(
             plannedTickets: pmPlannedTickets,
             autoAssign: pmAutoAssignAfterCreate,
+            deliveryContract: pmTicketDeliveryProfile.contract,
             autoCreateMissingDependenciesDuringCycle: autoCycleAutoCreateMissingDependencies,
             maxAutoCyclePasses: autoCycleMaxPasses
         ) { _, createdTickets, _, _ in
@@ -4641,6 +4650,7 @@ private struct PMPlannerSheet: View {
     @Binding var autoCreateMissingDependenciesDuringCycle: Bool
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
+    @Binding var ticketDeliveryProfile: PMTicketDeliveryProfile
     @Binding var selectedTemplateID: String
     let templateOptions: [PMBriefTemplateOption]
     @Binding var blueprintVision: String
@@ -4792,6 +4802,19 @@ private struct PMPlannerSheet: View {
             Text(L10n.string("PM templates prefill the project brief so you can generate tickets faster."))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Ticket Delivery Profile", selection: $ticketDeliveryProfile) {
+                    ForEach(PMTicketDeliveryProfile.allCases) { profile in
+                        Text(profile.title).tag(profile)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Applies to generated tickets: \(ticketDeliveryProfile.contract.outputType.title) · \(ticketDeliveryProfile.contract.gateMode.title) · \(ticketDeliveryProfile.contract.requiredArtifactsText)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
             Toggle(L10n.string("Create New Board for Plan"), isOn: $createNewBoardForPlan)

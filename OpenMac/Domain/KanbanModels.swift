@@ -709,6 +709,42 @@ enum TaskDeliveryOutputType: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum PMTicketDeliveryProfile: String, CaseIterable, Codable, Identifiable {
+    case balanced
+    case productBuild
+    case contentAndDocs
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .balanced:
+            return "Balanced"
+        case .productBuild:
+            return "Product Build"
+        case .contentAndDocs:
+            return "Content & Docs"
+        }
+    }
+
+    var contract: TaskDeliveryContract {
+        switch self {
+        case .balanced:
+            return .defaultContract
+        case .productBuild:
+            return TaskDeliveryContract(
+                outputType: .app,
+                gateMode: .strict
+            )
+        case .contentAndDocs:
+            return TaskDeliveryContract(
+                outputType: .document,
+                gateMode: .flexible
+            )
+        }
+    }
+}
+
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
     case strict
     case flexible

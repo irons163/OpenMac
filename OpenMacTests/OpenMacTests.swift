@@ -2751,6 +2751,32 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks[0].details.contains("Initial scope alignment."))
     }
 
+    @Test("planned ticket creation applies requested delivery contract")
+    func pmPlannerPlannedTicketCreationAppliesDeliveryContract() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Implementation",
+                details: "Build primary app flow.",
+                requiredSkills: ["swiftui"],
+                storyPoints: 3
+            )
+        ]
+        let contract = TaskDeliveryContract(outputType: .app, gateMode: .strict)
+
+        let createdCount = viewModel.addPlannedTickets(
+            plannedTickets,
+            autoAssign: false,
+            deliveryContract: contract
+        )
+
+        #expect(createdCount == 1)
+        #expect(viewModel.tasks.count == 1)
+        #expect(viewModel.tasks[0].resolvedDeliveryContract.outputType == contract.outputType)
+        #expect(viewModel.tasks[0].resolvedDeliveryContract.gateMode == contract.gateMode)
+        #expect(viewModel.tasks[0].resolvedDeliveryContract.artifactRule == contract.artifactRule)
+    }
+
     @Test("pm planner bootstrap creates agents for missing required skills")
     func pmPlannerBootstrapCreatesMissingSkillAgents() {
         let existingAgent = AgentProfile(name: "Existing UI", skills: ["swiftui"], maxConcurrentTasks: 3)
@@ -3694,6 +3720,22 @@ struct KanbanSupportTypeTests {
         #expect(TaskDeliveryGateMode.flexible.title == "Flexible")
         #expect(TaskDeliveryArtifactRule.all.title == "All")
         #expect(TaskDeliveryArtifact.images.title == "Images")
+    }
+
+    @Test("PM ticket delivery profiles map to expected contracts")
+    func pmTicketDeliveryProfileContracts() {
+        #expect(PMTicketDeliveryProfile.balanced.contract == .defaultContract)
+
+        let product = PMTicketDeliveryProfile.productBuild.contract
+        #expect(product.outputType == .app)
+        #expect(product.gateMode == .strict)
+        #expect(product.requiredArtifacts.contains(.files))
+        #expect(product.requiredArtifacts.contains(.tests))
+
+        let content = PMTicketDeliveryProfile.contentAndDocs.contract
+        #expect(content.outputType == .document)
+        #expect(content.gateMode == .flexible)
+        #expect(content.requiredArtifacts.contains(.report))
     }
 }
 
