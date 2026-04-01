@@ -1239,7 +1239,55 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
            codexHome.isEmpty {
             environment["CODEX_HOME"] = nil
         }
+        let homePath = environment["HOME"] ?? NSHomeDirectory()
+        let additionalPathDirectories = [
+            resolvedCodexExecutableURL(environment: environment, homeDirectoryPath: homePath)?
+                .deletingLastPathComponent().path,
+            "\(homePath)/.codex/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin"
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if let mergedPath = mergedPATH(
+            prependingDirectories: additionalPathDirectories,
+            existingPath: environment["PATH"]
+        ) {
+            environment["PATH"] = mergedPath
+        }
         return environment
+    }
+
+    private static func mergedPATH(
+        prependingDirectories directories: [String],
+        existingPath: String?,
+        fileManager: FileManager = .default
+    ) -> String? {
+        var orderedPaths: [String] = []
+        var seen = Set<String>()
+
+        for directory in directories {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: directory, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            guard seen.insert(directory).inserted else { continue }
+            orderedPaths.append(directory)
+        }
+
+        let existingSegments = (existingPath ?? "")
+            .split(separator: ":")
+            .map { String($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for segment in existingSegments where seen.insert(segment).inserted {
+            orderedPaths.append(segment)
+        }
+
+        guard !orderedPaths.isEmpty else { return nil }
+        return orderedPaths.joined(separator: ":")
     }
 
     private static func codexLoginCommandForCurrentProfile(
@@ -4550,6 +4598,76 @@ final class KanbanBoardViewModel: ObservableObject {
         return "'\(escaped)'"
     }
 
+    private static func shellCommandEnvironment(
+        _ sourceEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = sourceEnvironment
+        if let codexHome = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           codexHome.isEmpty {
+            environment["CODEX_HOME"] = nil
+        }
+
+        let fileManager = FileManager.default
+        let homePath = environment["HOME"] ?? NSHomeDirectory()
+        let codexExecutableCandidates = [
+            environment["CODEX_CLI_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex",
+            "\(homePath)/.local/bin/codex"
+        ]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty && fileManager.isExecutableFile(atPath: $0) }
+        let codexExecutableDirectories = codexExecutableCandidates
+            .map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+
+        let pathDirectories = codexExecutableDirectories + [
+            "\(homePath)/.codex/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin"
+        ]
+        if let mergedPath = mergedShellPATH(
+            prependingDirectories: pathDirectories,
+            existingPath: environment["PATH"],
+            fileManager: fileManager
+        ) {
+            environment["PATH"] = mergedPath
+        }
+
+        return environment
+    }
+
+    private static func mergedShellPATH(
+        prependingDirectories directories: [String],
+        existingPath: String?,
+        fileManager: FileManager
+    ) -> String? {
+        var orderedPaths: [String] = []
+        var seen = Set<String>()
+
+        for directory in directories {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: directory, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            guard seen.insert(directory).inserted else { continue }
+            orderedPaths.append(directory)
+        }
+
+        let existingSegments = (existingPath ?? "")
+            .split(separator: ":")
+            .map { String($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        for segment in existingSegments where seen.insert(segment).inserted {
+            orderedPaths.append(segment)
+        }
+
+        guard !orderedPaths.isEmpty else { return nil }
+        return orderedPaths.joined(separator: ":")
+    }
+
     private static func runShellCommand(
         _ command: String,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -4557,12 +4675,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
-        var processEnvironment = environment
-        if let codexHome = processEnvironment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           codexHome.isEmpty {
-            processEnvironment["CODEX_HOME"] = nil
-        }
-        process.environment = processEnvironment
+        process.environment = shellCommandEnvironment(environment)
 
         let outputPipe = Pipe()
         process.standardOutput = outputPipe

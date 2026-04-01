@@ -1322,7 +1322,7 @@ struct AgentTaskExecutorTests {
             environment: ["CODEX_HOME": "   ", "PATH": "/usr/bin"]
         )
         #expect(processedEnv["CODEX_HOME"] == nil)
-        #expect(processedEnv["PATH"] == "/usr/bin")
+        #expect(processedEnv["PATH"]?.split(separator: ":").contains("/usr/bin") == true)
 
         let loginCommand = KanbanBoardViewModelTestHooks.codexLoginCommand(
             environment: ["HOME": "/tmp/home", "CODEX_HOME": "/tmp/custom-codex-home"],
@@ -1345,6 +1345,12 @@ struct AgentTaskExecutorTests {
             homeDirectoryPath: tempDirectory.path
         )
         #expect(resolvedFromExplicit == executableURL.path)
+
+        let processedWithExplicitCodex = KanbanBoardViewModelTestHooks.codexBridgeProcessEnvironment(
+            environment: ["CODEX_CLI_PATH": executableURL.path, "PATH": "/usr/bin", "HOME": tempDirectory.path]
+        )
+        #expect(processedWithExplicitCodex["PATH"]?.split(separator: ":").first.map(String.init) == tempDirectory.path)
+        #expect(processedWithExplicitCodex["PATH"]?.split(separator: ":").contains("/usr/bin") == true)
 
         let resolvedFromPATH = KanbanBoardViewModelTestHooks.resolvedCodexExecutablePath(
             environment: ["PATH": tempDirectory.path],
