@@ -4353,10 +4353,7 @@ final class KanbanBoardViewModel: ObservableObject {
         onProgress: @escaping (_ update: String) -> Void
     ) -> (success: Bool, details: String) {
         if server.normalizedName == "xcode" {
-            let xcodeProvisioning = provisionBuiltinXcodeMCPServer()
-            if xcodeProvisioning.success {
-                return xcodeProvisioning
-            }
+            return provisionBuiltinXcodeMCPServer()
         }
 
         guard let bootstrapCommand = server.bootstrapCommand,
@@ -4384,6 +4381,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private func provisionBuiltinXcodeMCPServer() -> (success: Bool, details: String) {
         let environment = ProcessInfo.processInfo.environment
         let homePath = environment["HOME"] ?? NSHomeDirectory()
+        let fileManager = FileManager.default
         let explicitCandidate = environment["OPENMAC_XCODE_MCP_COMMAND"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let candidates = [
@@ -4396,21 +4394,41 @@ final class KanbanBoardViewModel: ObservableObject {
         ]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        var lastFailureDetails = ""
 
         for candidate in candidates {
+            guard fileManager.isExecutableFile(atPath: candidate) else {
+                continue
+            }
             let addCommand = "codex mcp add xcode -- \(Self.shellQuoted(candidate))"
             guard let result = try? Self.runShellCommand(addCommand, environment: environment) else {
+                lastFailureDetails = "failed to run: \(addCommand)"
                 continue
             }
             if result.code == 0 {
                 return (true, result.output)
             }
+
+            let normalizedOutput = result.output.lowercased()
+            if normalizedOutput.contains("already exists") {
+                let verifyCommand = "codex mcp get xcode --json"
+                if let verify = try? Self.runShellCommand(verifyCommand, environment: environment),
+                   verify.code == 0 {
+                    return (true, verify.output)
+                }
+            }
+            lastFailureDetails = result.output.isEmpty ? "exit \(result.code)" : result.output
         }
 
+        let resolvedHint = candidates.first(where: { fileManager.isExecutableFile(atPath: $0) }) ?? "<none>"
         return (
             false,
             message(
-                "Unable to auto-add xcode MCP server. Ensure xcode-mcpbridge is installed, then add command in Developer > MCP Servers."
+                "Unable to auto-add xcode MCP server. Resolved bridge path: %@. %@",
+                resolvedHint,
+                lastFailureDetails.isEmpty
+                    ? message("Ensure xcode-mcpbridge is installed, then add command in Developer > MCP Servers.")
+                    : lastFailureDetails
             )
         )
     }
