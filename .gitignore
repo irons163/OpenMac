@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Build artifacts
+DerivedData/
+.build/
+.swiftpm/
+*.xcresult
+*.profdata
+*.xccovreport
+*.xccovarchive
+
+# Logs
+*.log
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+*secrets*.json
+*credentials*.json
