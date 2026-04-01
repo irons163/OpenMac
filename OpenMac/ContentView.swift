@@ -59,12 +59,14 @@ struct ContentView: View {
     @State private var newTaskDetails = ""
     @State private var newTaskSkills = ""
     @State private var newTaskPoints = 1
+    @State private var newTaskDeliveryContract = TaskDeliveryContract.defaultContract
     @State private var selectedTaskTemplateID: UUID?
     @State private var editingTaskID: UUID?
     @State private var editTaskTitle = ""
     @State private var editTaskDetails = ""
     @State private var editTaskSkills = ""
     @State private var editTaskPoints = 1
+    @State private var editTaskDeliveryContract = TaskDeliveryContract.defaultContract
     @State private var newAgentName = ""
     @State private var newAgentSkills = ""
     @State private var newAgentCapacity = 3
@@ -799,6 +801,7 @@ struct ContentView: View {
                 details: $newTaskDetails,
                 skills: $newTaskSkills,
                 storyPoints: $newTaskPoints,
+                deliveryContract: $newTaskDeliveryContract,
                 selectedTemplateID: $selectedTaskTemplateID,
                 templates: viewModel.taskTemplates,
                 boardMessage: viewModel.lastBoardMessage,
@@ -824,6 +827,7 @@ struct ContentView: View {
                 details: $editTaskDetails,
                 skills: $editTaskSkills,
                 storyPoints: $editTaskPoints,
+                deliveryContract: $editTaskDeliveryContract,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditTaskSheet,
@@ -960,6 +964,7 @@ struct ContentView: View {
         newTaskDetails = ""
         newTaskSkills = ""
         newTaskPoints = 1
+        newTaskDeliveryContract = .defaultContract
         selectedTaskTemplateID = nil
         isShowingNewTaskSheet = false
     }
@@ -1011,6 +1016,7 @@ struct ContentView: View {
         editTaskDetails = task.details
         editTaskSkills = task.requiredSkills.sorted().joined(separator: ", ")
         editTaskPoints = task.storyPoints
+        editTaskDeliveryContract = task.resolvedDeliveryContract
         isShowingEditTaskSheet = true
     }
 
@@ -1020,6 +1026,7 @@ struct ContentView: View {
         editTaskDetails = ""
         editTaskSkills = ""
         editTaskPoints = 1
+        editTaskDeliveryContract = .defaultContract
         isShowingEditTaskSheet = false
     }
 
@@ -1419,7 +1426,8 @@ struct ContentView: View {
                 title: editTaskTitle,
                 details: editTaskDetails,
                 requiredSkillsText: editTaskSkills,
-                storyPoints: editTaskPoints
+                storyPoints: editTaskPoints,
+                deliveryContract: editTaskDeliveryContract
             ),
             onChanged: refreshAndCloseEditTaskSheet
         )
@@ -1432,6 +1440,7 @@ struct ContentView: View {
                 details: newTaskDetails,
                 requiredSkillsText: newTaskSkills,
                 storyPoints: newTaskPoints,
+                deliveryContract: newTaskDeliveryContract,
                 autoAssign: autoAssign
             ),
             onChanged: refreshAndResetTaskDraft
@@ -3389,7 +3398,8 @@ struct ContentView: View {
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int
+        storyPoints: Int,
+        deliveryContract: TaskDeliveryContract
     ) -> Bool {
         guard let editingTaskID else { return false }
         return applyTaskEdits(
@@ -3398,7 +3408,8 @@ struct ContentView: View {
             title: title,
             details: details,
             requiredSkillsText: requiredSkillsText,
-            storyPoints: storyPoints
+            storyPoints: storyPoints,
+            deliveryContract: deliveryContract
         )
     }
 
@@ -3507,14 +3518,16 @@ struct ContentView: View {
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int
+        storyPoints: Int,
+        deliveryContract: TaskDeliveryContract
     ) -> Bool {
         viewModel.updateTask(
             taskID,
             title: title,
             details: details,
             requiredSkillsText: requiredSkillsText,
-            storyPoints: storyPoints
+            storyPoints: storyPoints,
+            deliveryContract: deliveryContract
         )
     }
 
@@ -4006,6 +4019,10 @@ private struct TaskCardView: View {
                     .font(.caption)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
             }
+
+            Text("Delivery: \(task.resolvedDeliveryContract.outputType.title) · \(task.resolvedDeliveryContract.gateMode.title)")
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: colorScheme))
 
             HStack {
                 Text(L10n.format("SP: %d", task.storyPoints))
@@ -5246,6 +5263,7 @@ private struct NewTaskSheet: View {
     @Binding var details: String
     @Binding var skills: String
     @Binding var storyPoints: Int
+    @Binding var deliveryContract: TaskDeliveryContract
     @Binding var selectedTemplateID: UUID?
     let templates: [TaskTemplate]
     let boardMessage: String?
@@ -5283,6 +5301,32 @@ private struct NewTaskSheet: View {
 
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
+            Picker("Output Type", selection: outputTypeBinding) {
+                ForEach(TaskDeliveryOutputType.allCases) { outputType in
+                    Text(outputType.title).tag(outputType)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Picker("Completion Gate", selection: gateModeBinding) {
+                ForEach(TaskDeliveryGateMode.allCases) { gateMode in
+                    Text(gateMode.title).tag(gateMode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("Evidence Rule", selection: $deliveryContract.artifactRule) {
+                ForEach(TaskDeliveryArtifactRule.allCases) { artifactRule in
+                    Text(artifactRule.title).tag(artifactRule)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(deliveryContract.gateMode == .flexible)
+
+            Text("Expected Evidence: \(deliveryContract.requiredArtifactsText)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             HStack {
                 Spacer()
                 Button(L10n.string("Cancel"), action: onCancel)
@@ -5295,6 +5339,31 @@ private struct NewTaskSheet: View {
         .padding(18)
         .frame(width: 460)
     }
+
+    private var outputTypeBinding: Binding<TaskDeliveryOutputType> {
+        Binding(
+            get: { deliveryContract.outputType },
+            set: { newValue in
+                deliveryContract = TaskDeliveryContract(
+                    outputType: newValue,
+                    gateMode: deliveryContract.gateMode,
+                    artifactRule: deliveryContract.artifactRule
+                )
+            }
+        )
+    }
+
+    private var gateModeBinding: Binding<TaskDeliveryGateMode> {
+        Binding(
+            get: { deliveryContract.gateMode },
+            set: { newValue in
+                deliveryContract = TaskDeliveryContract(
+                    outputType: deliveryContract.outputType,
+                    gateMode: newValue
+                )
+            }
+        )
+    }
 }
 
 private struct EditTaskSheet: View {
@@ -5302,6 +5371,7 @@ private struct EditTaskSheet: View {
     @Binding var details: String
     @Binding var skills: String
     @Binding var storyPoints: Int
+    @Binding var deliveryContract: TaskDeliveryContract
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -5322,6 +5392,32 @@ private struct EditTaskSheet: View {
             TextField(L10n.string("Skills (comma separated)"), text: $skills)
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
+            Picker("Output Type", selection: outputTypeBinding) {
+                ForEach(TaskDeliveryOutputType.allCases) { outputType in
+                    Text(outputType.title).tag(outputType)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Picker("Completion Gate", selection: gateModeBinding) {
+                ForEach(TaskDeliveryGateMode.allCases) { gateMode in
+                    Text(gateMode.title).tag(gateMode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("Evidence Rule", selection: $deliveryContract.artifactRule) {
+                ForEach(TaskDeliveryArtifactRule.allCases) { artifactRule in
+                    Text(artifactRule.title).tag(artifactRule)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(deliveryContract.gateMode == .flexible)
+
+            Text("Expected Evidence: \(deliveryContract.requiredArtifactsText)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             HStack {
                 Spacer()
                 Button(L10n.string("Cancel"), action: onCancel)
@@ -5330,7 +5426,32 @@ private struct EditTaskSheet: View {
             }
         }
         .padding(18)
-        .frame(width: 420)
+        .frame(width: 460)
+    }
+
+    private var outputTypeBinding: Binding<TaskDeliveryOutputType> {
+        Binding(
+            get: { deliveryContract.outputType },
+            set: { newValue in
+                deliveryContract = TaskDeliveryContract(
+                    outputType: newValue,
+                    gateMode: deliveryContract.gateMode,
+                    artifactRule: deliveryContract.artifactRule
+                )
+            }
+        )
+    }
+
+    private var gateModeBinding: Binding<TaskDeliveryGateMode> {
+        Binding(
+            get: { deliveryContract.gateMode },
+            set: { newValue in
+                deliveryContract = TaskDeliveryContract(
+                    outputType: deliveryContract.outputType,
+                    gateMode: newValue
+                )
+            }
+        )
     }
 }
 
@@ -7364,7 +7485,8 @@ enum ContentViewTestHooks {
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int
+        storyPoints: Int,
+        deliveryContract: TaskDeliveryContract = .defaultContract
     ) -> Bool {
         ContentView.applyTaskEdits(
             viewModel: viewModel,
@@ -7372,7 +7494,8 @@ enum ContentViewTestHooks {
             title: title,
             details: details,
             requiredSkillsText: requiredSkillsText,
-            storyPoints: storyPoints
+            storyPoints: storyPoints,
+            deliveryContract: deliveryContract
         )
     }
 
@@ -7382,7 +7505,8 @@ enum ContentViewTestHooks {
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int
+        storyPoints: Int,
+        deliveryContract: TaskDeliveryContract = .defaultContract
     ) -> Bool {
         ContentView.applyTaskEdits(
             viewModel: viewModel,
@@ -7390,7 +7514,8 @@ enum ContentViewTestHooks {
             title: title,
             details: details,
             requiredSkillsText: requiredSkillsText,
-            storyPoints: storyPoints
+            storyPoints: storyPoints,
+            deliveryContract: deliveryContract
         )
     }
 
@@ -7723,6 +7848,7 @@ enum ContentViewTestHooks {
         var taskDetails = "Details"
         var taskSkills = "swiftui"
         var taskPoints = 3
+        var taskDeliveryContract = TaskDeliveryContract(outputType: .codeModule, gateMode: .strict)
         var selectedTemplateID: UUID? = nil
         let previewTemplates = [
             TaskTemplate(
@@ -7738,6 +7864,7 @@ enum ContentViewTestHooks {
             details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
             skills: Binding(get: { taskSkills }, set: { taskSkills = $0 }),
             storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
+            deliveryContract: Binding(get: { taskDeliveryContract }, set: { taskDeliveryContract = $0 }),
             selectedTemplateID: Binding(get: { selectedTemplateID }, set: { selectedTemplateID = $0 }),
             templates: previewTemplates,
             boardMessage: nil,
@@ -7753,6 +7880,7 @@ enum ContentViewTestHooks {
             details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
             skills: Binding(get: { taskSkills }, set: { taskSkills = $0 }),
             storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
+            deliveryContract: Binding(get: { taskDeliveryContract }, set: { taskDeliveryContract = $0 }),
             boardMessage: "Saved",
             boardMessageSeverity: .info,
             onCancel: {},

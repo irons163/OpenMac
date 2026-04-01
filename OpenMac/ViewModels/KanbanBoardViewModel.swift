@@ -547,6 +547,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     private func executionPrompt(task: WorkTask, agent: AgentProfile, template: ExecutionPromptTemplate) -> String {
         let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
         let skillsLine = sortedSkills.isEmpty ? template.noneSkillsText : sortedSkills
+        let deliveryContract = task.resolvedDeliveryContract
+        let expectedEvidence = deliveryContract.requiredArtifactsText.isEmpty
+            ? "none"
+            : deliveryContract.requiredArtifactsText
         return """
         \(template.preamble)
         \(template.agentLabel): \(agent.name)
@@ -554,6 +558,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         \(template.taskDetailsLabel): \(task.details)
         \(template.requiredSkillsLabel): \(skillsLine)
         \(template.storyPointsLabel): \(task.storyPoints)
+        Delivery output type: \(deliveryContract.outputType.title)
+        Completion gate: \(deliveryContract.gateMode.title) / \(deliveryContract.artifactRule.title)
+        Expected evidence: \(expectedEvidence)
 
         \(template.sectionsInstruction)
         \(template.languageInstruction)
@@ -2479,7 +2486,8 @@ final class KanbanBoardViewModel: ObservableObject {
             requiredSkills: Array(sourceTask.requiredSkills),
             storyPoints: sourceTask.storyPoints,
             status: sourceTask.status,
-            assignedAgentID: sourceTask.assignedAgentID
+            assignedAgentID: sourceTask.assignedAgentID,
+            deliveryContract: sourceTask.deliveryContract
         )
         if let assignedAgentID = copiedTask.assignedAgentID,
            !boards[targetBoardIndex].agents.contains(where: { $0.id == assignedAgentID }) {
@@ -2556,6 +2564,7 @@ final class KanbanBoardViewModel: ObservableObject {
         details: String,
         requiredSkillsText: String,
         storyPoints: Int = 1,
+        deliveryContract: TaskDeliveryContract? = nil,
         autoAssign: Bool = false
     ) -> Bool {
         let skills = requiredSkillsText
@@ -2575,7 +2584,12 @@ final class KanbanBoardViewModel: ObservableObject {
             requiredSkills: skills,
             storyPoints: storyPoints,
             status: .todo,
-            assignedAgentID: nil
+            assignedAgentID: nil,
+            deliveryContract: (deliveryContract ?? Self.inferredDeliveryContract(
+                title: trimmedTitle,
+                details: details,
+                requiredSkills: skills
+            )).normalized
         )
         tasks.append(task)
 
@@ -2601,6 +2615,78 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func taskTemplate(_ templateID: UUID) -> TaskTemplate? {
         taskTemplates.first(where: { $0.id == templateID })
+    }
+
+    private static func inferredDeliveryContract(
+        title: String,
+        details: String,
+        requiredSkills: [String]
+    ) -> TaskDeliveryContract {
+        let outputType = inferredDeliveryOutputType(title: title, details: details, requiredSkills: requiredSkills)
+        let gateMode: TaskDeliveryGateMode
+        switch outputType {
+        case .app, .codeModule, .data:
+            gateMode = .strict
+        case .document, .image, .mixed:
+            gateMode = .flexible
+        }
+        return TaskDeliveryContract(outputType: outputType, gateMode: gateMode)
+    }
+
+    private static func inferredDeliveryOutputType(
+        title: String,
+        details: String,
+        requiredSkills: [String]
+    ) -> TaskDeliveryOutputType {
+        let skillTokens = requiredSkills.joined(separator: " ")
+        let lowered = "\(title) \(details) \(skillTokens)".lowercased()
+        if lowered.contains("screenshot") ||
+            lowered.contains("image") ||
+            lowered.contains("圖") ||
+            lowered.contains("圖片") ||
+            lowered.contains(".png") ||
+            lowered.contains(".jpg") {
+            return .image
+        }
+        if lowered.contains("document") ||
+            lowered.contains("readme") ||
+            lowered.contains("spec") ||
+            lowered.contains("proposal") ||
+            lowered.contains("report") ||
+            lowered.contains("文件") ||
+            lowered.contains("說明") {
+            return .document
+        }
+        if lowered.contains("dataset") ||
+            lowered.contains("csv") ||
+            lowered.contains("json") ||
+            lowered.contains("etl") ||
+            lowered.contains("analytics") ||
+            lowered.contains("資料集") ||
+            lowered.contains("數據") {
+            return .data
+        }
+        if lowered.contains("app") ||
+            lowered.contains("ios") ||
+            lowered.contains("android") ||
+            lowered.contains("macos") ||
+            lowered.contains("swiftui") ||
+            lowered.contains("uikit") ||
+            lowered.contains("frontend") ||
+            lowered.contains("backend") ||
+            lowered.contains("api") ||
+            lowered.contains("web") ||
+            lowered.contains("產品") {
+            return .app
+        }
+        if lowered.contains("module") ||
+            lowered.contains("library") ||
+            lowered.contains("package") ||
+            lowered.contains("sdk") ||
+            lowered.contains("函式庫") {
+            return .codeModule
+        }
+        return .mixed
     }
 
     @discardableResult
@@ -2864,7 +2950,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 requiredSkills: plannedTicket.requiredSkills,
                 storyPoints: plannedTicket.storyPoints,
                 status: .todo,
-                assignedAgentID: nil
+                assignedAgentID: nil,
+                // PM-generated tickets are planning artifacts first; keep gate flexible by default.
+                deliveryContract: .defaultContract
             )
             tasks.append(task)
             let milestone = plannedTicket.milestone.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2949,7 +3037,11 @@ final class KanbanBoardViewModel: ObservableObject {
                 requiredSkills: requiredSkills.sorted(),
                 storyPoints: max(1, min(5, max(1, sourceTask.storyPoints / 2))),
                 status: .todo,
-                assignedAgentID: nil
+                assignedAgentID: nil,
+                deliveryContract: TaskDeliveryContract(
+                    outputType: .codeModule,
+                    gateMode: .strict
+                )
             )
             generatedTasks.append(generatedTask)
         }
@@ -3080,7 +3172,8 @@ final class KanbanBoardViewModel: ObservableObject {
         title: String,
         details: String,
         requiredSkillsText: String,
-        storyPoints: Int
+        storyPoints: Int,
+        deliveryContract: TaskDeliveryContract? = nil
     ) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
 
@@ -3099,6 +3192,15 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks[taskIndex].details = details
         tasks[taskIndex].requiredSkills = Set(skills.map { $0.lowercased() })
         tasks[taskIndex].storyPoints = max(1, storyPoints)
+        if let deliveryContract {
+            tasks[taskIndex].deliveryContract = deliveryContract.normalized
+        } else if tasks[taskIndex].deliveryContract == nil {
+            tasks[taskIndex].deliveryContract = Self.inferredDeliveryContract(
+                title: trimmedTitle,
+                details: details,
+                requiredSkills: skills
+            )
+        }
         taskExecutionApprovalsByTaskID[taskID] = nil
 
         if let agentID = tasks[taskIndex].assignedAgentID {
@@ -3139,7 +3241,8 @@ final class KanbanBoardViewModel: ObservableObject {
             requiredSkills: Array(sourceTask.requiredSkills),
             storyPoints: sourceTask.storyPoints,
             status: .todo,
-            assignedAgentID: nil
+            assignedAgentID: nil,
+            deliveryContract: sourceTask.deliveryContract
         )
         tasks.append(duplicatedTask)
         persistBoardState()
@@ -6165,6 +6268,29 @@ final class KanbanBoardViewModel: ObservableObject {
                     message: blockerMessage,
                     details: normalizedSummary
                 )
+            } else if let normalizedSummary,
+                      let blockerMessage = deliveryGateBlockMessage(for: tasks[taskIndex], normalizedSummary: normalizedSummary) {
+                var blockedRecord = baselineRecord
+                blockedRecord.status = .failed
+                blockedRecord.lastFinishedAt = finishedAt
+                blockedRecord.lastOutputSummary = normalizedSummary
+                blockedRecord.lastError = blockerMessage
+                blockedRecord.lastDebugOutput = nil
+                blockedRecord.lastAgentID = prepared.agent.id
+                tasks[taskIndex].executionRecord = blockedRecord
+                lastExecutionDebugLog = nil
+                lastCodexLoginCommand = nil
+                lastBoardMessage = blockerMessage
+                lastBoardMessageSeverity = .warning
+                appendAgentExecutionEvent(
+                    agentID: prepared.agent.id,
+                    taskID: prepared.taskID,
+                    taskTitle: tasks[taskIndex].title,
+                    status: .failed,
+                    phase: .governance,
+                    message: blockerMessage,
+                    details: normalizedSummary
+                )
             } else {
                 var finishedRecord = baselineRecord
                 finishedRecord.status = .succeeded
@@ -6264,6 +6390,77 @@ final class KanbanBoardViewModel: ObservableObject {
             return nil
         }
         return self.message("Execution blocked: missing task details or acceptance criteria")
+    }
+
+    private func deliveryGateBlockMessage(for task: WorkTask, normalizedSummary: String) -> String? {
+        let contract = task.resolvedDeliveryContract
+        guard contract.gateMode == .strict else { return nil }
+        let evidence = detectedDeliveryArtifacts(from: normalizedSummary)
+        let required = contract.requiredArtifacts
+
+        let passed: Bool
+        switch contract.artifactRule {
+        case .all:
+            passed = required.isSubset(of: evidence)
+        case .any:
+            passed = !required.intersection(evidence).isEmpty
+        }
+        guard !passed else { return nil }
+
+        let missingArtifacts: [TaskDeliveryArtifact]
+        switch contract.artifactRule {
+        case .all:
+            missingArtifacts = required.subtracting(evidence)
+                .sorted { $0.rawValue < $1.rawValue }
+        case .any:
+            missingArtifacts = required
+                .sorted { $0.rawValue < $1.rawValue }
+        }
+        let expected = missingArtifacts.map(\.title).joined(separator: ", ")
+        return message("Delivery gate blocked: missing evidence for %@", expected)
+    }
+
+    private func detectedDeliveryArtifacts(from normalizedSummary: String) -> Set<TaskDeliveryArtifact> {
+        let lowered = normalizedSummary.lowercased()
+        var artifacts: Set<TaskDeliveryArtifact> = [.summary]
+        if !normalizedSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            artifacts.insert(.report)
+        }
+        if hasEvidence(
+            in: lowered,
+            positive: ["files:", "file:", "檔案:", "文件:", ".swift", ".kt", ".js", ".ts", ".py", ".md", ".xcodeproj", ".xcworkspace", ".zip"],
+            negative: ["files: none", "file: none", "檔案: 無", "文件: 無", "files: n/a", "file: n/a"]
+        ) {
+            artifacts.insert(.files)
+        }
+        if hasEvidence(
+            in: lowered,
+            positive: ["commands:", "command:", "指令:", "命令:", "xcodebuild", "swift test", "npm run", "pnpm ", "yarn ", "make ", "cargo ", "./"],
+            negative: ["commands: none", "command: none", "指令: 無", "命令: 無", "commands: n/a", "command: n/a"]
+        ) {
+            artifacts.insert(.commands)
+        }
+        if hasEvidence(
+            in: lowered,
+            positive: ["test", "tests", "測試", "coverage", "covered", "passed", "all green", "green"],
+            negative: ["no tests", "tests: none", "測試: 無", "測試覆蓋: 無", "without tests"]
+        ) {
+            artifacts.insert(.tests)
+        }
+        if hasEvidence(
+            in: lowered,
+            positive: ["image", "images", "screenshot", "png", "jpg", "jpeg", "webp", "heic", "圖片", "截圖"],
+            negative: ["image: none", "images: none", "圖片: 無", "截圖: 無"]
+        ) {
+            artifacts.insert(.images)
+        }
+        return artifacts
+    }
+
+    private func hasEvidence(in normalizedText: String, positive: [String], negative: [String]) -> Bool {
+        let hasPositive = positive.contains(where: { normalizedText.contains($0) })
+        guard hasPositive else { return false }
+        return !negative.contains(where: { normalizedText.contains($0) })
     }
 
     private func extractCodexLoginCommand(from userMessage: String?, debugLog: String?) -> String? {

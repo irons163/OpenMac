@@ -681,6 +681,187 @@ struct AgentProfile: Identifiable, Equatable, Codable {
     }
 }
 
+enum TaskDeliveryOutputType: String, CaseIterable, Codable, Identifiable {
+    case app
+    case codeModule
+    case document
+    case image
+    case data
+    case mixed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .app:
+            return "App"
+        case .codeModule:
+            return "Code Module"
+        case .document:
+            return "Document"
+        case .image:
+            return "Image"
+        case .data:
+            return "Data"
+        case .mixed:
+            return "Mixed"
+        }
+    }
+}
+
+enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
+    case strict
+    case flexible
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .strict:
+            return "Strict"
+        case .flexible:
+            return "Flexible"
+        }
+    }
+}
+
+enum TaskDeliveryArtifactRule: String, CaseIterable, Codable, Identifiable {
+    case all
+    case any
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            return "All"
+        case .any:
+            return "Any"
+        }
+    }
+}
+
+enum TaskDeliveryArtifact: String, CaseIterable, Codable, Identifiable {
+    case files
+    case commands
+    case tests
+    case report
+    case images
+    case summary
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .files:
+            return "Files"
+        case .commands:
+            return "Commands"
+        case .tests:
+            return "Tests"
+        case .report:
+            return "Report"
+        case .images:
+            return "Images"
+        case .summary:
+            return "Summary"
+        }
+    }
+}
+
+struct TaskDeliveryContract: Equatable, Codable {
+    var outputType: TaskDeliveryOutputType
+    var gateMode: TaskDeliveryGateMode
+    var artifactRule: TaskDeliveryArtifactRule
+    var requiredArtifacts: Set<TaskDeliveryArtifact>
+
+    init(
+        outputType: TaskDeliveryOutputType,
+        gateMode: TaskDeliveryGateMode,
+        artifactRule: TaskDeliveryArtifactRule? = nil,
+        requiredArtifacts: Set<TaskDeliveryArtifact>? = nil
+    ) {
+        self.outputType = outputType
+        self.gateMode = gateMode
+        self.artifactRule = artifactRule ?? Self.defaultArtifactRule(for: gateMode)
+        self.requiredArtifacts = requiredArtifacts ?? Self.defaultRequiredArtifacts(
+            outputType: outputType,
+            gateMode: gateMode
+        )
+    }
+
+    static var defaultContract: TaskDeliveryContract {
+        TaskDeliveryContract(
+            outputType: .mixed,
+            gateMode: .flexible
+        )
+    }
+
+    static func defaultArtifactRule(for gateMode: TaskDeliveryGateMode) -> TaskDeliveryArtifactRule {
+        switch gateMode {
+        case .strict:
+            return .all
+        case .flexible:
+            return .any
+        }
+    }
+
+    static func defaultRequiredArtifacts(
+        outputType: TaskDeliveryOutputType,
+        gateMode: TaskDeliveryGateMode
+    ) -> Set<TaskDeliveryArtifact> {
+        switch gateMode {
+        case .strict:
+            switch outputType {
+            case .app, .codeModule:
+                return [.files, .commands, .tests, .report]
+            case .document:
+                return [.files, .report]
+            case .image:
+                return [.images, .report]
+            case .data:
+                return [.files, .commands, .report]
+            case .mixed:
+                return [.report]
+            }
+        case .flexible:
+            switch outputType {
+            case .app, .codeModule:
+                return [.files, .report]
+            case .document:
+                return [.report, .summary]
+            case .image:
+                return [.images, .report]
+            case .data:
+                return [.files, .report]
+            case .mixed:
+                return [.report, .summary]
+            }
+        }
+    }
+
+    var normalized: TaskDeliveryContract {
+        TaskDeliveryContract(
+            outputType: outputType,
+            gateMode: gateMode,
+            artifactRule: artifactRule,
+            requiredArtifacts: requiredArtifacts
+        )
+    }
+
+    var requiredArtifactsText: String {
+        requiredArtifacts
+            .sorted { $0.rawValue < $1.rawValue }
+            .map(\.title)
+            .joined(separator: ", ")
+    }
+
+    mutating func resetDefaultsForCurrentMode() {
+        artifactRule = Self.defaultArtifactRule(for: gateMode)
+        requiredArtifacts = Self.defaultRequiredArtifacts(outputType: outputType, gateMode: gateMode)
+    }
+}
+
 struct WorkTask: Identifiable, Equatable, Codable {
     let id: UUID
     var title: String
@@ -690,6 +871,7 @@ struct WorkTask: Identifiable, Equatable, Codable {
     var status: KanbanStatus
     var assignedAgentID: UUID?
     var executionRecord: TaskExecutionRecord?
+    var deliveryContract: TaskDeliveryContract?
     let createdAt: Date
 
     init(
@@ -701,6 +883,7 @@ struct WorkTask: Identifiable, Equatable, Codable {
         status: KanbanStatus,
         assignedAgentID: UUID?,
         executionRecord: TaskExecutionRecord? = nil,
+        deliveryContract: TaskDeliveryContract? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -711,11 +894,16 @@ struct WorkTask: Identifiable, Equatable, Codable {
         self.status = status
         self.assignedAgentID = assignedAgentID
         self.executionRecord = executionRecord
+        self.deliveryContract = deliveryContract?.normalized
         self.createdAt = createdAt
     }
 
     var isAssignable: Bool {
         status == .todo && assignedAgentID == nil
+    }
+
+    var resolvedDeliveryContract: TaskDeliveryContract {
+        deliveryContract?.normalized ?? .defaultContract
     }
 
     nonisolated private static func normalizeSkill(_ rawValue: String) -> String {

@@ -3678,6 +3678,23 @@ struct KanbanSupportTypeTests {
         #expect(decoded.openAIAuthMode == .apiKey)
         #expect(decoded.codexProfile == nil)
     }
+
+    @Test("delivery contract defaults and titles remain stable")
+    func deliveryContractDefaultsAndTitles() {
+        let strictApp = TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        #expect(strictApp.artifactRule == .all)
+        #expect(strictApp.requiredArtifacts == Set([.files, .commands, .tests, .report]))
+
+        let flexibleDoc = TaskDeliveryContract(outputType: .document, gateMode: .flexible)
+        #expect(flexibleDoc.artifactRule == .any)
+        #expect(flexibleDoc.requiredArtifacts.contains(.report))
+        #expect(flexibleDoc.requiredArtifacts.contains(.summary))
+
+        #expect(TaskDeliveryOutputType.codeModule.title == "Code Module")
+        #expect(TaskDeliveryGateMode.flexible.title == "Flexible")
+        #expect(TaskDeliveryArtifactRule.all.title == "All")
+        #expect(TaskDeliveryArtifact.images.title == "Images")
+    }
 }
 
 @Suite(.serialized)
@@ -9086,6 +9103,49 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessage == "Assign an agent before running this task")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
         #expect(store.savedSnapshots.isEmpty)
+    }
+
+    @Test("run task execution enforces strict delivery gate evidence")
+    func runTaskExecutionEnforcesStrictDeliveryGateEvidence() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build iOS MVP",
+            details: "Implement an MVP app and verify build/test output.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(
+                outputType: .app,
+                gateMode: .strict
+            )
+        )
+        let summary = """
+        Summary: Planned implementation
+        Actions taken:
+        - Reviewed requirements and drafted plan
+        Evidence (files/commands/results):
+        - Files: none
+        - Commands: none
+        - Results: pending
+        Risks or blockers:
+        - Waiting for implementation
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .failed)
+        #expect(updatedTask?.executionRecord?.lastError == "Delivery gate blocked: missing evidence for Commands, Files, Tests")
+        #expect(viewModel.lastBoardMessage == "Delivery gate blocked: missing evidence for Commands, Files, Tests")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
     @Test("run task execution requires non-empty task details")
