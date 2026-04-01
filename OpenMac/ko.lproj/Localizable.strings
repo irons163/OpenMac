@@ -565,3 +565,4 @@
 "%d blocked by quality/safety gate" = "%d건 품질/안전 게이트 차단";
 "Failed to export blueprint" = "블루프린트 내보내기에 실패했습니다";
 "Copy Blueprint JSON" = "블루프린트 JSON 복사";
+"Xcode is installed, but active developer directory is CommandLineTools. Switch to full Xcode for app build/test: %@" = "Xcode가 설치되어 있지만 현재 developer directory가 CommandLineTools를 가리킵니다. 앱 빌드/테스트를 위해 전체 Xcode로 전환하세요: %@";

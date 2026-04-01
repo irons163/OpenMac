@@ -929,6 +929,7 @@ struct ContentView: View {
             syncQualitySafetyGateDraftFromViewModel()
             syncMCPDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
+            viewModel.showXcodeDeveloperDirectoryWarningIfNeeded()
             viewModel.syncMCPServerRegistryInBackgroundIfNeeded()
         }
         .onChange(of: appearanceModeRawValue) { _, _ in

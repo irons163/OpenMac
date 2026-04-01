@@ -565,3 +565,4 @@
 "%d blocked by quality/safety gate" = "%d 件が品質・安全ゲートでブロック";
 "Failed to export blueprint" = "ブループリントのエクスポートに失敗しました";
 "Copy Blueprint JSON" = "ブループリントJSONをコピー";
+"Xcode is installed, but active developer directory is CommandLineTools. Switch to full Xcode for app build/test: %@" = "Xcode はインストールされていますが、現在の developer directory は CommandLineTools です。アプリのビルド/テストには完全版 Xcode へ切り替えてください: %@";

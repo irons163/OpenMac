@@ -564,3 +564,4 @@
 "%d blocked by quality/safety gate" = "%d 个被质量/安全闸门阻挡";
 "Failed to export blueprint" = "导出蓝图失败";
 "Copy Blueprint JSON" = "复制蓝图 JSON";
+"Xcode is installed, but active developer directory is CommandLineTools. Switch to full Xcode for app build/test: %@" = "已安装 Xcode，但当前 active developer directory 指向 CommandLineTools。若要构建/测试 App，请切换到完整 Xcode：%@";

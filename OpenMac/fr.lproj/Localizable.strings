@@ -565,3 +565,4 @@
 "%d blocked by quality/safety gate" = "%d bloqué(s) par le contrôle qualité/sécurité";
 "Failed to export blueprint" = "Échec de l’export du blueprint";
 "Copy Blueprint JSON" = "Copier le JSON du blueprint";
+"Xcode is installed, but active developer directory is CommandLineTools. Switch to full Xcode for app build/test: %@" = "Xcode est installe, mais le repertoire developpeur actif pointe vers CommandLineTools. Pour compiler/tester l'app, basculez vers Xcode complet : %@";

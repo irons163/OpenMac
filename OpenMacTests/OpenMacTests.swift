@@ -2020,6 +2020,48 @@ struct KanbanFlowTests {
         #expect(!KanbanStatus.done.canMove(to: .todo))
     }
 
+    @Test("xcode repair command is generated only for CommandLineTools path")
+    func xcodeRepairCommandGenerationRules() {
+        let command = KanbanBoardViewModelTestHooks.xcodeSelectRepairCommandIfNeeded(
+            activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
+            installedXcodeDeveloperDirectoryPath: "/Applications/Xcode.app/Contents/Developer"
+        )
+        #expect(command == "sudo xcode-select -s '/Applications/Xcode.app/Contents/Developer'")
+
+        let alreadyUsingXcode = KanbanBoardViewModelTestHooks.xcodeSelectRepairCommandIfNeeded(
+            activeDeveloperDirectoryPath: "/Applications/Xcode.app/Contents/Developer",
+            installedXcodeDeveloperDirectoryPath: "/Applications/Xcode.app/Contents/Developer"
+        )
+        #expect(alreadyUsingXcode == nil)
+
+        let noXcodeInstalled = KanbanBoardViewModelTestHooks.xcodeSelectRepairCommandIfNeeded(
+            activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
+            installedXcodeDeveloperDirectoryPath: nil
+        )
+        #expect(noXcodeInstalled == nil)
+    }
+
+    @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
+    func startupWarningForCommandLineToolsOnly() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.showXcodeDeveloperDirectoryWarningIfNeeded(
+            activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
+            installedXcodeDeveloperDirectoryPath: "/Applications/Xcode.app/Contents/Developer"
+        )
+
+        #expect(viewModel.lastBoardMessage?.isEmpty == false)
+        #expect(viewModel.lastBoardMessage?.contains("sudo xcode-select -s") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+
+        let noXcodeViewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        noXcodeViewModel.showXcodeDeveloperDirectoryWarningIfNeeded(
+            activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
+            installedXcodeDeveloperDirectoryPath: nil
+        )
+        #expect(noXcodeViewModel.lastBoardMessage == nil)
+        #expect(noXcodeViewModel.lastBoardMessageSeverity == nil)
+    }
+
     @Test("view model applies valid move and rejects invalid move")
     func viewModelMoveValidation() {
         let task = WorkTask(

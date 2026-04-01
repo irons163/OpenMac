@@ -4005,6 +4005,35 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessageSeverity = nil
     }
 
+    func showXcodeDeveloperDirectoryWarningIfNeeded(
+        activeDeveloperDirectoryPath: String? = nil,
+        installedXcodeDeveloperDirectoryPath: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) {
+        let activePath = activeDeveloperDirectoryPath
+            ?? Self.activeDeveloperDirectoryPath(environment: environment)
+        let xcodeDeveloperPath = installedXcodeDeveloperDirectoryPath
+            ?? Self.installedXcodeDeveloperDirectoryPath(fileManager: fileManager)
+        guard let command = Self.xcodeSelectRepairCommandIfNeeded(
+            activeDeveloperDirectoryPath: activePath,
+            installedXcodeDeveloperDirectoryPath: xcodeDeveloperPath
+        ) else {
+            return
+        }
+
+        if let existingMessage = lastBoardMessage,
+           !existingMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return
+        }
+
+        lastBoardMessage = message(
+            "Xcode is installed, but active developer directory is CommandLineTools. Switch to full Xcode for app build/test: %@",
+            command
+        )
+        lastBoardMessageSeverity = .warning
+    }
+
     func isAgentExecutionRunning(_ agentID: UUID) -> Bool {
         tasks.contains { task in
             guard task.executionRecord?.status == .running else { return false }
@@ -4751,6 +4780,78 @@ final class KanbanBoardViewModel: ObservableObject {
             if keywords.count >= 16 { break }
         }
         return keywords
+    }
+
+    private static func installedXcodeDeveloperDirectoryPath(
+        fileManager: FileManager = .default
+    ) -> String? {
+        let defaultPath = "/Applications/Xcode.app/Contents/Developer"
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: defaultPath, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return nil
+        }
+        return defaultPath
+    }
+
+    private static func activeDeveloperDirectoryPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        if let override = environment["DEVELOPER_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        process.arguments = ["-p"]
+        process.environment = environment
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let output, !output.isEmpty else { return nil }
+        return output
+    }
+
+    fileprivate static func xcodeSelectRepairCommandIfNeeded(
+        activeDeveloperDirectoryPath: String?,
+        installedXcodeDeveloperDirectoryPath: String?
+    ) -> String? {
+        guard let installedXcodeDeveloperDirectoryPath,
+              !installedXcodeDeveloperDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        guard let activeDeveloperDirectoryPath,
+              !activeDeveloperDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let normalizedInstalledPath = URL(
+            fileURLWithPath: installedXcodeDeveloperDirectoryPath,
+            isDirectory: true
+        ).standardizedFileURL.path
+        let normalizedActivePath = URL(
+            fileURLWithPath: activeDeveloperDirectoryPath,
+            isDirectory: true
+        ).standardizedFileURL.path
+
+        guard normalizedActivePath != normalizedInstalledPath else { return nil }
+        guard normalizedActivePath.hasPrefix("/Library/Developer/CommandLineTools") else { return nil }
+        return "sudo xcode-select -s \(shellQuoted(normalizedInstalledPath))"
     }
 
     private static func shellQuoted(_ value: String) -> String {
@@ -7176,6 +7277,16 @@ enum KanbanBoardViewModelTestHooks {
             executablePath: executablePath,
             arguments: arguments,
             environment: environment
+        )
+    }
+
+    static func xcodeSelectRepairCommandIfNeeded(
+        activeDeveloperDirectoryPath: String?,
+        installedXcodeDeveloperDirectoryPath: String?
+    ) -> String? {
+        KanbanBoardViewModel.xcodeSelectRepairCommandIfNeeded(
+            activeDeveloperDirectoryPath: activeDeveloperDirectoryPath,
+            installedXcodeDeveloperDirectoryPath: installedXcodeDeveloperDirectoryPath
         )
     }
 }
