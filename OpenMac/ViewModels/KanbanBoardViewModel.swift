@@ -1365,6 +1365,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy
     @Published private(set) var dagExecutionPolicy: DAGExecutionPolicy
     @Published private(set) var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy
+    @Published private(set) var mcpServerPolicy: MCPServerPolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1378,6 +1379,8 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
     private static let maxTaskTimelineEventsPerTask = 240
+    private static let mcpRegistrySyncTTL: TimeInterval = 60 * 30
+    private var mcpReadinessCacheByServerName: [String: Bool] = [:]
 
     private func message(_ key: String) -> String {
         L10n.string(key)
@@ -1563,6 +1566,7 @@ final class KanbanBoardViewModel: ObservableObject {
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         dagExecutionPolicy: DAGExecutionPolicy = .init(),
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
+        mcpServerPolicy: MCPServerPolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1600,6 +1604,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
+        self.mcpServerPolicy = mcpServerPolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1624,6 +1629,7 @@ final class KanbanBoardViewModel: ObservableObject {
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         dagExecutionPolicy: DAGExecutionPolicy = .init(),
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
+        mcpServerPolicy: MCPServerPolicy = .init(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1661,6 +1667,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
+        self.mcpServerPolicy = mcpServerPolicy
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1943,7 +1950,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     executionParallelizationPolicy: executionParallelizationPolicy,
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
-                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
+                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+                    mcpServerPolicy: mcpServerPolicy
                 )
             )
         } catch {
@@ -1982,7 +1990,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     executionParallelizationPolicy: executionParallelizationPolicy,
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
-                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
+                    executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+                    mcpServerPolicy: mcpServerPolicy
                 )
             )
         } catch {
@@ -2265,6 +2274,8 @@ final class KanbanBoardViewModel: ObservableObject {
             gitHubPRQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy ?? .init()
             dagExecutionPolicy = snapshot.dagExecutionPolicy ?? .init()
             executionQualitySafetyGatePolicy = snapshot.executionQualitySafetyGatePolicy ?? .init()
+            mcpServerPolicy = snapshot.mcpServerPolicy ?? .init()
+            mcpReadinessCacheByServerName = [:]
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
                 importedBoards.contains { board in
                     board.tasks.contains(where: { $0.id == approvalEntry.key })
@@ -2307,6 +2318,10 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedQualitySafetyPolicy = snapshot.executionQualitySafetyGatePolicy {
                 executionQualitySafetyGatePolicy = importedQualitySafetyPolicy
+            }
+            if let importedMCPPolicy = snapshot.mcpServerPolicy {
+                mcpServerPolicy = importedMCPPolicy
+                mcpReadinessCacheByServerName = [:]
             }
             if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
                 taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
@@ -3955,6 +3970,163 @@ final class KanbanBoardViewModel: ObservableObject {
         return message("Quality/safety gate is on")
     }
 
+    func updateMCPServerPolicy(
+        autoFetchEnabled: Bool,
+        registryURL: String
+    ) {
+        mcpServerPolicy = MCPServerPolicy(
+            autoFetchEnabled: autoFetchEnabled,
+            registryURL: registryURL,
+            autoFetchedServers: mcpServerPolicy.autoFetchedServers,
+            manualServers: mcpServerPolicy.manualServers,
+            lastSyncedAt: mcpServerPolicy.lastSyncedAt,
+            lastSyncError: mcpServerPolicy.lastSyncError
+        )
+        mcpReadinessCacheByServerName = [:]
+        persistBoardState()
+        lastBoardMessage = message("Updated MCP server settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    @discardableResult
+    func addManualMCPServer(
+        name: String,
+        bootstrapCommand: String,
+        keywordHintsText: String
+    ) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            lastBoardMessage = message("MCP server name is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let trimmedBootstrapCommand = bootstrapCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBootstrapCommand.isEmpty else {
+            lastBoardMessage = message("MCP bootstrap command is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let keywordHints = keywordHintsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let descriptor = MCPServerDescriptor(
+            name: trimmedName,
+            bootstrapCommand: trimmedBootstrapCommand,
+            verificationCommand: "codex mcp get \(Self.shellQuoted(trimmedName)) --json",
+            keywordHints: keywordHints,
+            isEnabled: true,
+            source: .manual,
+            notes: nil
+        )
+
+        let existingIndex = mcpServerPolicy.manualServers.firstIndex(where: {
+            $0.normalizedName == descriptor.normalizedName
+        })
+        if let existingIndex {
+            mcpServerPolicy.manualServers[existingIndex] = descriptor
+        } else {
+            mcpServerPolicy.manualServers.append(descriptor)
+        }
+
+        mcpReadinessCacheByServerName[descriptor.normalizedName] = nil
+        persistBoardState()
+        lastBoardMessage = message("Saved MCP server: %@", descriptor.name)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func removeManualMCPServer(named name: String) -> Bool {
+        let normalizedName = MCPServerDescriptor.normalizedServerName(name)
+        let beforeCount = mcpServerPolicy.manualServers.count
+        mcpServerPolicy.manualServers.removeAll { descriptor in
+            descriptor.normalizedName == normalizedName
+        }
+
+        guard mcpServerPolicy.manualServers.count != beforeCount else {
+            return false
+        }
+        mcpReadinessCacheByServerName[normalizedName] = nil
+        persistBoardState()
+        lastBoardMessage = message("Removed MCP server: %@", name)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    func setManualMCPServerEnabled(name: String, isEnabled: Bool) {
+        let normalizedName = MCPServerDescriptor.normalizedServerName(name)
+        guard let index = mcpServerPolicy.manualServers.firstIndex(where: {
+            $0.normalizedName == normalizedName
+        }) else { return }
+
+        mcpServerPolicy.manualServers[index].isEnabled = isEnabled
+        mcpReadinessCacheByServerName[normalizedName] = nil
+        persistBoardState()
+    }
+
+    func syncMCPServerRegistryInBackgroundIfNeeded() {
+        guard mcpServerPolicy.autoFetchEnabled else { return }
+        guard shouldSyncMCPRegistry(lastSyncedAt: mcpServerPolicy.lastSyncedAt) else { return }
+        syncMCPServerRegistryInBackground(force: false, announceResult: false)
+    }
+
+    func syncMCPServerRegistryInBackground(
+        force: Bool,
+        announceResult: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        guard mcpServerPolicy.autoFetchEnabled else {
+            completion?()
+            return
+        }
+        if !force,
+           !shouldSyncMCPRegistry(lastSyncedAt: mcpServerPolicy.lastSyncedAt) {
+            completion?()
+            return
+        }
+
+        let registryURL = mcpServerPolicy.registryURL
+        runOnBackground {
+            let fetchResult = Self.fetchMCPServersFromRegistry(registryURL: registryURL)
+            self.runOnMain {
+                if let servers = fetchResult.servers {
+                    self.mcpServerPolicy.autoFetchedServers = servers
+                    self.mcpServerPolicy.lastSyncedAt = Date()
+                    self.mcpServerPolicy.lastSyncError = nil
+                    self.persistBoardState()
+                    if announceResult {
+                        self.lastBoardMessage = self.message("MCP registry synced: %d server(s)", servers.count)
+                        self.lastBoardMessageSeverity = .info
+                    }
+                    completion?()
+                } else {
+                    let errorMessage = fetchResult.error ?? "unknown error"
+                    self.mcpServerPolicy.lastSyncedAt = Date()
+                    self.mcpServerPolicy.lastSyncError = errorMessage
+                    self.persistBoardState()
+                    if announceResult {
+                        self.lastBoardMessage = self.message("MCP registry sync failed: %@", errorMessage)
+                        self.lastBoardMessageSeverity = .warning
+                    }
+                    completion?()
+                }
+            }
+        }
+    }
+
+    func mcpServerStatusSummaryText() -> String {
+        let effectiveCount = mcpServerPolicy.effectiveServers.filter(\.isEnabled).count
+        let manualCount = mcpServerPolicy.manualServers.count
+        if let error = mcpServerPolicy.lastSyncError, !error.isEmpty {
+            return message("MCP: %d active · %d manual · last sync error", effectiveCount, manualCount)
+        }
+        return message("MCP: %d active · %d manual", effectiveCount, manualCount)
+    }
+
     func resetExecutionQuotaUsage() {
         executionQuotaUsage = ExecutionQuotaUsage()
         persistBoardState()
@@ -4077,11 +4249,328 @@ final class KanbanBoardViewModel: ObservableObject {
         return nil
     }
 
+    private func ensureMCPServersReadyForExecution(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> String? {
+        let runtimeProfile = agent.runtimeProfile ?? .defaultCodexBridge
+        guard runtimeProfile.provider == .openAICompatible,
+              runtimeProfile.openAIAuthMode == .codexBridge else {
+            return nil
+        }
+
+        let requiredServers = requiredMCPServers(for: task, agent: agent)
+        guard !requiredServers.isEmpty else { return nil }
+
+        onProgress(message("MCP preflight: checking %d server(s)", requiredServers.count))
+        for server in requiredServers {
+            if let provisioningError = ensureMCPServerReady(server, onProgress: onProgress) {
+                return provisioningError
+            }
+        }
+        return nil
+    }
+
+    private func requiredMCPServers(for task: WorkTask, agent: AgentProfile) -> [MCPServerDescriptor] {
+        let normalizedContext = (
+            [task.title, task.details]
+                + Array(task.requiredSkills)
+                + Array(agent.skills)
+        )
+        .joined(separator: " ")
+        .lowercased()
+
+        return mcpServerPolicy.effectiveServers.filter { descriptor in
+            guard descriptor.isEnabled else { return false }
+            if descriptor.keywordHints.isEmpty { return true }
+            return descriptor.keywordHints.contains { normalizedContext.contains($0) }
+        }
+    }
+
+    private func ensureMCPServerReady(
+        _ server: MCPServerDescriptor,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> String? {
+        let cacheKey = server.normalizedName
+        if mcpReadinessCacheByServerName[cacheKey] == true {
+            onProgress(message("MCP ready: %@", server.name))
+            return nil
+        }
+
+        if isMCPServerRegisteredAndEnabled(server) {
+            mcpReadinessCacheByServerName[cacheKey] = true
+            onProgress(message("MCP ready: %@", server.name))
+            return nil
+        }
+
+        onProgress(message("MCP missing: %@. Provisioning...", server.name))
+        let provisionResult = provisionMCPServer(server, onProgress: onProgress)
+        if !provisionResult.success {
+            mcpReadinessCacheByServerName[cacheKey] = false
+            return provisionResult.details
+        }
+        if !provisionResult.details.isEmpty {
+            onProgress(provisionResult.details)
+        }
+
+        guard isMCPServerRegisteredAndEnabled(server) else {
+            mcpReadinessCacheByServerName[cacheKey] = false
+            return message(
+                "MCP server \"%@\" is still unavailable after auto-provisioning. Add it manually in Developer > MCP Servers.",
+                server.name
+            )
+        }
+
+        mcpReadinessCacheByServerName[cacheKey] = true
+        onProgress(message("MCP provisioned: %@", server.name))
+        return nil
+    }
+
+    private func isMCPServerRegisteredAndEnabled(_ server: MCPServerDescriptor) -> Bool {
+        let verificationCommand = server.verificationCommand
+            ?? "codex mcp get \(Self.shellQuoted(server.name)) --json"
+        guard let result = try? Self.runShellCommand(verificationCommand) else {
+            return false
+        }
+        guard result.code == 0 else {
+            return false
+        }
+
+        guard let outputData = result.output.data(using: .utf8),
+              let jsonObject = try? JSONSerialization.jsonObject(with: outputData) as? [String: Any] else {
+            return true
+        }
+
+        if let enabled = jsonObject["enabled"] as? Bool {
+            return enabled
+        }
+        return true
+    }
+
+    private func provisionMCPServer(
+        _ server: MCPServerDescriptor,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> (success: Bool, details: String) {
+        if server.normalizedName == "xcode" {
+            let xcodeProvisioning = provisionBuiltinXcodeMCPServer()
+            if xcodeProvisioning.success {
+                return xcodeProvisioning
+            }
+        }
+
+        guard let bootstrapCommand = server.bootstrapCommand,
+              !bootstrapCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (
+                false,
+                message(
+                    "MCP server \"%@\" has no bootstrap command. Add one in Developer > MCP Servers.",
+                    server.name
+                )
+            )
+        }
+
+        guard let result = try? Self.runShellCommand(bootstrapCommand) else {
+            return (false, message("MCP bootstrap command failed to launch for %@", server.name))
+        }
+        guard result.code == 0 else {
+            let reason = result.output.isEmpty ? "exit \(result.code)" : result.output
+            return (false, message("MCP bootstrap failed for %@: %@", server.name, reason))
+        }
+        onProgress(message("MCP bootstrap completed: %@", server.name))
+        return (true, result.output)
+    }
+
+    private func provisionBuiltinXcodeMCPServer() -> (success: Bool, details: String) {
+        let environment = ProcessInfo.processInfo.environment
+        let homePath = environment["HOME"] ?? NSHomeDirectory()
+        let explicitCandidate = environment["OPENMAC_XCODE_MCP_COMMAND"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = [
+            explicitCandidate,
+            "\(homePath)/.codex/bin/xcode-mcpbridge.sh",
+            "/opt/homebrew/bin/xcode-mcpbridge.sh",
+            "/usr/local/bin/xcode-mcpbridge.sh",
+            "/opt/homebrew/bin/xcode-mcpbridge",
+            "/usr/local/bin/xcode-mcpbridge"
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for candidate in candidates {
+            let addCommand = "codex mcp add xcode -- \(Self.shellQuoted(candidate))"
+            guard let result = try? Self.runShellCommand(addCommand, environment: environment) else {
+                continue
+            }
+            if result.code == 0 {
+                return (true, result.output)
+            }
+        }
+
+        return (
+            false,
+            message(
+                "Unable to auto-add xcode MCP server. Ensure xcode-mcpbridge is installed, then add command in Developer > MCP Servers."
+            )
+        )
+    }
+
+    private func shouldSyncMCPRegistry(lastSyncedAt: Date?) -> Bool {
+        guard let lastSyncedAt else { return true }
+        return Date().timeIntervalSince(lastSyncedAt) >= Self.mcpRegistrySyncTTL
+    }
+
+    private struct MCPRegistryResponse: Decodable {
+        let servers: [MCPRegistryEntry]
+    }
+
+    private struct MCPRegistryEntry: Decodable {
+        let server: MCPRegistryServer
+    }
+
+    private struct MCPRegistryServer: Decodable {
+        let name: String
+        let description: String?
+        let remotes: [MCPRegistryRemote]?
+    }
+
+    private struct MCPRegistryRemote: Decodable {
+        let url: String?
+    }
+
+    private static func fetchMCPServersFromRegistry(
+        registryURL: String
+    ) -> (servers: [MCPServerDescriptor]?, error: String?) {
+        let trimmedRegistryURL = registryURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedRegistryURL), !trimmedRegistryURL.isEmpty else {
+            return (nil, "invalid registry URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var receivedData: Data?
+        var httpStatusCode = 0
+        var receivedError: Error?
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            receivedData = data
+            httpStatusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            receivedError = error
+            semaphore.signal()
+        }.resume()
+
+        if semaphore.wait(timeout: .now() + 15) == .timedOut {
+            return (nil, "network timeout")
+        }
+
+        if let receivedError {
+            return (nil, receivedError.localizedDescription)
+        }
+        guard (200 ... 299).contains(httpStatusCode) else {
+            return (nil, "HTTP \(httpStatusCode)")
+        }
+        guard let receivedData else {
+            return (nil, "empty response")
+        }
+
+        let decoder = JSONDecoder()
+        guard let payload = try? decoder.decode(MCPRegistryResponse.self, from: receivedData) else {
+            return (nil, "invalid registry JSON")
+        }
+
+        var seen = Set<String>()
+        let servers: [MCPServerDescriptor] = payload.servers.compactMap { entry in
+            let name = entry.server.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            guard let remoteURL = entry.server.remotes?
+                .compactMap({ $0.url?.trimmingCharacters(in: .whitespacesAndNewlines) })
+                .first(where: { !$0.isEmpty }) else {
+                return nil
+            }
+            let normalizedName = MCPServerDescriptor.normalizedServerName(name)
+            guard !seen.contains(normalizedName) else { return nil }
+            seen.insert(normalizedName)
+
+            let bootstrapCommand = "codex mcp add \(shellQuoted(name)) --url \(shellQuoted(remoteURL))"
+            let keywordHints = inferredKeywordHints(name: name, description: entry.server.description)
+            return MCPServerDescriptor(
+                name: name,
+                bootstrapCommand: bootstrapCommand,
+                verificationCommand: "codex mcp get \(shellQuoted(name)) --json",
+                keywordHints: keywordHints,
+                isEnabled: true,
+                source: .registry,
+                notes: entry.server.description
+            )
+        }
+
+        return (servers, nil)
+    }
+
+    private static func inferredKeywordHints(name: String, description _: String?) -> [String] {
+        let raw = name.lowercased()
+        let separators = CharacterSet.alphanumerics.inverted
+        var seen = Set<String>()
+        var keywords: [String] = []
+        for token in raw.components(separatedBy: separators) {
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 3 else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            keywords.append(trimmed)
+            if keywords.count >= 16 { break }
+        }
+        return keywords
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
+        return "'\(escaped)'"
+    }
+
+    private static func runShellCommand(
+        _ command: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        var processEnvironment = environment
+        if let codexHome = processEnvironment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           codexHome.isEmpty {
+            processEnvironment["CODEX_HOME"] = nil
+        }
+        process.environment = processEnvironment
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (process.terminationStatus, output)
+    }
+
     private func executeWithAutoRetry(
         task: WorkTask,
         agent: AgentProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> ExecutionAttemptResult {
+        if let mcpFailure = ensureMCPServersReadyForExecution(task: task, agent: agent, onProgress: onProgress) {
+            return ExecutionAttemptResult(
+                outcome: .failure(message: mcpFailure),
+                retriesPerformed: 0
+            )
+        }
+
         var outcome = taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
         let config = executionAutoRetryConfiguration
         guard config.isEnabled, config.maxRetryCount > 0 else {
@@ -5920,7 +6409,8 @@ final class KanbanBoardViewModel: ObservableObject {
             executionParallelizationPolicy: executionParallelizationPolicy,
             gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
             dagExecutionPolicy: dagExecutionPolicy,
-            executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy
+            executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+            mcpServerPolicy: mcpServerPolicy
         )
         try? boardStore.save(snapshot)
     }
@@ -5957,6 +6447,7 @@ extension KanbanBoardViewModel {
                     gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                     dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
                     executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
+                    mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
                     taskExecutor: taskExecutor,
@@ -5981,6 +6472,7 @@ extension KanbanBoardViewModel {
                 gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                 dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
                 executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
+                mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
                 taskExecutor: taskExecutor,

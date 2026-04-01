@@ -7687,6 +7687,72 @@ struct KanbanPersistenceTests {
         #expect(loaded == nil)
     }
 
+    @Test("MCP server policy defaults to auto-fetch and builtin xcode server")
+    func mcpPolicyDefaultsIncludeBuiltinXcode() {
+        let policy = MCPServerPolicy()
+
+        #expect(policy.autoFetchEnabled)
+        #expect(!policy.registryURL.isEmpty)
+        #expect(policy.effectiveServers.contains(where: { $0.normalizedName == "xcode" }))
+    }
+
+    @Test("persistent board loads MCP server policy from snapshot")
+    func persistentBoardLoadsMCPPolicyFromSnapshot() {
+        let manualServer = MCPServerDescriptor(
+            name: "xcode-local",
+            bootstrapCommand: "codex mcp add xcode-local -- '/tmp/xcode-mcpbridge.sh'",
+            verificationCommand: "codex mcp get xcode-local --json",
+            keywordHints: ["xcode", "swiftui"],
+            isEnabled: true,
+            source: .manual
+        )
+        let mcpPolicy = MCPServerPolicy(
+            autoFetchEnabled: true,
+            registryURL: "https://registry.modelcontextprotocol.io/v0.1/servers?limit=10",
+            autoFetchedServers: [],
+            manualServers: [manualServer],
+            lastSyncedAt: Date(timeIntervalSince1970: 123),
+            lastSyncError: nil
+        )
+
+        let snapshot = KanbanBoardSnapshot(
+            tasks: [],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 2],
+            mcpServerPolicy: mcpPolicy
+        )
+        let store = SpyBoardStore(loadSnapshot: snapshot)
+
+        let viewModel = KanbanBoardViewModel.persistentBoard(boardStore: store)
+
+        #expect(viewModel.mcpServerPolicy.manualServers.count == 1)
+        #expect(viewModel.mcpServerPolicy.manualServers.first?.normalizedName == "xcode-local")
+        #expect(viewModel.mcpServerPolicy.autoFetchEnabled)
+    }
+
+    @Test("manual MCP server CRUD updates view model policy")
+    func manualMCPServerCRUDUpdatesPolicy() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        let added = viewModel.addManualMCPServer(
+            name: "xcode-local",
+            bootstrapCommand: "codex mcp add xcode-local -- '/tmp/xcode-mcpbridge.sh'",
+            keywordHintsText: "xcode, swiftui"
+        )
+        #expect(added)
+        #expect(viewModel.mcpServerPolicy.manualServers.count == 1)
+        #expect(viewModel.mcpServerPolicy.manualServers.first?.keywordHints.contains("xcode") == true)
+
+        viewModel.setManualMCPServerEnabled(name: "xcode-local", isEnabled: false)
+        #expect(viewModel.mcpServerPolicy.manualServers.first?.isEnabled == false)
+
+        let removed = viewModel.removeManualMCPServer(named: "xcode-local")
+        #expect(removed)
+        #expect(viewModel.mcpServerPolicy.manualServers.isEmpty)
+        #expect(store.savedSnapshots.count >= 3)
+    }
+
     @Test("agentName resolves unassigned, known, and unknown ids")
     func agentNameResolvesKnownUnknownAndUnassigned() {
         let agent = AgentProfile(name: "Known Agent", skills: ["swiftui"], maxConcurrentTasks: 2)

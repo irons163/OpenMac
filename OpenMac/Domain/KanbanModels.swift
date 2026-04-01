@@ -424,6 +424,164 @@ struct ExecutionQualitySafetyGatePolicy: Equatable, Codable {
     }
 }
 
+enum MCPServerSourceType: String, Codable, Equatable {
+    case builtin
+    case registry
+    case manual
+}
+
+struct MCPServerDescriptor: Identifiable, Equatable, Codable {
+    var name: String
+    var bootstrapCommand: String?
+    var verificationCommand: String?
+    var keywordHints: [String]
+    var isEnabled: Bool
+    var source: MCPServerSourceType
+    var notes: String?
+
+    nonisolated var id: String { Self.normalizedServerName(name) }
+    nonisolated var normalizedName: String { Self.normalizedServerName(name) }
+
+    nonisolated init(
+        name: String,
+        bootstrapCommand: String? = nil,
+        verificationCommand: String? = nil,
+        keywordHints: [String] = [],
+        isEnabled: Bool = true,
+        source: MCPServerSourceType = .manual,
+        notes: String? = nil
+    ) {
+        self.name = Self.normalizedLabel(name)
+        self.bootstrapCommand = Self.normalizedOptionalText(bootstrapCommand)
+        self.verificationCommand = Self.normalizedOptionalText(verificationCommand)
+        self.keywordHints = Self.normalizedKeywordHints(keywordHints)
+        self.isEnabled = isEnabled
+        self.source = source
+        self.notes = Self.normalizedOptionalText(notes)
+    }
+
+    nonisolated static func normalizedServerName(_ value: String) -> String {
+        normalizedLabel(value).lowercased()
+    }
+
+    nonisolated private static func normalizedLabel(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "mcp-server" : trimmed
+    }
+
+    nonisolated private static func normalizedOptionalText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    nonisolated private static func normalizedKeywordHints(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            normalized.append(trimmed)
+        }
+        return normalized
+    }
+}
+
+struct MCPServerPolicy: Equatable, Codable {
+    static let defaultRegistryURL = "https://registry.modelcontextprotocol.io/v0.1/servers?limit=200"
+
+    var autoFetchEnabled: Bool
+    var registryURL: String
+    var autoFetchedServers: [MCPServerDescriptor]
+    var manualServers: [MCPServerDescriptor]
+    var lastSyncedAt: Date?
+    var lastSyncError: String?
+
+    init(
+        autoFetchEnabled: Bool = true,
+        registryURL: String = MCPServerPolicy.defaultRegistryURL,
+        autoFetchedServers: [MCPServerDescriptor] = [],
+        manualServers: [MCPServerDescriptor] = [],
+        lastSyncedAt: Date? = nil,
+        lastSyncError: String? = nil
+    ) {
+        self.autoFetchEnabled = autoFetchEnabled
+        let trimmedRegistryURL = registryURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.registryURL = trimmedRegistryURL.isEmpty ? MCPServerPolicy.defaultRegistryURL : trimmedRegistryURL
+        self.autoFetchedServers = MCPServerPolicy.normalizedServers(autoFetchedServers, source: .registry)
+        self.manualServers = MCPServerPolicy.normalizedServers(manualServers, source: .manual)
+        self.lastSyncedAt = lastSyncedAt
+        let trimmedSyncError = lastSyncError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.lastSyncError = trimmedSyncError.isEmpty ? nil : trimmedSyncError
+    }
+
+    var effectiveServers: [MCPServerDescriptor] {
+        let autoServers = autoFetchEnabled ? autoFetchedServers : []
+        return MCPServerPolicy.mergedServers(
+            builtin: MCPServerPolicy.defaultBuiltinServers,
+            autoFetched: autoServers,
+            manual: manualServers
+        )
+    }
+
+    nonisolated static var defaultBuiltinServers: [MCPServerDescriptor] {
+        [
+            MCPServerDescriptor(
+                name: "xcode",
+                bootstrapCommand: nil,
+                verificationCommand: "codex mcp get xcode --json",
+                keywordHints: ["xcode", "xcodebuild", "ios", "macos", "uikit", "simulator"],
+                isEnabled: true,
+                source: .builtin,
+                notes: "Apple/Xcode build and simulator tooling"
+            )
+        ]
+    }
+
+    nonisolated private static func normalizedServers(
+        _ rawServers: [MCPServerDescriptor],
+        source: MCPServerSourceType
+    ) -> [MCPServerDescriptor] {
+        var seen = Set<String>()
+        var normalized: [MCPServerDescriptor] = []
+        for rawServer in rawServers {
+            let key = rawServer.normalizedName
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            normalized.append(
+                MCPServerDescriptor(
+                    name: rawServer.name,
+                    bootstrapCommand: rawServer.bootstrapCommand,
+                    verificationCommand: rawServer.verificationCommand,
+                    keywordHints: rawServer.keywordHints,
+                    isEnabled: rawServer.isEnabled,
+                    source: source,
+                    notes: rawServer.notes
+                )
+            )
+        }
+        return normalized
+    }
+
+    nonisolated private static func mergedServers(
+        builtin: [MCPServerDescriptor],
+        autoFetched: [MCPServerDescriptor],
+        manual: [MCPServerDescriptor]
+    ) -> [MCPServerDescriptor] {
+        let ordered = builtin + autoFetched + manual
+        var byName: [String: MCPServerDescriptor] = [:]
+        for server in ordered {
+            byName[server.normalizedName] = server
+        }
+
+        return byName.values.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
 struct TaskTemplate: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String

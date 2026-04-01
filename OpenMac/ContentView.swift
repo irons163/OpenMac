@@ -51,6 +51,7 @@ struct ContentView: View {
     @State private var isShowingWIPSettingsSheet = false
     @State private var isShowingManualTriageSheet = false
     @State private var isShowingPMPlannerSheet = false
+    @State private var isShowingMCPServersSheet = false
     @State private var isShowingDeleteBoardAlert = false
     @State private var newBoardName = ""
     @State private var renameBoardName = ""
@@ -136,6 +137,12 @@ struct ContentView: View {
     @State private var qualitySafetyRequireSecurityPrivacyNotes = true
     @State private var isBoardMessageExpanded = false
     @State private var isGitHubFlowRunning = false
+    @State private var mcpAutoFetchEnabled = true
+    @State private var mcpRegistryURL = MCPServerPolicy.defaultRegistryURL
+    @State private var mcpManualServerName = ""
+    @State private var mcpManualBootstrapCommand = ""
+    @State private var mcpManualKeywordHints = ""
+    @State private var isMCPRegistrySyncing = false
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -622,6 +629,17 @@ struct ContentView: View {
                         applyQualitySafetyGateSettings()
                     }
                     Divider()
+                    Text(L10n.string("MCP Servers"))
+                    Text(viewModel.mcpServerStatusSummaryText())
+                        .font(.caption2.monospaced())
+                    Button(isMCPRegistrySyncing ? L10n.string("Syncing MCP Registry...") : L10n.string("Sync MCP Registry Now")) {
+                        syncMCPRegistryNowFromToolbar()
+                    }
+                    .disabled(isMCPRegistrySyncing || !mcpAutoFetchEnabled)
+                    Button(L10n.string("Manage MCP Servers...")) {
+                        openMCPServersSheet()
+                    }
+                    Divider()
                     Text(L10n.string("Projects Folder"))
                     Text(resolvedCodexProjectsDirectoryPath)
                         .font(.caption2.monospaced())
@@ -753,6 +771,28 @@ struct ContentView: View {
                 onCopyBlueprint: copyPMBlueprintFromSheet
             )
         }
+        .sheet(isPresented: $isShowingMCPServersSheet) {
+            MCPServersSheet(
+                autoFetchEnabled: $mcpAutoFetchEnabled,
+                registryURL: $mcpRegistryURL,
+                manualServerName: $mcpManualServerName,
+                manualBootstrapCommand: $mcpManualBootstrapCommand,
+                manualKeywordHints: $mcpManualKeywordHints,
+                isSyncingRegistry: isMCPRegistrySyncing,
+                statusText: viewModel.mcpServerStatusSummaryText(),
+                lastSyncError: viewModel.mcpServerPolicy.lastSyncError,
+                manualServers: viewModel.mcpServerPolicy.manualServers,
+                effectiveServers: viewModel.mcpServerPolicy.effectiveServers,
+                onApplySettings: applyMCPSettingsFromSheet,
+                onSyncRegistry: syncMCPRegistryNowFromToolbar,
+                onAddManualServer: addManualMCPServerFromSheet,
+                onToggleManualServer: { name, isEnabled in
+                    viewModel.setManualMCPServerEnabled(name: name, isEnabled: isEnabled)
+                },
+                onRemoveManualServer: removeManualMCPServerFromSheet,
+                onClose: closeMCPServersSheet
+            )
+        }
         .sheet(isPresented: $isShowingNewTaskSheet) {
             NewTaskSheet(
                 title: $newTaskTitle,
@@ -881,7 +921,9 @@ struct ContentView: View {
             syncPRQualityGateDraftFromViewModel()
             syncDAGSchedulerDraftFromViewModel()
             syncQualitySafetyGateDraftFromViewModel()
+            syncMCPDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
+            viewModel.syncMCPServerRegistryInBackgroundIfNeeded()
         }
         .onChange(of: appearanceModeRawValue) { _, _ in
             applyWindowAppearanceMode()
@@ -1342,6 +1384,7 @@ struct ContentView: View {
         closeEditAgentSheet()
         normalizeAssigneeFilterSelection()
         syncSelectedAgentConsoleSelection()
+        syncMCPDraftFromViewModel()
     }
 
     private func openWIPSettings() {
@@ -1628,6 +1671,59 @@ struct ContentView: View {
             requireTestCoverageIntent: qualitySafetyRequireCoverageIntent,
             requireSecurityPrivacyForSensitiveTasks: qualitySafetyRequireSecurityPrivacyNotes
         )
+    }
+
+    private func syncMCPDraftFromViewModel() {
+        let policy = viewModel.mcpServerPolicy
+        mcpAutoFetchEnabled = policy.autoFetchEnabled
+        mcpRegistryURL = policy.registryURL
+    }
+
+    private func openMCPServersSheet() {
+        syncMCPDraftFromViewModel()
+        isShowingMCPServersSheet = true
+    }
+
+    private func closeMCPServersSheet() {
+        isShowingMCPServersSheet = false
+    }
+
+    private func applyMCPSettingsFromSheet() {
+        viewModel.updateMCPServerPolicy(
+            autoFetchEnabled: mcpAutoFetchEnabled,
+            registryURL: mcpRegistryURL
+        )
+        if mcpAutoFetchEnabled {
+            syncMCPRegistryNowFromToolbar()
+        }
+    }
+
+    private func syncMCPRegistryNowFromToolbar() {
+        guard !isMCPRegistrySyncing else { return }
+        isMCPRegistrySyncing = true
+        viewModel.syncMCPServerRegistryInBackground(
+            force: true,
+            announceResult: true
+        ) {
+            self.isMCPRegistrySyncing = false
+            self.syncMCPDraftFromViewModel()
+        }
+    }
+
+    private func addManualMCPServerFromSheet() {
+        let added = viewModel.addManualMCPServer(
+            name: mcpManualServerName,
+            bootstrapCommand: mcpManualBootstrapCommand,
+            keywordHintsText: mcpManualKeywordHints
+        )
+        guard added else { return }
+        mcpManualServerName = ""
+        mcpManualBootstrapCommand = ""
+        mcpManualKeywordHints = ""
+    }
+
+    private func removeManualMCPServerFromSheet(_ name: String) {
+        _ = viewModel.removeManualMCPServer(named: name)
     }
 
     private func applyAutoRetrySettings() {
@@ -4994,6 +5090,154 @@ private struct RenameBoardSheet: View {
         }
         .padding(18)
         .frame(width: 360)
+    }
+}
+
+private struct MCPServersSheet: View {
+    @Binding var autoFetchEnabled: Bool
+    @Binding var registryURL: String
+    @Binding var manualServerName: String
+    @Binding var manualBootstrapCommand: String
+    @Binding var manualKeywordHints: String
+
+    let isSyncingRegistry: Bool
+    let statusText: String
+    let lastSyncError: String?
+    let manualServers: [MCPServerDescriptor]
+    let effectiveServers: [MCPServerDescriptor]
+    let onApplySettings: () -> Void
+    let onSyncRegistry: () -> Void
+    let onAddManualServer: () -> Void
+    let onToggleManualServer: (_ name: String, _ isEnabled: Bool) -> Void
+    let onRemoveManualServer: (_ name: String) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.string("MCP Servers"))
+                .font(.title3.weight(.semibold))
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(L10n.string("Auto-fetch MCP registry"), isOn: $autoFetchEnabled)
+                    TextField(L10n.string("MCP Registry URL"), text: $registryURL)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button(L10n.string("Apply MCP Settings")) {
+                            onApplySettings()
+                        }
+                        Button(isSyncingRegistry ? L10n.string("Syncing MCP Registry...") : L10n.string("Sync MCP Registry Now")) {
+                            onSyncRegistry()
+                        }
+                        .disabled(isSyncingRegistry || !autoFetchEnabled)
+                    }
+                    Text(statusText)
+                        .font(.caption2.monospaced())
+                    if let lastSyncError, !lastSyncError.isEmpty {
+                        Text(lastSyncError)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.string("Add Manual MCP Server"))
+                        .font(.headline)
+                    TextField(L10n.string("Server Name"), text: $manualServerName)
+                        .textFieldStyle(.roundedBorder)
+                    TextField(L10n.string("Bootstrap Command"), text: $manualBootstrapCommand)
+                        .textFieldStyle(.roundedBorder)
+                    TextField(L10n.string("Keyword Hints (comma-separated)"), text: $manualKeywordHints)
+                        .textFieldStyle(.roundedBorder)
+                    Button(L10n.string("Add or Update MCP Server")) {
+                        onAddManualServer()
+                    }
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.string("Manual Servers"))
+                        .font(.headline)
+                    if manualServers.isEmpty {
+                        Text(L10n.string("No manual MCP servers"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(manualServers, id: \.normalizedName) { server in
+                            HStack {
+                                Toggle(
+                                    isOn: Binding(
+                                        get: { server.isEnabled },
+                                        set: { onToggleManualServer(server.name, $0) }
+                                    )
+                                ) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(server.name)
+                                        if let bootstrap = server.bootstrapCommand {
+                                            Text(bootstrap)
+                                                .font(.caption2.monospaced())
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                                Button(L10n.string("Remove")) {
+                                    onRemoveManualServer(server.name)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.string("Active MCP Servers"))
+                        .font(.headline)
+                    if effectiveServers.isEmpty {
+                        Text(L10n.string("No active MCP servers"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(effectiveServers, id: \.normalizedName) { server in
+                                    HStack(spacing: 8) {
+                                        Text(server.name)
+                                            .font(.callout.weight(.semibold))
+                                        Text(server.source.rawValue)
+                                            .font(.caption2.monospaced())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.14))
+                                            .clipShape(Capsule())
+                                        if !server.isEnabled {
+                                            Text(L10n.string("disabled"))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 160)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Close")) {
+                    onClose()
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 760, minHeight: 650)
     }
 }
 
