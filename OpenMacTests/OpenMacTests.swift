@@ -1747,6 +1747,86 @@ struct AgentTaskExecutorTests {
         )
         #expect(resolvedDefault.contains("Library/Application Support/OpenMac/Projects"))
     }
+
+    @Test("projects directory resolver builds board-scoped folder names")
+    func projectsDirectoryResolverBuildsBoardScopedFolder() {
+        let base = "/tmp/openmac-projects-root"
+        let scoped = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: base,
+            boardName: " Youbike (2) / MVP "
+        )
+        #expect(scoped == "/tmp/openmac-projects-root/Youbike-2-MVP")
+
+        let fallback = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: base,
+            boardName: "   / :   "
+        )
+        #expect(fallback == "/tmp/openmac-projects-root/board")
+    }
+
+    @Test("view model executes codex bridge under board-scoped projects directory")
+    func viewModelExecutionUsesBoardScopedProjectsDirectory() {
+        let baseDirectoryPath = "/tmp/openmac-projects-root"
+        var capturedWorkingDirectoryPath: String?
+
+        let task = WorkTask(
+            title: "Build MVP",
+            details: "Create project files and verify commands.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Builder",
+            skills: ["swiftui"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var assignedTask = task
+        assignedTask.assignedAgentID = agent.id
+
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [CodexProjectsDirectorySettings.environmentOverrideKey: baseDirectoryPath] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                capturedWorkingDirectoryPath = request.workingDirectoryPath
+                return """
+                Summary:
+                Generated implementation scaffold.
+                Actions taken:
+                - Created files and verified workflow.
+                Evidence (files/commands/results):
+                - Files: ./README.md
+                - Commands: swift test
+                - Results: all checks passed
+                Risks or blockers:
+                - none
+                """
+            }
+        )
+
+        let viewModel = KanbanBoardViewModel(
+            tasks: [assignedTask],
+            agents: [agent],
+            taskExecutor: executor
+        )
+        #expect(viewModel.renameBoard(viewModel.selectedBoardID, to: "Youbike (2)"))
+
+        let executed = viewModel.runTaskExecution(assignedTask.id)
+        let expectedDirectoryPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: baseDirectoryPath,
+            boardName: "Youbike (2)"
+        )
+
+        #expect(executed)
+        #expect(capturedWorkingDirectoryPath == expectedDirectoryPath)
+    }
 }
 
 struct ItemModelTests {

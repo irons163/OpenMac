@@ -81,6 +81,39 @@ enum CodexProjectsDirectorySettings {
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
+
+    static func boardScopedProjectsDirectoryPath(
+        baseDirectoryPath: String,
+        boardName: String
+    ) -> String {
+        let expandedBasePath = (baseDirectoryPath as NSString).expandingTildeInPath
+        let baseURL = URL(fileURLWithPath: expandedBasePath, isDirectory: true)
+        let folderName = normalizedBoardDirectoryName(boardName)
+        return baseURL.appendingPathComponent(folderName, isDirectory: true).path
+    }
+
+    private static func normalizedBoardDirectoryName(_ boardName: String) -> String {
+        let trimmed = boardName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "board" }
+
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        var scalars: [UnicodeScalar] = []
+        var previousWasSeparator = false
+
+        for scalar in trimmed.unicodeScalars {
+            if allowedCharacters.contains(scalar) {
+                scalars.append(scalar)
+                previousWasSeparator = false
+            } else if !previousWasSeparator {
+                scalars.append("-")
+                previousWasSeparator = true
+            }
+        }
+
+        let collapsed = String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+        return collapsed.isEmpty ? "board" : collapsed
+    }
 }
 
 struct BoardHealthRecommendation: Identifiable, Equatable {
@@ -4963,7 +4996,7 @@ final class KanbanBoardViewModel: ObservableObject {
             )
         }
 
-        var outcome = taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+        var outcome = executeTaskWithBoardScopedProjectsDirectory(task: task, agent: agent, onProgress: onProgress)
         let config = executionAutoRetryConfiguration
         guard config.isEnabled, config.maxRetryCount > 0 else {
             return ExecutionAttemptResult(outcome: outcome, retriesPerformed: 0)
@@ -4988,10 +5021,37 @@ final class KanbanBoardViewModel: ObservableObject {
                 Thread.sleep(forTimeInterval: backoff)
             }
             onProgress("Auto-retry attempt \(retriesPerformed) for \"\(task.title)\"")
-            outcome = taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+            outcome = executeTaskWithBoardScopedProjectsDirectory(task: task, agent: agent, onProgress: onProgress)
         }
 
         return ExecutionAttemptResult(outcome: outcome, retriesPerformed: retriesPerformed)
+    }
+
+    private func executeTaskWithBoardScopedProjectsDirectory(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        guard var defaultExecutor = taskExecutor as? DefaultAgentTaskExecutor else {
+            return taskExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+        }
+
+        let upstreamEnvironmentProvider = defaultExecutor.environmentProvider
+        let boardName = selectedBoardName
+        defaultExecutor.environmentProvider = {
+            var environment = upstreamEnvironmentProvider()
+            let baseProjectsDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+                environment: environment
+            )
+            let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+                baseDirectoryPath: baseProjectsDirectoryPath,
+                boardName: boardName
+            )
+            environment[CodexProjectsDirectorySettings.environmentOverrideKey] = boardScopedPath
+            return environment
+        }
+
+        return defaultExecutor.execute(task: task, agent: agent, onProgress: onProgress)
     }
 
     private func applyRetryRunCount(for taskID: UUID, additionalAttempts: Int) {
