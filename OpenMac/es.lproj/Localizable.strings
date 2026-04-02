@@ -597,3 +597,4 @@
 "Summary" = "Resumen";
 "Strict mode blocks review until required evidence is present." = "El modo estricto bloquea la revisión hasta que exista la evidencia requerida.";
 "Flexible mode allows partial evidence and is suitable for research/docs outputs." = "El modo flexible permite evidencia parcial y es adecuado para salidas de investigación/docs.";
+"Planned with delivery mode: %@" = "Planificado con modo de entrega: %@";

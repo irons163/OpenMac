@@ -596,3 +596,4 @@
 "Summary" = "摘要";
 "Strict mode blocks review until required evidence is present." = "嚴格模式會在證據不足時阻擋進入審查。";
 "Flexible mode allows partial evidence and is suitable for research/docs outputs." = "彈性模式允許部分證據，適合研究/文件型輸出。";
+"Planned with delivery mode: %@" = "已使用交付模式規劃：%@";

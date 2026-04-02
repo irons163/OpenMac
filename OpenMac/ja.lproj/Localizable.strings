@@ -597,3 +597,4 @@
 "Summary" = "要約";
 "Strict mode blocks review until required evidence is present." = "厳格モードでは、必要な証拠が揃うまでレビューへ進めません。";
 "Flexible mode allows partial evidence and is suitable for research/docs outputs." = "柔軟モードは部分的な証拠を許容し、調査/ドキュメント出力に適しています。";
+"Planned with delivery mode: %@" = "適用した納品モード: %@";

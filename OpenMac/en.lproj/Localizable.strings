@@ -596,3 +596,4 @@
 "Summary" = "Summary";
 "Strict mode blocks review until required evidence is present." = "Strict mode blocks review until required evidence is present.";
 "Flexible mode allows partial evidence and is suitable for research/docs outputs." = "Flexible mode allows partial evidence and is suitable for research/docs outputs.";
+"Planned with delivery mode: %@" = "Planned with delivery mode: %@";

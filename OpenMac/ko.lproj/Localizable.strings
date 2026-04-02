@@ -597,3 +597,4 @@
 "Summary" = "요약";
 "Strict mode blocks review until required evidence is present." = "엄격 모드는 필요한 증거가 갖춰질 때까지 리뷰로 이동하지 않습니다.";
 "Flexible mode allows partial evidence and is suitable for research/docs outputs." = "유연 모드는 부분 증거를 허용하며 조사/문서 산출에 적합합니다.";
+"Planned with delivery mode: %@" = "적용된 산출 모드: %@";
