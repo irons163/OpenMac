@@ -5097,6 +5097,31 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    private enum XcodeBuildContainer {
+        case project(URL)
+        case workspace(URL)
+
+        var url: URL {
+            switch self {
+            case let .project(url), let .workspace(url):
+                return url
+            }
+        }
+
+        var displayName: String {
+            url.lastPathComponent
+        }
+
+        var xcodebuildListArgument: String {
+            switch self {
+            case .project:
+                return "-project"
+            case .workspace:
+                return "-workspace"
+            }
+        }
+    }
+
     private func enforceRealArtifactVerificationIfNeeded(
         task: WorkTask,
         outcome: AgentTaskExecutionOutcome,
@@ -5153,12 +5178,15 @@ final class KanbanBoardViewModel: ObservableObject {
             return .failed(reason: "workspace folder not found (\(boardScopedProjectsPath))")
         }
 
-        let xcodeProjects = discoverXcodeProjectURLs(in: boardScopedProjectsURL)
-        guard let projectURL = xcodeProjects.first else {
-            return .failed(reason: "no Xcode project (.xcodeproj) found in \(boardScopedProjectsPath)")
+        let containerResolution = resolveXcodeBuildContainer(in: boardScopedProjectsURL)
+        guard let container = containerResolution.container else {
+            return .failed(
+                reason: containerResolution.failureReason ?? "no Xcode project or workspace found in \(boardScopedProjectsPath)",
+                debugLog: containerResolution.debugLog
+            )
         }
-        let projectName = projectURL.lastPathComponent
-        let projectRootURL = projectURL.deletingLastPathComponent()
+        let projectName = container.displayName
+        let projectRootURL = container.url.deletingLastPathComponent()
 
         var checks: [String] = ["Real install verification passed"]
         checks.append("Project: \(projectName)")
@@ -5183,7 +5211,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         if policy.requireXcodeBuild {
-            let listCommand = "xcodebuild -list -project \(Self.shellQuoted(projectURL.path))"
+            let listCommand = "xcodebuild -list \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path))"
             let listResult: (code: Int32, output: String)
             do {
                 listResult = try Self.runShellCommand(listCommand)
@@ -5207,7 +5235,7 @@ final class KanbanBoardViewModel: ObservableObject {
             }
 
             let buildCommand = """
-            xcodebuild -project \(Self.shellQuoted(projectURL.path)) -scheme \(Self.shellQuoted(scheme)) -configuration Debug build
+            xcodebuild \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path)) -scheme \(Self.shellQuoted(scheme)) -configuration Debug build
             """
             let buildResult: (code: Int32, output: String)
             do {
@@ -5239,6 +5267,95 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    private func resolveXcodeBuildContainer(in rootURL: URL) -> (container: XcodeBuildContainer?, failureReason: String?, debugLog: String?) {
+        let projects = discoverXcodeProjectURLs(in: rootURL)
+        if let firstProject = projects.first {
+            return (.project(firstProject), nil, nil)
+        }
+
+        let workspaces = discoverXcodeWorkspaceURLs(in: rootURL)
+        if let firstWorkspace = workspaces.first {
+            return (.workspace(firstWorkspace), nil, nil)
+        }
+
+        if let manifestURL = discoverXcodeGenManifestURLs(in: rootURL).first {
+            let generation = attemptGenerateXcodeProject(withXcodeGenAt: manifestURL)
+            if let generatedContainer = generation.container {
+                return (generatedContainer, nil, nil)
+            }
+            return (
+                nil,
+                generation.failureReason ?? "failed to generate Xcode project from project.yml",
+                generation.debugLog
+            )
+        }
+
+        if hasSwiftPackageManifest(in: rootURL) {
+            return (
+                nil,
+                "detected Package.swift but no .xcodeproj/.xcworkspace. Strict app install verification requires an Xcode project/workspace",
+                "Convert/generate an Xcode project (for example via xcodegen) before strict install verification."
+            )
+        }
+
+        return (nil, "no Xcode project (.xcodeproj/.xcworkspace) found in \(rootURL.path)", nil)
+    }
+
+    private func attemptGenerateXcodeProject(withXcodeGenAt manifestURL: URL) -> (container: XcodeBuildContainer?, failureReason: String?, debugLog: String?) {
+        let workingDirectory = manifestURL.deletingLastPathComponent().path
+        let generateCommand = "cd \(Self.shellQuoted(workingDirectory)) && xcodegen generate"
+        let result: (code: Int32, output: String)
+        do {
+            result = try Self.runShellCommand(generateCommand)
+        } catch {
+            return (
+                nil,
+                "failed to run xcodegen generate for \(manifestURL.lastPathComponent)",
+                String(describing: error)
+            )
+        }
+
+        guard result.code == 0 else {
+            let lowered = result.output.lowercased()
+            if lowered.contains("command not found: xcodegen") {
+                return (
+                    nil,
+                    "project.yml detected but xcodegen is not installed",
+                    "Install xcodegen and retry. Command: brew install xcodegen"
+                )
+            }
+            return (
+                nil,
+                "xcodegen generate failed for \(manifestURL.lastPathComponent)",
+                DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                    result.output,
+                    maxLines: 32,
+                    maxCharacters: 5000
+                )
+            )
+        }
+
+        let generatedProjects = discoverXcodeProjectURLs(in: manifestURL.deletingLastPathComponent())
+        if let generatedProject = generatedProjects.first {
+            return (.project(generatedProject), nil, nil)
+        }
+
+        let generatedWorkspaces = discoverXcodeWorkspaceURLs(in: manifestURL.deletingLastPathComponent())
+        if let generatedWorkspace = generatedWorkspaces.first {
+            return (.workspace(generatedWorkspace), nil, nil)
+        }
+
+        return (
+            nil,
+            "xcodegen completed but no .xcodeproj/.xcworkspace was generated",
+            DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                result.output,
+                maxLines: 24,
+                maxCharacters: 4000
+            )
+        )
+    }
+
     private func discoverXcodeProjectURLs(in rootURL: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
@@ -5256,6 +5373,63 @@ final class KanbanBoardViewModel: ObservableObject {
         return projectURLs.sorted { lhs, rhs in
             lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
         }
+    }
+
+    private func discoverXcodeWorkspaceURLs(in rootURL: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var workspaceURLs: [URL] = []
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension.lowercased() == "xcworkspace" else { continue }
+            workspaceURLs.append(fileURL)
+        }
+        return workspaceURLs.sorted { lhs, rhs in
+            lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    private func discoverXcodeGenManifestURLs(in rootURL: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var manifestURLs: [URL] = []
+        for case let fileURL as URL in enumerator {
+            let lowercasedName = fileURL.lastPathComponent.lowercased()
+            guard lowercasedName == "project.yml" || lowercasedName == "project.yaml" else { continue }
+            manifestURLs.append(fileURL)
+        }
+
+        return manifestURLs.sorted { lhs, rhs in
+            lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    private func hasSwiftPackageManifest(in rootURL: URL) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        for case let fileURL as URL in enumerator {
+            if fileURL.lastPathComponent == "Package.swift" {
+                return true
+            }
+        }
+        return false
     }
 
     private func discoverInfoPlistURLs(near projectRootURL: URL) -> [URL] {

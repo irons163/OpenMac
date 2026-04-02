@@ -9512,6 +9512,65 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("run task execution explains package-only output when strict app verification requires Xcode project")
+    func runTaskExecutionExplainsPackageOnlyOutputForStrictAppVerification() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "Default Board"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: projectRootURL, withIntermediateDirectories: true)
+        try Data("import PackageDescription\nlet package = Package(name: \"Timer\")\n".utf8)
+            .write(to: projectRootURL.appendingPathComponent("Package.swift"), options: .atomic)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build iOS MVP",
+            details: "Implement app features and verify installable output.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Implementation complete
+        Actions taken:
+        - Built feature modules
+        Evidence (files/commands/results):
+        - Files: Package.swift
+        - Commands: swift build
+        - Tests: all green
+        - Results: ready for review
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: false,
+                requireXcodeBuild: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .failed)
+        #expect(updatedTask?.executionRecord?.lastError == "Real install verification failed: detected Package.swift but no .xcodeproj/.xcworkspace. Strict app install verification requires an Xcode project/workspace")
+        #expect(updatedTask?.executionRecord?.lastDebugOutput?.contains("Convert/generate an Xcode project") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("run task execution requires non-empty task details")
     func runTaskExecutionRequiresTaskDetails() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
