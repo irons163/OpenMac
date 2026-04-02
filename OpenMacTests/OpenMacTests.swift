@@ -2044,6 +2044,7 @@ struct KanbanFlowTests {
     @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
     func startupWarningForCommandLineToolsOnly() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.clearLocalizedTransientBoardMessage()
         viewModel.showXcodeDeveloperDirectoryWarningIfNeeded(
             activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
             installedXcodeDeveloperDirectoryPath: "/Applications/Xcode.app/Contents/Developer"
@@ -2054,9 +2055,10 @@ struct KanbanFlowTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
 
         let noXcodeViewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        noXcodeViewModel.clearLocalizedTransientBoardMessage()
         noXcodeViewModel.showXcodeDeveloperDirectoryWarningIfNeeded(
             activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
-            installedXcodeDeveloperDirectoryPath: nil
+            installedXcodeDeveloperDirectoryPath: ""
         )
         #expect(noXcodeViewModel.lastBoardMessage == nil)
         #expect(noXcodeViewModel.lastBoardMessageSeverity == nil)
