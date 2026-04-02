@@ -506,7 +506,7 @@ struct MCPServerDescriptor: Identifiable, Equatable, Codable {
 }
 
 struct MCPServerPolicy: Equatable, Codable {
-    static let defaultRegistryURL = "https://registry.modelcontextprotocol.io/v0.1/servers?limit=200"
+    static let defaultRegistryURL = "https://registry.modelcontextprotocol.io/v0.1/servers?limit=100"
 
     var autoFetchEnabled: Bool
     var registryURL: String
@@ -772,6 +772,66 @@ enum PMTicketDeliveryProfile: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum PMRealArtifactVerificationPreset: String, CaseIterable, Codable, Identifiable {
+    case useDeveloperDefaults
+    case disabled
+    case standard
+    case strict
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .useDeveloperDefaults:
+            return L10n.string("Use Developer Defaults")
+        case .disabled:
+            return L10n.string("Off (Summary only)")
+        case .standard:
+            return L10n.string("Standard (xcodebuild)")
+        case .strict:
+            return L10n.string("Strict (Info.plist + xcodebuild)")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .useDeveloperDefaults:
+            return L10n.string("Follow the Developer default verification policy for this board.")
+        case .disabled:
+            return L10n.string("Skip installation checks and accept summary-level evidence for strict app tasks.")
+        case .standard:
+            return L10n.string("Run build-level verification (xcodebuild) for strict app tasks.")
+        case .strict:
+            return L10n.string("Enforce both Info.plist executable key and xcodebuild verification for strict app tasks.")
+        }
+    }
+
+    func resolvedPolicy(defaultPolicy: ExecutionRealArtifactVerificationPolicy) -> ExecutionRealArtifactVerificationPolicy {
+        switch self {
+        case .useDeveloperDefaults:
+            return defaultPolicy
+        case .disabled:
+            return ExecutionRealArtifactVerificationPolicy(
+                isEnabled: false,
+                requireInfoPlistExecutableKey: defaultPolicy.requireInfoPlistExecutableKey,
+                requireXcodeBuild: defaultPolicy.requireXcodeBuild
+            )
+        case .standard:
+            return ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: false,
+                requireXcodeBuild: true
+            )
+        case .strict:
+            return ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true
+            )
+        }
+    }
+}
+
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
     case strict
     case flexible
@@ -980,13 +1040,15 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
     var tasks: [WorkTask]
     var agents: [AgentProfile]
     var wipLimits: [KanbanStatus: Int]
+    var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy?
 
     init(
         id: UUID = UUID(),
         name: String,
         tasks: [WorkTask] = [],
         agents: [AgentProfile] = [],
-        wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2]
+        wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
+        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil
     ) {
         self.id = id
         self.name = name
@@ -995,5 +1057,6 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
         self.wipLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
             partialResult[pair.key] = max(1, pair.value)
         }
+        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
     }
 }

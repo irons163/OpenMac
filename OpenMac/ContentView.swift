@@ -105,6 +105,7 @@ struct ContentView: View {
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
     @State private var pmTicketDeliveryProfile: PMTicketDeliveryProfile = .balanced
+    @State private var pmRealArtifactVerificationPreset: PMRealArtifactVerificationPreset = .useDeveloperDefaults
     @State private var pmSelectedTemplateID = "custom"
     @State private var pmBlueprintVision = ""
     @State private var pmBlueprintTargetUsers = ""
@@ -635,7 +636,7 @@ struct ContentView: View {
                         applyQualitySafetyGateSettings()
                     }
                     Divider()
-                    Text(L10n.string("Real Artifact Verification"))
+                    Text(L10n.string("Real Artifact Verification Defaults"))
                     Toggle(
                         L10n.string("Enable real installation-grade verification for strict app tasks"),
                         isOn: $realArtifactVerificationEnabled
@@ -648,9 +649,12 @@ struct ContentView: View {
                         L10n.string("Require xcodebuild build to succeed"),
                         isOn: $realArtifactRequireXcodeBuild
                     )
-                    Text(viewModel.executionRealArtifactVerificationSummaryText())
+                    Text(L10n.string("Default for new boards and PM preset \"Use Developer Defaults\""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(viewModel.executionRealArtifactVerificationDefaultSummaryText())
                         .font(.caption2.monospaced())
-                    Button(L10n.string("Apply Real Verification Settings")) {
+                    Button(L10n.string("Apply Real Verification Defaults")) {
                         applyRealArtifactVerificationSettings()
                     }
                     Divider()
@@ -767,6 +771,7 @@ struct ContentView: View {
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
                 ticketDeliveryProfile: $pmTicketDeliveryProfile,
+                realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
                 selectedTemplateID: $pmSelectedTemplateID,
                 templateOptions: pmTemplateOptions,
                 blueprintVision: $pmBlueprintVision,
@@ -1143,6 +1148,7 @@ struct ContentView: View {
         pmPlanSummary = ""
         pmPlannedTickets = []
         pmTicketDeliveryProfile = .balanced
+        pmRealArtifactVerificationPreset = inferredPMRealArtifactVerificationPresetForSelectedBoard()
         pmTestPlanText = ""
         isShowingPMPlannerSheet = true
     }
@@ -1158,6 +1164,7 @@ struct ContentView: View {
         pmPlanSummary = ""
         pmPlannedTickets = []
         pmTicketDeliveryProfile = .balanced
+        pmRealArtifactVerificationPreset = .useDeveloperDefaults
         pmTestPlanText = ""
         isShowingPMPlannerSheet = false
     }
@@ -1262,6 +1269,7 @@ struct ContentView: View {
             handleBoardContextChanged()
         }
 
+        applyPMRealArtifactVerificationPresetForSelectedBoard(announce: false)
         let createdCount = viewModel.addPlannedTickets(
             pmPlannedTickets,
             autoAssign: pmAutoAssignAfterCreate,
@@ -1353,6 +1361,8 @@ struct ContentView: View {
             handleBoardContextChanged()
         }
 
+        applyPMRealArtifactVerificationPresetForSelectedBoard(announce: false)
+
         isAutoCycleRunning = true
         viewModel.runPMAutopilotInBackground(
             plannedTickets: pmPlannedTickets,
@@ -1397,6 +1407,31 @@ struct ContentView: View {
             return
         }
         copyToPasteboard(text)
+    }
+
+    private func inferredPMRealArtifactVerificationPresetForSelectedBoard() -> PMRealArtifactVerificationPreset {
+        if viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy {
+            return .useDeveloperDefaults
+        }
+        let boardPolicy = viewModel.executionRealArtifactVerificationPolicy
+        if !boardPolicy.isEnabled {
+            return .disabled
+        }
+        if !boardPolicy.requireInfoPlistExecutableKey && boardPolicy.requireXcodeBuild {
+            return .standard
+        }
+        return .strict
+    }
+
+    private func applyPMRealArtifactVerificationPresetForSelectedBoard(announce: Bool) {
+        if pmRealArtifactVerificationPreset == .useDeveloperDefaults {
+            viewModel.useDefaultRealArtifactVerificationPolicyForSelectedBoard(announce: announce)
+            return
+        }
+        let resolvedPolicy = pmRealArtifactVerificationPreset.resolvedPolicy(
+            defaultPolicy: viewModel.executionRealArtifactVerificationDefaultPolicy
+        )
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(resolvedPolicy, announce: announce)
     }
 
     private func openGlobalTaskSearchResult(_ result: GlobalTaskSearchResult) {
@@ -1716,9 +1751,9 @@ struct ContentView: View {
     }
 
     private func syncRealArtifactVerificationDraftFromViewModel() {
-        realArtifactVerificationEnabled = viewModel.executionRealArtifactVerificationPolicy.isEnabled
-        realArtifactRequireInfoPlistExecutableKey = viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey
-        realArtifactRequireXcodeBuild = viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild
+        realArtifactVerificationEnabled = viewModel.executionRealArtifactVerificationDefaultPolicy.isEnabled
+        realArtifactRequireInfoPlistExecutableKey = viewModel.executionRealArtifactVerificationDefaultPolicy.requireInfoPlistExecutableKey
+        realArtifactRequireXcodeBuild = viewModel.executionRealArtifactVerificationDefaultPolicy.requireXcodeBuild
     }
 
     private func applyRealArtifactVerificationSettings() {
@@ -4689,6 +4724,7 @@ private struct PMPlannerSheet: View {
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
     @Binding var ticketDeliveryProfile: PMTicketDeliveryProfile
+    @Binding var realArtifactVerificationPreset: PMRealArtifactVerificationPreset
     @Binding var selectedTemplateID: String
     let templateOptions: [PMBriefTemplateOption]
     @Binding var blueprintVision: String
@@ -4869,6 +4905,23 @@ private struct PMPlannerSheet: View {
                     .foregroundStyle(.secondary)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Verification Mode"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker(L10n.string("Project Verification Preset"), selection: $realArtifactVerificationPreset) {
+                    ForEach(PMRealArtifactVerificationPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text(realArtifactVerificationPreset.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             Toggle(L10n.string("Auto Assign After Create"), isOn: $autoAssignAfterCreate)
             Toggle(L10n.string("Create New Board for Plan"), isOn: $createNewBoardForPlan)
             Toggle(
@@ -4887,6 +4940,9 @@ private struct PMPlannerSheet: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(L10n.format("Planned with delivery mode: %@", ticketDeliveryProfile.title))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(L10n.format("Execution verification: %@", realArtifactVerificationPreset.title))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text(planSummary)

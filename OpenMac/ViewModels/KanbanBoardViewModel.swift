@@ -1504,6 +1504,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy
     @Published private(set) var dagExecutionPolicy: DAGExecutionPolicy
     @Published private(set) var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy
+    @Published private(set) var executionRealArtifactVerificationDefaultPolicy: ExecutionRealArtifactVerificationPolicy
+    @Published private(set) var selectedBoardUsesDefaultRealArtifactVerificationPolicy: Bool
     @Published private(set) var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy
     @Published private(set) var mcpServerPolicy: MCPServerPolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
@@ -1727,11 +1729,13 @@ final class KanbanBoardViewModel: ObservableObject {
         let normalizedLimits = wipLimits.reduce(into: [:]) { partialResult, pair in
             partialResult[pair.key] = max(1, pair.value)
         }
+        let resolvedRealArtifactPolicy = executionRealArtifactVerificationPolicy
         let initialBoard = KanbanBoardRecord(
             name: Self.defaultBoardName,
             tasks: tasks,
             agents: agents,
-            wipLimits: normalizedLimits
+            wipLimits: normalizedLimits,
+            executionRealArtifactVerificationPolicy: nil
         )
         self.boards = [initialBoard]
         self.selectedBoardID = initialBoard.id
@@ -1749,7 +1753,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
-        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
+        self.executionRealArtifactVerificationDefaultPolicy = resolvedRealArtifactPolicy
+        self.selectedBoardUsesDefaultRealArtifactVerificationPolicy = true
+        self.executionRealArtifactVerificationPolicy = resolvedRealArtifactPolicy
         self.mcpServerPolicy = mcpServerPolicy
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
@@ -1799,8 +1805,17 @@ final class KanbanBoardViewModel: ObservableObject {
         } else if let first = boards.first {
             resolvedBoard = first
         } else {
-            resolvedBoard = KanbanBoardRecord(name: Self.defaultBoardName)
+            resolvedBoard = KanbanBoardRecord(
+                name: Self.defaultBoardName,
+                executionRealArtifactVerificationPolicy: nil
+            )
         }
+
+        let resolvedDefaultRealArtifactPolicy = executionRealArtifactVerificationPolicy
+        let selectedBoardUsesDefaultRealArtifactVerificationPolicy =
+            resolvedBoard.executionRealArtifactVerificationPolicy == nil
+        let resolvedSelectedBoardRealArtifactPolicy =
+            resolvedBoard.executionRealArtifactVerificationPolicy ?? resolvedDefaultRealArtifactPolicy
 
         self.boards = boards.isEmpty ? [resolvedBoard] : boards
         self.selectedBoardID = resolvedBoard.id
@@ -1818,7 +1833,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
-        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
+        self.executionRealArtifactVerificationDefaultPolicy = resolvedDefaultRealArtifactPolicy
+        self.selectedBoardUsesDefaultRealArtifactVerificationPolicy = selectedBoardUsesDefaultRealArtifactVerificationPolicy
+        self.executionRealArtifactVerificationPolicy = resolvedSelectedBoardRealArtifactPolicy
         self.mcpServerPolicy = mcpServerPolicy
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
@@ -1845,7 +1862,10 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         syncCurrentBoardRecord()
-        let board = KanbanBoardRecord(name: trimmedName)
+        let board = KanbanBoardRecord(
+            name: trimmedName,
+            executionRealArtifactVerificationPolicy: nil
+        )
         boards.append(board)
         loadBoard(board.id)
         persistBoardState()
@@ -1949,7 +1969,8 @@ final class KanbanBoardViewModel: ObservableObject {
             name: resolvedName,
             tasks: sourceBoard.tasks,
             agents: sourceBoard.agents,
-            wipLimits: sourceBoard.wipLimits
+            wipLimits: sourceBoard.wipLimits,
+            executionRealArtifactVerificationPolicy: sourceBoard.executionRealArtifactVerificationPolicy
         )
         boards.append(copiedBoard)
         loadBoard(copiedBoard.id)
@@ -2104,7 +2125,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
-                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
+                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
                     mcpServerPolicy: mcpServerPolicy
                 )
             )
@@ -2145,7 +2166,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
-                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
+                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
                     mcpServerPolicy: mcpServerPolicy
                 )
             )
@@ -2327,7 +2348,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 name: Self.defaultBoardName,
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,
-                wipLimits: snapshot.wipLimits
+                wipLimits: snapshot.wipLimits,
+                executionRealArtifactVerificationPolicy: nil
             )
             importedBoards = normalizedImportedBoardRecords([fallbackBoard])
         }
@@ -2400,7 +2422,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 name: Self.defaultBoardName,
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,
-                wipLimits: snapshot.wipLimits
+                wipLimits: snapshot.wipLimits,
+                executionRealArtifactVerificationPolicy: nil
             )
             importedBoards = normalizedImportedBoardRecords([fallbackBoard])
             preferredSelectedBoardID = nil
@@ -2429,7 +2452,7 @@ final class KanbanBoardViewModel: ObservableObject {
             gitHubPRQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy ?? .init()
             dagExecutionPolicy = snapshot.dagExecutionPolicy ?? .init()
             executionQualitySafetyGatePolicy = snapshot.executionQualitySafetyGatePolicy ?? .init()
-            executionRealArtifactVerificationPolicy = snapshot.executionRealArtifactVerificationPolicy ?? .init()
+            executionRealArtifactVerificationDefaultPolicy = snapshot.executionRealArtifactVerificationPolicy ?? .init()
             mcpServerPolicy = snapshot.mcpServerPolicy ?? .init()
             mcpReadinessCacheByServerName = [:]
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
@@ -2476,7 +2499,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 executionQualitySafetyGatePolicy = importedQualitySafetyPolicy
             }
             if let importedRealArtifactPolicy = snapshot.executionRealArtifactVerificationPolicy {
-                executionRealArtifactVerificationPolicy = importedRealArtifactPolicy
+                executionRealArtifactVerificationDefaultPolicy = importedRealArtifactPolicy
             }
             if let importedMCPPolicy = snapshot.mcpServerPolicy {
                 mcpServerPolicy = importedMCPPolicy
@@ -4265,13 +4288,59 @@ final class KanbanBoardViewModel: ObservableObject {
         requireInfoPlistExecutableKey: Bool,
         requireXcodeBuild: Bool
     ) {
-        executionRealArtifactVerificationPolicy = ExecutionRealArtifactVerificationPolicy(
+        let updatedPolicy = ExecutionRealArtifactVerificationPolicy(
             isEnabled: isEnabled,
             requireInfoPlistExecutableKey: requireInfoPlistExecutableKey,
             requireXcodeBuild: requireXcodeBuild
         )
+        executionRealArtifactVerificationDefaultPolicy = updatedPolicy
+        if selectedBoardUsesDefaultRealArtifactVerificationPolicy {
+            executionRealArtifactVerificationPolicy = updatedPolicy
+        }
+        syncCurrentBoardRecord()
         persistBoardState()
-        lastBoardMessage = message("Updated real artifact verification settings")
+        lastBoardMessage = message("Updated real artifact verification defaults")
+        lastBoardMessageSeverity = .info
+    }
+
+    func updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+        isEnabled: Bool,
+        requireInfoPlistExecutableKey: Bool,
+        requireXcodeBuild: Bool,
+        announce: Bool = true
+    ) {
+        updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: isEnabled,
+                requireInfoPlistExecutableKey: requireInfoPlistExecutableKey,
+                requireXcodeBuild: requireXcodeBuild
+            ),
+            announce: announce
+        )
+    }
+
+    func updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+        _ policy: ExecutionRealArtifactVerificationPolicy,
+        announce: Bool = true
+    ) {
+        selectedBoardUsesDefaultRealArtifactVerificationPolicy = false
+        executionRealArtifactVerificationPolicy = policy
+        syncCurrentBoardRecord()
+        persistBoardState()
+        guard announce else { return }
+        lastBoardMessage = message("Updated board real artifact verification settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func useDefaultRealArtifactVerificationPolicyForSelectedBoard(
+        announce: Bool = true
+    ) {
+        selectedBoardUsesDefaultRealArtifactVerificationPolicy = true
+        executionRealArtifactVerificationPolicy = executionRealArtifactVerificationDefaultPolicy
+        syncCurrentBoardRecord()
+        persistBoardState()
+        guard announce else { return }
+        lastBoardMessage = message("Using developer default real artifact verification for this board")
         lastBoardMessageSeverity = .info
     }
 
@@ -4283,6 +4352,17 @@ final class KanbanBoardViewModel: ObservableObject {
             "Real artifact verification is on (Info.plist: %@, xcodebuild: %@)",
             executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey ? message("On") : message("Off"),
             executionRealArtifactVerificationPolicy.requireXcodeBuild ? message("On") : message("Off")
+        )
+    }
+
+    func executionRealArtifactVerificationDefaultSummaryText() -> String {
+        guard executionRealArtifactVerificationDefaultPolicy.isEnabled else {
+            return message("Real artifact verification is off")
+        }
+        return message(
+            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@)",
+            executionRealArtifactVerificationDefaultPolicy.requireInfoPlistExecutableKey ? message("On") : message("Off"),
+            executionRealArtifactVerificationDefaultPolicy.requireXcodeBuild ? message("On") : message("Off")
         )
     }
 
@@ -7265,6 +7345,10 @@ final class KanbanBoardViewModel: ObservableObject {
         boards[selectedBoardIndex].tasks = tasks
         boards[selectedBoardIndex].agents = agents
         boards[selectedBoardIndex].wipLimits = wipLimits
+        boards[selectedBoardIndex].executionRealArtifactVerificationPolicy =
+            selectedBoardUsesDefaultRealArtifactVerificationPolicy
+            ? nil
+            : executionRealArtifactVerificationPolicy
     }
 
     private func pruneExecutionGovernanceStateForExistingTasks() {
@@ -7280,6 +7364,10 @@ final class KanbanBoardViewModel: ObservableObject {
         tasks = board.tasks
         agents = board.agents
         wipLimits = board.wipLimits
+        selectedBoardUsesDefaultRealArtifactVerificationPolicy =
+            board.executionRealArtifactVerificationPolicy == nil
+        executionRealArtifactVerificationPolicy =
+            board.executionRealArtifactVerificationPolicy ?? executionRealArtifactVerificationDefaultPolicy
         lastUnassignedTaskIDs = Set(tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.map(\.id))
         lastAssignmentReasons = [:]
         lastBoardMessage = nil
@@ -7336,7 +7424,8 @@ final class KanbanBoardViewModel: ObservableObject {
             name: resolvedName,
             tasks: resolvedTasks,
             agents: board.agents,
-            wipLimits: resolvedWIPLimits
+            wipLimits: resolvedWIPLimits,
+            executionRealArtifactVerificationPolicy: board.executionRealArtifactVerificationPolicy
         )
     }
 
@@ -7450,7 +7539,7 @@ final class KanbanBoardViewModel: ObservableObject {
             gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
             dagExecutionPolicy: dagExecutionPolicy,
             executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
-            executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
+            executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
             mcpServerPolicy: mcpServerPolicy
         )
         try? boardStore.save(snapshot)

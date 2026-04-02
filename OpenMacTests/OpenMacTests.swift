@@ -7233,6 +7233,56 @@ struct KanbanPersistenceTests {
         #expect(snapshot.executionRealArtifactVerificationPolicy?.requireXcodeBuild == true)
     }
 
+    @Test("real artifact defaults can be linked or overridden per board")
+    func realArtifactDefaultsCanBeLinkedOrOverriddenPerBoard() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        viewModel.updateExecutionRealArtifactVerificationPolicy(
+            isEnabled: true,
+            requireInfoPlistExecutableKey: false,
+            requireXcodeBuild: true
+        )
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == false)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+
+        let boardAID = viewModel.selectedBoardID
+        _ = viewModel.createBoard(name: "Board B")
+        let boardBID = viewModel.selectedBoardID
+        #expect(boardAID != boardBID)
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
+
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            isEnabled: false,
+            requireInfoPlistExecutableKey: true,
+            requireXcodeBuild: true,
+            announce: false
+        )
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == false)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.isEnabled == false)
+
+        _ = viewModel.switchBoard(to: boardAID)
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == false)
+
+        viewModel.updateExecutionRealArtifactVerificationPolicy(
+            isEnabled: true,
+            requireInfoPlistExecutableKey: true,
+            requireXcodeBuild: true
+        )
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+
+        _ = viewModel.switchBoard(to: boardBID)
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == false)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.isEnabled == false)
+
+        viewModel.useDefaultRealArtifactVerificationPolicyForSelectedBoard(announce: false)
+        #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+    }
+
     @Test("imports workspace snapshot and persists board selection")
     func importsWorkspaceSnapshotAndPersistsSelection() throws {
         let deliveryTask = WorkTask(
