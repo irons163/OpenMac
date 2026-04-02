@@ -4805,14 +4805,29 @@ private struct PMPlannerSheet: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 6) {
-                Picker("Ticket Delivery Profile", selection: $ticketDeliveryProfile) {
+                Text(L10n.string("Delivery Mode"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker(L10n.string("Ticket Delivery Profile"), selection: $ticketDeliveryProfile) {
                     ForEach(PMTicketDeliveryProfile.allCases) { profile in
                         Text(profile.title).tag(profile)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text("Applies to generated tickets: \(ticketDeliveryProfile.contract.outputType.title) · \(ticketDeliveryProfile.contract.gateMode.title) · \(ticketDeliveryProfile.contract.requiredArtifactsText)")
+                Text(
+                    L10n.format(
+                        "Applies to generated tickets: %@ · %@ · %@",
+                        ticketDeliveryProfile.contract.outputType.title,
+                        ticketDeliveryProfile.contract.gateMode.title,
+                        ticketDeliveryProfile.contract.requiredArtifactsText
+                    )
+                )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(ticketDeliveryProfile.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -5325,21 +5340,21 @@ private struct NewTaskSheet: View {
 
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
-            Picker("Output Type", selection: outputTypeBinding) {
+            Picker(L10n.string("Output Type"), selection: outputTypeBinding) {
                 ForEach(TaskDeliveryOutputType.allCases) { outputType in
                     Text(outputType.title).tag(outputType)
                 }
             }
             .pickerStyle(.menu)
 
-            Picker("Completion Gate", selection: gateModeBinding) {
+            Picker(L10n.string("Completion Gate"), selection: gateModeBinding) {
                 ForEach(TaskDeliveryGateMode.allCases) { gateMode in
                     Text(gateMode.title).tag(gateMode)
                 }
             }
             .pickerStyle(.segmented)
 
-            Picker("Evidence Rule", selection: $deliveryContract.artifactRule) {
+            Picker(L10n.string("Evidence Rule"), selection: $deliveryContract.artifactRule) {
                 ForEach(TaskDeliveryArtifactRule.allCases) { artifactRule in
                     Text(artifactRule.title).tag(artifactRule)
                 }
@@ -5347,9 +5362,17 @@ private struct NewTaskSheet: View {
             .pickerStyle(.segmented)
             .disabled(deliveryContract.gateMode == .flexible)
 
-            Text("Expected Evidence: \(deliveryContract.requiredArtifactsText)")
+            Text(L10n.format("Expected Evidence: %@", deliveryContract.requiredArtifactsText))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text(
+                deliveryContract.gateMode == .strict
+                    ? L10n.string("Strict mode blocks review until required evidence is present.")
+                    : L10n.string("Flexible mode allows partial evidence and is suitable for research/docs outputs.")
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
 
             HStack {
                 Spacer()
@@ -5416,21 +5439,21 @@ private struct EditTaskSheet: View {
             TextField(L10n.string("Skills (comma separated)"), text: $skills)
             Stepper(L10n.format("Story Points: %d", storyPoints), value: $storyPoints, in: 1 ... 13)
 
-            Picker("Output Type", selection: outputTypeBinding) {
+            Picker(L10n.string("Output Type"), selection: outputTypeBinding) {
                 ForEach(TaskDeliveryOutputType.allCases) { outputType in
                     Text(outputType.title).tag(outputType)
                 }
             }
             .pickerStyle(.menu)
 
-            Picker("Completion Gate", selection: gateModeBinding) {
+            Picker(L10n.string("Completion Gate"), selection: gateModeBinding) {
                 ForEach(TaskDeliveryGateMode.allCases) { gateMode in
                     Text(gateMode.title).tag(gateMode)
                 }
             }
             .pickerStyle(.segmented)
 
-            Picker("Evidence Rule", selection: $deliveryContract.artifactRule) {
+            Picker(L10n.string("Evidence Rule"), selection: $deliveryContract.artifactRule) {
                 ForEach(TaskDeliveryArtifactRule.allCases) { artifactRule in
                     Text(artifactRule.title).tag(artifactRule)
                 }
@@ -5438,9 +5461,17 @@ private struct EditTaskSheet: View {
             .pickerStyle(.segmented)
             .disabled(deliveryContract.gateMode == .flexible)
 
-            Text("Expected Evidence: \(deliveryContract.requiredArtifactsText)")
+            Text(L10n.format("Expected Evidence: %@", deliveryContract.requiredArtifactsText))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text(
+                deliveryContract.gateMode == .strict
+                    ? L10n.string("Strict mode blocks review until required evidence is present.")
+                    : L10n.string("Flexible mode allows partial evidence and is suitable for research/docs outputs.")
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
 
             HStack {
                 Spacer()

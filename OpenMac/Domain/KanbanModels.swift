@@ -694,17 +694,17 @@ enum TaskDeliveryOutputType: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .app:
-            return "App"
+            return L10n.string("App")
         case .codeModule:
-            return "Code Module"
+            return L10n.string("Code Module")
         case .document:
-            return "Document"
+            return L10n.string("Document")
         case .image:
-            return "Image"
+            return L10n.string("Image")
         case .data:
-            return "Data"
+            return L10n.string("Data")
         case .mixed:
-            return "Mixed"
+            return L10n.string("Mixed")
         }
     }
 }
@@ -719,11 +719,22 @@ enum PMTicketDeliveryProfile: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .balanced:
-            return "Balanced"
+            return L10n.string("Balanced")
         case .productBuild:
-            return "Product Build"
+            return L10n.string("Product Build")
         case .contentAndDocs:
-            return "Content & Docs"
+            return L10n.string("Content & Docs")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .balanced:
+            return L10n.string("Balanced profile: allows progressive output while still expecting evidence.")
+        case .productBuild:
+            return L10n.string("Product Build profile: requires runnable deliverables with strict evidence.")
+        case .contentAndDocs:
+            return L10n.string("Content & Docs profile: optimized for summaries, docs, and non-code outputs.")
         }
     }
 
@@ -754,9 +765,9 @@ enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .strict:
-            return "Strict"
+            return L10n.string("Strict")
         case .flexible:
-            return "Flexible"
+            return L10n.string("Flexible")
         }
     }
 }
@@ -770,9 +781,9 @@ enum TaskDeliveryArtifactRule: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .all:
-            return "All"
+            return L10n.string("All")
         case .any:
-            return "Any"
+            return L10n.string("Any")
         }
     }
 }
@@ -790,17 +801,17 @@ enum TaskDeliveryArtifact: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .files:
-            return "Files"
+            return L10n.string("Files")
         case .commands:
-            return "Commands"
+            return L10n.string("Commands")
         case .tests:
-            return "Tests"
+            return L10n.string("Tests")
         case .report:
-            return "Report"
+            return L10n.string("Report")
         case .images:
-            return "Images"
+            return L10n.string("Images")
         case .summary:
-            return "Summary"
+            return L10n.string("Summary")
         }
     }
 }
