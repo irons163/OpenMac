@@ -7209,6 +7209,11 @@ struct KanbanPersistenceTests {
             backoffSeconds: 0.5,
             retryableErrorTypes: Set([.network, .server])
         )
+        viewModel.updateExecutionRealArtifactVerificationPolicy(
+            isEnabled: true,
+            requireInfoPlistExecutableKey: false,
+            requireXcodeBuild: true
+        )
 
         let exported = viewModel.workspaceExportData()
 
@@ -7223,6 +7228,9 @@ struct KanbanPersistenceTests {
         #expect(snapshot.executionAutoRetryConfiguration?.maxRetryCount == 4)
         #expect(snapshot.executionAutoRetryConfiguration?.backoffSeconds == 0.5)
         #expect(snapshot.executionAutoRetryConfiguration?.retryableErrorTypes == Set([.network, .server]))
+        #expect(snapshot.executionRealArtifactVerificationPolicy?.isEnabled == true)
+        #expect(snapshot.executionRealArtifactVerificationPolicy?.requireInfoPlistExecutableKey == false)
+        #expect(snapshot.executionRealArtifactVerificationPolicy?.requireXcodeBuild == true)
     }
 
     @Test("imports workspace snapshot and persists board selection")
@@ -9361,6 +9369,147 @@ struct KanbanPersistenceTests {
         #expect(updatedTask?.executionRecord?.lastError == "Delivery gate blocked: missing evidence for Commands, Files, Tests")
         #expect(viewModel.lastBoardMessage == "Delivery gate blocked: missing evidence for Commands, Files, Tests")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("run task execution blocks strict app when real verification misses CFBundleExecutable")
+    func runTaskExecutionBlocksStrictAppWhenRealVerificationMissesExecutableKey() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "Default Board"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+            .appendingPathComponent("FitnessApp", isDirectory: true)
+        let projectURL = projectRootURL.appendingPathComponent("FitnessApp.xcodeproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+        let infoPlistURL = projectRootURL.appendingPathComponent("iOS-Info.plist")
+        let plistWithoutExecutable: [String: String] = [
+            "CFBundleIdentifier": "com.example.fitness"
+        ]
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: plistWithoutExecutable,
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(to: infoPlistURL, options: .atomic)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build iOS MVP",
+            details: "Implement app features and verify installable output.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Implementation complete
+        Actions taken:
+        - Built feature modules
+        Evidence (files/commands/results):
+        - Files: FitnessApp/iOS-Info.plist, FitnessApp/FitnessApp.xcodeproj
+        - Commands: swift test
+        - Tests: all green
+        - Results: ready for review
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: false
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .failed)
+        #expect(updatedTask?.executionRecord?.lastError == "Real install verification failed: missing CFBundleExecutable in Info.plist")
+        #expect(updatedTask?.executionRecord?.lastDebugOutput?.contains("iOS-Info.plist") == true)
+        #expect(viewModel.lastBoardMessage == "Execution failed: Real install verification failed: missing CFBundleExecutable in Info.plist")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("run task execution appends real verification success note for strict app tasks")
+    func runTaskExecutionAppendsRealVerificationSuccessNoteForStrictAppTasks() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "Default Board"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+            .appendingPathComponent("FitnessApp", isDirectory: true)
+        let projectURL = projectRootURL.appendingPathComponent("FitnessApp.xcodeproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+        let infoPlistURL = projectRootURL.appendingPathComponent("iOS-Info.plist")
+        let plistWithExecutable: [String: String] = [
+            "CFBundleIdentifier": "com.example.fitness",
+            "CFBundleExecutable": "$(EXECUTABLE_NAME)"
+        ]
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: plistWithExecutable,
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(to: infoPlistURL, options: .atomic)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build iOS MVP",
+            details: "Implement app features and verify installable output.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Implementation complete
+        Actions taken:
+        - Built feature modules
+        Evidence (files/commands/results):
+        - Files: FitnessApp/iOS-Info.plist, FitnessApp/FitnessApp.xcodeproj
+        - Commands: swift test
+        - Tests: all green
+        - Results: ready for review
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: false
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .succeeded)
+        #expect(updatedTask?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
     @Test("run task execution requires non-empty task details")

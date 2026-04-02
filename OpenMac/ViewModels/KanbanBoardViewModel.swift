@@ -1504,6 +1504,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy
     @Published private(set) var dagExecutionPolicy: DAGExecutionPolicy
     @Published private(set) var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy
+    @Published private(set) var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy
     @Published private(set) var mcpServerPolicy: MCPServerPolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
@@ -1511,6 +1512,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private let assignmentEngine: AutoAssignmentEngine
     private let projectPlanner: any ProjectPlanning
     private let taskExecutor: any AgentTaskExecuting
+    private let projectsDirectoryPathProvider: () -> String
     private let boardStore: KanbanBoardStore?
     private let runOnBackground: ExecutionDispatcher
     private let runOnMain: ExecutionDispatcher
@@ -1705,7 +1707,11 @@ final class KanbanBoardViewModel: ObservableObject {
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         dagExecutionPolicy: DAGExecutionPolicy = .init(),
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
+        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy = .init(),
         mcpServerPolicy: MCPServerPolicy = .init(),
+        projectsDirectoryPathProvider: @escaping () -> String = {
+            CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+        },
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1743,7 +1749,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
+        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
         self.mcpServerPolicy = mcpServerPolicy
+        self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -1768,7 +1776,11 @@ final class KanbanBoardViewModel: ObservableObject {
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy = .init(),
         dagExecutionPolicy: DAGExecutionPolicy = .init(),
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
+        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy = .init(),
         mcpServerPolicy: MCPServerPolicy = .init(),
+        projectsDirectoryPathProvider: @escaping () -> String = {
+            CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+        },
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
@@ -1806,7 +1818,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
+        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
         self.mcpServerPolicy = mcpServerPolicy
+        self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
         self.taskExecutor = taskExecutor
@@ -2090,6 +2104,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
                     mcpServerPolicy: mcpServerPolicy
                 )
             )
@@ -2130,6 +2145,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+                    executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
                     mcpServerPolicy: mcpServerPolicy
                 )
             )
@@ -2413,6 +2429,7 @@ final class KanbanBoardViewModel: ObservableObject {
             gitHubPRQualityGatePolicy = snapshot.gitHubPRQualityGatePolicy ?? .init()
             dagExecutionPolicy = snapshot.dagExecutionPolicy ?? .init()
             executionQualitySafetyGatePolicy = snapshot.executionQualitySafetyGatePolicy ?? .init()
+            executionRealArtifactVerificationPolicy = snapshot.executionRealArtifactVerificationPolicy ?? .init()
             mcpServerPolicy = snapshot.mcpServerPolicy ?? .init()
             mcpReadinessCacheByServerName = [:]
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
@@ -2457,6 +2474,9 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedQualitySafetyPolicy = snapshot.executionQualitySafetyGatePolicy {
                 executionQualitySafetyGatePolicy = importedQualitySafetyPolicy
+            }
+            if let importedRealArtifactPolicy = snapshot.executionRealArtifactVerificationPolicy {
+                executionRealArtifactVerificationPolicy = importedRealArtifactPolicy
             }
             if let importedMCPPolicy = snapshot.mcpServerPolicy {
                 mcpServerPolicy = importedMCPPolicy
@@ -4240,6 +4260,32 @@ final class KanbanBoardViewModel: ObservableObject {
         return message("Quality/safety gate is on")
     }
 
+    func updateExecutionRealArtifactVerificationPolicy(
+        isEnabled: Bool,
+        requireInfoPlistExecutableKey: Bool,
+        requireXcodeBuild: Bool
+    ) {
+        executionRealArtifactVerificationPolicy = ExecutionRealArtifactVerificationPolicy(
+            isEnabled: isEnabled,
+            requireInfoPlistExecutableKey: requireInfoPlistExecutableKey,
+            requireXcodeBuild: requireXcodeBuild
+        )
+        persistBoardState()
+        lastBoardMessage = message("Updated real artifact verification settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func executionRealArtifactVerificationSummaryText() -> String {
+        guard executionRealArtifactVerificationPolicy.isEnabled else {
+            return message("Real artifact verification is off")
+        }
+        return message(
+            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@)",
+            executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey ? message("On") : message("Off"),
+            executionRealArtifactVerificationPolicy.requireXcodeBuild ? message("On") : message("Off")
+        )
+    }
+
     func updateMCPServerPolicy(
         autoFetchEnabled: Bool,
         registryURL: String
@@ -4997,6 +5043,11 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         var outcome = executeTaskWithBoardScopedProjectsDirectory(task: task, agent: agent, onProgress: onProgress)
+        outcome = enforceRealArtifactVerificationIfNeeded(
+            task: task,
+            outcome: outcome,
+            onProgress: onProgress
+        )
         let config = executionAutoRetryConfiguration
         guard config.isEnabled, config.maxRetryCount > 0 else {
             return ExecutionAttemptResult(outcome: outcome, retriesPerformed: 0)
@@ -5022,9 +5073,274 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             onProgress("Auto-retry attempt \(retriesPerformed) for \"\(task.title)\"")
             outcome = executeTaskWithBoardScopedProjectsDirectory(task: task, agent: agent, onProgress: onProgress)
+            outcome = enforceRealArtifactVerificationIfNeeded(
+                task: task,
+                outcome: outcome,
+                onProgress: onProgress
+            )
         }
 
         return ExecutionAttemptResult(outcome: outcome, retriesPerformed: retriesPerformed)
+    }
+
+    private struct RealArtifactVerificationResult {
+        let successNote: String?
+        let failureReason: String?
+        let debugLog: String?
+
+        static func passed(note: String?) -> Self {
+            Self(successNote: note, failureReason: nil, debugLog: nil)
+        }
+
+        static func failed(reason: String, debugLog: String? = nil) -> Self {
+            Self(successNote: nil, failureReason: reason, debugLog: debugLog)
+        }
+    }
+
+    private func enforceRealArtifactVerificationIfNeeded(
+        task: WorkTask,
+        outcome: AgentTaskExecutionOutcome,
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        guard case let .success(summary) = outcome else { return outcome }
+        guard shouldRunRealArtifactVerification(for: task) else { return outcome }
+
+        onProgress(message("Running real install verification..."))
+        let verification = runRealArtifactVerification(for: task)
+        if let failureReason = verification.failureReason {
+            let userMessage = message("Real install verification failed: %@", failureReason)
+            onProgress(userMessage)
+            if let debugLog = verification.debugLog,
+               !debugLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .failure(
+                    message: userMessage + DefaultAgentTaskExecutor.debugLogDelimiter + debugLog
+                )
+            }
+            return .failure(message: userMessage)
+        }
+
+        guard let successNote = verification.successNote,
+              !successNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return outcome
+        }
+        onProgress(successNote)
+        let normalizedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mergedSummary: String
+        if normalizedSummary.isEmpty {
+            mergedSummary = successNote
+        } else {
+            mergedSummary = normalizedSummary + "\n\n" + successNote
+        }
+        return .success(summary: mergedSummary)
+    }
+
+    private func shouldRunRealArtifactVerification(for task: WorkTask) -> Bool {
+        let policy = executionRealArtifactVerificationPolicy
+        guard policy.isEnabled else { return false }
+        guard policy.requireInfoPlistExecutableKey || policy.requireXcodeBuild else { return false }
+
+        let contract = task.resolvedDeliveryContract
+        return contract.gateMode == .strict && contract.outputType == .app
+    }
+
+    private func runRealArtifactVerification(for _: WorkTask) -> RealArtifactVerificationResult {
+        let policy = executionRealArtifactVerificationPolicy
+        let boardScopedProjectsPath = resolvedBoardScopedProjectsDirectoryPath()
+        let boardScopedProjectsURL = URL(fileURLWithPath: boardScopedProjectsPath, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: boardScopedProjectsPath, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return .failed(reason: "workspace folder not found (\(boardScopedProjectsPath))")
+        }
+
+        let xcodeProjects = discoverXcodeProjectURLs(in: boardScopedProjectsURL)
+        guard let projectURL = xcodeProjects.first else {
+            return .failed(reason: "no Xcode project (.xcodeproj) found in \(boardScopedProjectsPath)")
+        }
+        let projectName = projectURL.lastPathComponent
+        let projectRootURL = projectURL.deletingLastPathComponent()
+
+        var checks: [String] = ["Real install verification passed"]
+        checks.append("Project: \(projectName)")
+
+        if policy.requireInfoPlistExecutableKey {
+            let plistCandidates = discoverInfoPlistURLs(near: projectRootURL)
+            guard !plistCandidates.isEmpty else {
+                return .failed(reason: "no Info.plist found near \(projectName)")
+            }
+
+            let executableKeyFound = plistCandidates.contains { infoPlistContainsExecutableKey(at: $0) }
+            guard executableKeyFound else {
+                let listedCandidates = plistCandidates
+                    .map(\.lastPathComponent)
+                    .joined(separator: ", ")
+                let details = listedCandidates.isEmpty
+                    ? nil
+                    : "Checked Info.plist files: \(listedCandidates)"
+                return .failed(reason: "missing CFBundleExecutable in Info.plist", debugLog: details)
+            }
+            checks.append("Info.plist includes CFBundleExecutable")
+        }
+
+        if policy.requireXcodeBuild {
+            let listCommand = "xcodebuild -list -project \(Self.shellQuoted(projectURL.path))"
+            let listResult: (code: Int32, output: String)
+            do {
+                listResult = try Self.runShellCommand(listCommand)
+            } catch {
+                return .failed(reason: "xcodebuild -list failed for \(projectName)", debugLog: String(describing: error))
+            }
+            guard listResult.code == 0 else {
+                return .failed(
+                    reason: "xcodebuild -list failed for \(projectName)",
+                    debugLog: DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                        listResult.output,
+                        maxLines: 32,
+                        maxCharacters: 5000
+                    )
+                )
+            }
+
+            let schemes = parseXcodeSchemes(fromListOutput: listResult.output)
+            guard let scheme = preferredBuildScheme(from: schemes) else {
+                return .failed(reason: "no shared scheme found in \(projectName)")
+            }
+
+            let buildCommand = """
+            xcodebuild -project \(Self.shellQuoted(projectURL.path)) -scheme \(Self.shellQuoted(scheme)) -configuration Debug build
+            """
+            let buildResult: (code: Int32, output: String)
+            do {
+                buildResult = try Self.runShellCommand(buildCommand)
+            } catch {
+                return .failed(reason: "xcodebuild build failed for \(scheme)", debugLog: String(describing: error))
+            }
+            guard buildResult.code == 0 else {
+                return .failed(
+                    reason: "xcodebuild build failed for \(scheme)",
+                    debugLog: DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                        buildResult.output,
+                        maxLines: 48,
+                        maxCharacters: 7000
+                    )
+                )
+            }
+            checks.append("xcodebuild succeeded (scheme: \(scheme))")
+        }
+
+        return .passed(note: checks.joined(separator: " · "))
+    }
+
+    private func resolvedBoardScopedProjectsDirectoryPath() -> String {
+        let baseProjectsDirectoryPath = projectsDirectoryPathProvider()
+        return CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: baseProjectsDirectoryPath,
+            boardName: selectedBoardName
+        )
+    }
+
+    private func discoverXcodeProjectURLs(in rootURL: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var projectURLs: [URL] = []
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension.lowercased() == "xcodeproj" else { continue }
+            projectURLs.append(fileURL)
+        }
+        return projectURLs.sorted { lhs, rhs in
+            lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    private func discoverInfoPlistURLs(near projectRootURL: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: projectRootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var plistURLs: [URL] = []
+        for case let fileURL as URL in enumerator {
+            let fileName = fileURL.lastPathComponent.lowercased()
+            guard fileName.hasSuffix("info.plist") else { continue }
+
+            let normalizedPath = fileURL.path.lowercased()
+            if normalizedPath.contains("/.build/") ||
+                normalizedPath.contains("/deriveddata/") ||
+                normalizedPath.contains("/sourcepackages/") ||
+                normalizedPath.contains("/checkouts/") {
+                continue
+            }
+            plistURLs.append(fileURL)
+        }
+
+        return plistURLs.sorted { lhs, rhs in
+            lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    private func infoPlistContainsExecutableKey(at plistURL: URL) -> Bool {
+        guard let plistData = try? Data(contentsOf: plistURL),
+              let rawValue = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil),
+              let dictionary = rawValue as? [String: Any],
+              let executableValue = dictionary["CFBundleExecutable"] else {
+            return false
+        }
+        if let executableString = executableValue as? String {
+            return !executableString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
+
+    private func parseXcodeSchemes(fromListOutput output: String) -> [String] {
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        var collectingSchemes = false
+        var schemes: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == "Schemes:" {
+                collectingSchemes = true
+                continue
+            }
+
+            guard collectingSchemes else { continue }
+            if trimmed.isEmpty {
+                if !schemes.isEmpty {
+                    break
+                }
+                continue
+            }
+
+            let hasIndentation = line.first?.isWhitespace ?? false
+            if !hasIndentation {
+                if !schemes.isEmpty {
+                    break
+                }
+                continue
+            }
+            schemes.append(trimmed)
+        }
+
+        var seen = Set<String>()
+        return schemes.filter { seen.insert($0).inserted }
+    }
+
+    private func preferredBuildScheme(from schemes: [String]) -> String? {
+        if let nonTestScheme = schemes.first(where: { !$0.lowercased().contains("test") }) {
+            return nonTestScheme
+        }
+        return schemes.first
     }
 
     private func executeTaskWithBoardScopedProjectsDirectory(
@@ -6960,6 +7276,7 @@ final class KanbanBoardViewModel: ObservableObject {
             gitHubPRQualityGatePolicy: gitHubPRQualityGatePolicy,
             dagExecutionPolicy: dagExecutionPolicy,
             executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
+            executionRealArtifactVerificationPolicy: executionRealArtifactVerificationPolicy,
             mcpServerPolicy: mcpServerPolicy
         )
         try? boardStore.save(snapshot)
@@ -6972,6 +7289,9 @@ extension KanbanBoardViewModel {
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
+        projectsDirectoryPathProvider: @escaping () -> String = {
+            CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+        },
         gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
         runOnBackground: @escaping ExecutionDispatcher = { work in
             DispatchQueue.global(qos: .userInitiated).async(execute: work)
@@ -6997,7 +7317,9 @@ extension KanbanBoardViewModel {
                     gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                     dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
                     executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
+                    executionRealArtifactVerificationPolicy: snapshot.executionRealArtifactVerificationPolicy ?? .init(),
                     mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
+                    projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
                     taskExecutor: taskExecutor,
@@ -7022,7 +7344,9 @@ extension KanbanBoardViewModel {
                 gitHubPRQualityGatePolicy: snapshot.gitHubPRQualityGatePolicy ?? .init(),
                 dagExecutionPolicy: snapshot.dagExecutionPolicy ?? .init(),
                 executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
+                executionRealArtifactVerificationPolicy: snapshot.executionRealArtifactVerificationPolicy ?? .init(),
                 mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
+                projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
                 taskExecutor: taskExecutor,
@@ -7037,6 +7361,7 @@ extension KanbanBoardViewModel {
             assignmentEngine: assignmentEngine,
             projectPlanner: projectPlanner,
             taskExecutor: taskExecutor,
+            projectsDirectoryPathProvider: projectsDirectoryPathProvider,
             gitCommandRunner: gitCommandRunner,
             runOnBackground: runOnBackground,
             runOnMain: runOnMain
@@ -7048,6 +7373,9 @@ extension KanbanBoardViewModel {
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
         projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
+        projectsDirectoryPathProvider: @escaping () -> String = {
+            CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
+        },
         gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
         runOnBackground: @escaping ExecutionDispatcher = { work in
             DispatchQueue.global(qos: .userInitiated).async(execute: work)
@@ -7060,6 +7388,7 @@ extension KanbanBoardViewModel {
         return KanbanBoardViewModel(
             tasks: demoData.tasks,
             agents: demoData.agents,
+            projectsDirectoryPathProvider: projectsDirectoryPathProvider,
             assignmentEngine: assignmentEngine,
             projectPlanner: projectPlanner,
             taskExecutor: taskExecutor,

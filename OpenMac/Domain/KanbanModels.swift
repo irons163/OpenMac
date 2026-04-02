@@ -424,6 +424,22 @@ struct ExecutionQualitySafetyGatePolicy: Equatable, Codable {
     }
 }
 
+struct ExecutionRealArtifactVerificationPolicy: Equatable, Codable {
+    var isEnabled: Bool
+    var requireInfoPlistExecutableKey: Bool
+    var requireXcodeBuild: Bool
+
+    init(
+        isEnabled: Bool = true,
+        requireInfoPlistExecutableKey: Bool = true,
+        requireXcodeBuild: Bool = true
+    ) {
+        self.isEnabled = isEnabled
+        self.requireInfoPlistExecutableKey = requireInfoPlistExecutableKey
+        self.requireXcodeBuild = requireXcodeBuild
+    }
+}
+
 enum MCPServerSourceType: String, Codable, Equatable {
     case builtin
     case registry

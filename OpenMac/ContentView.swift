@@ -138,6 +138,9 @@ struct ContentView: View {
     @State private var qualitySafetyRequireAcceptance = true
     @State private var qualitySafetyRequireCoverageIntent = true
     @State private var qualitySafetyRequireSecurityPrivacyNotes = true
+    @State private var realArtifactVerificationEnabled = true
+    @State private var realArtifactRequireInfoPlistExecutableKey = true
+    @State private var realArtifactRequireXcodeBuild = true
     @State private var isBoardMessageExpanded = false
     @State private var isGitHubFlowRunning = false
     @State private var mcpAutoFetchEnabled = true
@@ -632,6 +635,25 @@ struct ContentView: View {
                         applyQualitySafetyGateSettings()
                     }
                     Divider()
+                    Text(L10n.string("Real Artifact Verification"))
+                    Toggle(
+                        L10n.string("Enable real installation-grade verification for strict app tasks"),
+                        isOn: $realArtifactVerificationEnabled
+                    )
+                    Toggle(
+                        L10n.string("Require CFBundleExecutable in Info.plist"),
+                        isOn: $realArtifactRequireInfoPlistExecutableKey
+                    )
+                    Toggle(
+                        L10n.string("Require xcodebuild build to succeed"),
+                        isOn: $realArtifactRequireXcodeBuild
+                    )
+                    Text(viewModel.executionRealArtifactVerificationSummaryText())
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Apply Real Verification Settings")) {
+                        applyRealArtifactVerificationSettings()
+                    }
+                    Divider()
                     Text(L10n.string("MCP Servers"))
                     Text(viewModel.mcpServerStatusSummaryText())
                         .font(.caption2.monospaced())
@@ -927,6 +949,7 @@ struct ContentView: View {
             syncPRQualityGateDraftFromViewModel()
             syncDAGSchedulerDraftFromViewModel()
             syncQualitySafetyGateDraftFromViewModel()
+            syncRealArtifactVerificationDraftFromViewModel()
             syncMCPDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
             viewModel.showXcodeDeveloperDirectoryWarningIfNeeded()
@@ -1689,6 +1712,20 @@ struct ContentView: View {
             requireAcceptanceCriteria: qualitySafetyRequireAcceptance,
             requireTestCoverageIntent: qualitySafetyRequireCoverageIntent,
             requireSecurityPrivacyForSensitiveTasks: qualitySafetyRequireSecurityPrivacyNotes
+        )
+    }
+
+    private func syncRealArtifactVerificationDraftFromViewModel() {
+        realArtifactVerificationEnabled = viewModel.executionRealArtifactVerificationPolicy.isEnabled
+        realArtifactRequireInfoPlistExecutableKey = viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey
+        realArtifactRequireXcodeBuild = viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild
+    }
+
+    private func applyRealArtifactVerificationSettings() {
+        viewModel.updateExecutionRealArtifactVerificationPolicy(
+            isEnabled: realArtifactVerificationEnabled,
+            requireInfoPlistExecutableKey: realArtifactRequireInfoPlistExecutableKey,
+            requireXcodeBuild: realArtifactRequireXcodeBuild
         )
     }
 

@@ -17,6 +17,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy?
     var dagExecutionPolicy: DAGExecutionPolicy?
     var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy?
+    var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy?
     var mcpServerPolicy: MCPServerPolicy?
 
     init(
@@ -36,6 +37,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         gitHubPRQualityGatePolicy: GitHubPRQualityGatePolicy? = nil,
         dagExecutionPolicy: DAGExecutionPolicy? = nil,
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy? = nil,
+        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil,
         mcpServerPolicy: MCPServerPolicy? = nil
     ) {
         self.tasks = tasks
@@ -54,6 +56,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.gitHubPRQualityGatePolicy = gitHubPRQualityGatePolicy
         self.dagExecutionPolicy = dagExecutionPolicy
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
+        self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
         self.mcpServerPolicy = mcpServerPolicy
     }
 
@@ -79,6 +82,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             gitHubPRQualityGatePolicy: nil,
             dagExecutionPolicy: nil,
             executionQualitySafetyGatePolicy: nil,
+            executionRealArtifactVerificationPolicy: nil,
             mcpServerPolicy: nil
         )
     }
