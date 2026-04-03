@@ -1833,8 +1833,8 @@ struct ContentView: View {
         pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
     }
 
-    private func refreshPMPluginDiagnostics() {
-        viewModel.refreshPMPlanningPluginDiagnostics()
+    private func refreshPMPluginDiagnostics(announce: Bool = true) {
+        viewModel.refreshPMPlanningPluginDiagnostics(announce: announce)
         pmPluginStatusLastScannedAt = Date()
     }
 
@@ -1862,6 +1862,7 @@ struct ContentView: View {
             pluginsDirectoryPath: resolvedPMPluginsDirectoryPath
         )
         pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
+        refreshPMPluginDiagnostics(announce: false)
     }
 
     private func openMCPServersSheet() {
