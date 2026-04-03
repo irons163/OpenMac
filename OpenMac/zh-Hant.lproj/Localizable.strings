@@ -651,3 +651,4 @@
 "Rescanned PM plugins: none detected" = "已重新掃描 PM 插件：未偵測到插件";
 "Rescanned PM plugins: %d detected (%@)" = "已重新掃描 PM 插件：偵測到 %d 個（%@）";
 " and %d more" = " 以及另外 %d 個";
+"Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "本機 PM 插件探索已停用。請開啟自動探索以使用本機插件。";

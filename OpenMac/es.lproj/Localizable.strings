@@ -652,3 +652,4 @@
 "Rescanned PM plugins: none detected" = "Rescanned PM plugins: none detected";
 "Rescanned PM plugins: %d detected (%@)" = "Rescanned PM plugins: %d detected (%@)";
 " and %d more" = " and %d more";
+"Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins.";

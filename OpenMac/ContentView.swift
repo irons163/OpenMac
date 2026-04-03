@@ -5076,6 +5076,11 @@ private struct PMPlannerSheet: View {
                         )
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        if !pmPluginsAutoDiscover {
+                            Text(L10n.string("Local PM plugin discovery is disabled. Enable auto-discover to use local plugins."))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                         if pmPluginsAutoDiscover && pmLocalPluginCount == 0 {
                             Text(L10n.string("No local PM plugins detected. Planner will fallback to built-in logic."))
                                 .font(.caption2)
@@ -5085,6 +5090,7 @@ private struct PMPlannerSheet: View {
                             Button(L10n.string("Rescan PM Plugins"), action: onRefreshPMPlugins)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .disabled(!pmPluginsAutoDiscover)
                             Button(L10n.string("Open PM Plugins Folder in Finder"), action: onOpenPMPluginsFolder)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
