@@ -664,6 +664,7 @@
 "Last planning engine: %@" = "최근 계획 엔진: %@";
 "Last plan summary: %@" = "최근 계획 요약: %@";
 "Last plan generated: %@" = "최근 계획 생성: %@";
+"Updated: %@" = "업데이트: %@";
 "Plan freshness: %@" = "계획 신선도: %@";
 "Fresh" = "최신";
 "Stale" = "오래됨";

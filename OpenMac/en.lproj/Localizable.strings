@@ -663,6 +663,7 @@
 "Last planning engine: %@" = "Last planning engine: %@";
 "Last plan summary: %@" = "Last plan summary: %@";
 "Last plan generated: %@" = "Last plan generated: %@";
+"Updated: %@" = "Updated: %@";
 "Plan freshness: %@" = "Plan freshness: %@";
 "Fresh" = "Fresh";
 "Stale" = "Stale";

@@ -1856,11 +1856,13 @@ struct ContentView: View {
         let lastEngineName = pmLastGeneratedEngineName ?? "-"
         let lastSummary = pmLastGeneratedSummaryPreview ?? "-"
         let lastGeneratedAt = pmLastGeneratedPlanAtText
+        let lastGeneratedRelative = pmLastGeneratedRelativeText
         let snapshot = [
             L10n.format("Board: %@", viewModel.selectedBoardName),
             "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
             L10n.format("Last planning engine: %@", lastEngineName),
             L10n.format("Last plan generated: %@", lastGeneratedAt),
+            L10n.format("Updated: %@", lastGeneratedRelative),
             L10n.format("Plan freshness: %@", pmLastPlanFreshnessLabel),
             L10n.format("Last plan summary: %@", lastSummary),
             L10n.format(
@@ -3010,6 +3012,15 @@ struct ContentView: View {
         return shortDateTimeString(generatedAt)
     }
 
+    private var pmLastGeneratedRelativeText: String {
+        guard let generatedAt = pmLastGeneratedPlanAt else {
+            return L10n.string("No plan")
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: generatedAt, relativeTo: Date())
+    }
+
     private func shortDateTimeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -3104,6 +3115,10 @@ struct ContentView: View {
             }
 
             Text(L10n.format("Last plan generated: %@", pmLastGeneratedPlanAtText))
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            Text(L10n.format("Updated: %@", pmLastGeneratedRelativeText))
                 .font(.caption2)
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
 

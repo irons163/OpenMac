@@ -664,6 +664,7 @@
 "Last planning engine: %@" = "前回の計画エンジン: %@";
 "Last plan summary: %@" = "前回の計画サマリー: %@";
 "Last plan generated: %@" = "前回の計画生成: %@";
+"Updated: %@" = "更新: %@";
 "Plan freshness: %@" = "計画の鮮度: %@";
 "Fresh" = "最新";
 "Stale" = "古い";

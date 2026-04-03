@@ -663,6 +663,7 @@
 "Last planning engine: %@" = "最近规划引擎：%@";
 "Last plan summary: %@" = "最近计划摘要：%@";
 "Last plan generated: %@" = "最近计划生成：%@";
+"Updated: %@" = "更新：%@";
 "Plan freshness: %@" = "计划新鲜度：%@";
 "Fresh" = "新鲜";
 "Stale" = "过期";

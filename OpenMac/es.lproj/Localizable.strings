@@ -664,6 +664,7 @@
 "Last planning engine: %@" = "Último motor de planificación: %@";
 "Last plan summary: %@" = "Último resumen del plan: %@";
 "Last plan generated: %@" = "Último plan generado: %@";
+"Updated: %@" = "Actualizado: %@";
 "Plan freshness: %@" = "Frescura del plan: %@";
 "Fresh" = "Reciente";
 "Stale" = "Desactualizado";
