@@ -153,6 +153,7 @@ struct ContentView: View {
     @State private var isMCPRegistrySyncing = false
     @State private var pmPluginsAutoDiscover = true
     @State private var pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+    @State private var pmPluginStatusLastScannedAt: Date?
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -834,7 +835,7 @@ struct ContentView: View {
                 onCopyBlueprint: copyPMBlueprintFromSheet,
                 onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
-                onRefreshPMPlugins: { viewModel.refreshPMPlanningPluginDiagnostics() },
+                onRefreshPMPlugins: { refreshPMPluginDiagnostics() },
                 onCopyPMPluginDiagnostics: {
                     let names = viewModel.pmPlanningLocalPluginNames()
                     let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
@@ -1830,6 +1831,29 @@ struct ContentView: View {
         pmPlannerEngineMode = viewModel.pmPlannerEngineMode
         pmPluginsAutoDiscover = viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins
         pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
+    }
+
+    private func refreshPMPluginDiagnostics() {
+        viewModel.refreshPMPlanningPluginDiagnostics()
+        pmPluginStatusLastScannedAt = Date()
+    }
+
+    private func copyPMPlannerStatusSnapshot() {
+        let names = viewModel.pmPlanningLocalPluginNames()
+        let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
+        let snapshot = [
+            L10n.format("Board: %@", viewModel.selectedBoardName),
+            "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
+            L10n.format(
+                "Plugin discovery: %@ · Local plugins: %d",
+                viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
+                names.count
+            ),
+            L10n.format("Plugins folder: %@", viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath),
+            L10n.format("Detected plugins: %@", namesText),
+            L10n.format("Last: %@", pmPluginStatusLastScanText)
+        ].joined(separator: "\n")
+        copyToPasteboard(snapshot)
     }
 
     private func applyPMPluginSettings() {
@@ -2952,6 +2976,16 @@ struct ContentView: View {
         return shown + L10n.format(" and %d more", remaining)
     }
 
+    private var pmPluginStatusLastScanText: String {
+        guard let scannedAt = pmPluginStatusLastScannedAt else {
+            return L10n.string("Not scanned yet")
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: scannedAt)
+    }
+
     @ViewBuilder
     private func pmPlannerStatusSection() -> some View {
         let localPluginCount = viewModel.pmPlanningLocalPluginCount()
@@ -2997,9 +3031,13 @@ struct ContentView: View {
                         : BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
             }
 
+            Text(L10n.format("Last: %@", pmPluginStatusLastScanText))
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
             HStack(spacing: 8) {
                 Button(L10n.string("Rescan PM Plugins")) {
-                    viewModel.refreshPMPlanningPluginDiagnostics()
+                    refreshPMPluginDiagnostics()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -3007,6 +3045,12 @@ struct ContentView: View {
 
                 Button(L10n.string("PM Plan Project")) {
                     openPMPlannerSheet()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button(L10n.string("Copy PM Planner Status")) {
+                    copyPMPlannerStatusSnapshot()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

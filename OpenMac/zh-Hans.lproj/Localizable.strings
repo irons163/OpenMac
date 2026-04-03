@@ -658,3 +658,5 @@
 "Waiting for plan generation" = "等待生成计划";
 "Engine Source: %@" = "引擎来源：%@";
 "PM Planner Status" = "PM 规划器状态";
+"Not scanned yet" = "尚未扫描";
+"Copy PM Planner Status" = "复制 PM 规划器状态";

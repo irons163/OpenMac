@@ -659,3 +659,5 @@
 "Waiting for plan generation" = "Esperando generación del plan";
 "Engine Source: %@" = "Origen del motor: %@";
 "PM Planner Status" = "Estado del planificador PM";
+"Not scanned yet" = "Aún no escaneado";
+"Copy PM Planner Status" = "Copiar estado del planificador PM";

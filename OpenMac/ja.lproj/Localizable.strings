@@ -659,3 +659,5 @@
 "Waiting for plan generation" = "計画生成待ち";
 "Engine Source: %@" = "エンジンソース: %@";
 "PM Planner Status" = "PM プランナー状態";
+"Not scanned yet" = "未スキャン";
+"Copy PM Planner Status" = "PM プランナー状態をコピー";
