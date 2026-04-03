@@ -2962,6 +2962,29 @@ struct ContentView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
 
+            HStack(spacing: 6) {
+                Label(viewModel.pmPlannerEngineMode.title, systemImage: "cpu")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+
+                Label(
+                    viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
+                    systemImage: "dot.radiowaves.left.and.right"
+                )
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary, in: Capsule())
+
+                Label("\(localPluginCount)", systemImage: "puzzlepiece.extension")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+            }
+
             Text(viewModel.pmPlanningPluginStatusSummaryText())
                 .font(.caption2)
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
