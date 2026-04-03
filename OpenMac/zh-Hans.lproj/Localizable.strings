@@ -647,3 +647,4 @@
 "Plugins folder: %@" = "插件文件夹：%@";
 "No local PM plugins detected. Planner will fallback to built-in logic." = "未检测到本地 PM 插件，将回退到内置规划逻辑。";
 "Detected plugins: %@" = "已检测插件：%@";
+"Rescan PM Plugins" = "重新扫描 PM 插件";

@@ -832,7 +832,8 @@ struct ContentView: View {
                 onCopyTestPlan: copyPMTestPlanFromSheet,
                 onCopyBlueprint: copyPMBlueprintFromSheet,
                 onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
-                onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) }
+                onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
+                onRefreshPMPlugins: { viewModel.refreshPMPlanningPluginDiagnostics() }
             )
         }
         .sheet(isPresented: $isShowingMCPServersSheet) {
@@ -4880,6 +4881,7 @@ private struct PMPlannerSheet: View {
     let onCopyBlueprint: () -> Void
     let onOpenPMPluginsFolder: () -> Void
     let onCopyPMPluginsPath: () -> Void
+    let onRefreshPMPlugins: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
@@ -5080,6 +5082,9 @@ private struct PMPlannerSheet: View {
                                 .foregroundStyle(.orange)
                         }
                         HStack(spacing: 8) {
+                            Button(L10n.string("Rescan PM Plugins"), action: onRefreshPMPlugins)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                             Button(L10n.string("Open PM Plugins Folder in Finder"), action: onOpenPMPluginsFolder)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)

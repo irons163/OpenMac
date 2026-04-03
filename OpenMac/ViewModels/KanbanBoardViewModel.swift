@@ -4466,6 +4466,10 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
+    func refreshPMPlanningPluginDiagnostics() {
+        objectWillChange.send()
+    }
+
     func updateMCPServerPolicy(
         autoFetchEnabled: Bool,
         registryURL: String
