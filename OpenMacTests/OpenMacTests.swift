@@ -2121,6 +2121,51 @@ struct KanbanFlowTests {
         #expect(noXcodeInstalled == nil)
     }
 
+    @Test("xcode verification build overrides route mobile SDKs to simulator without signing")
+    func xcodeVerificationBuildOverridesForMobileSDKs() {
+        let ios = KanbanBoardViewModelTestHooks.verificationBuildOverrides(forSDKRoot: "iphoneos")
+        #expect(ios.sdk == "iphonesimulator")
+        #expect(ios.destination == "generic/platform=iOS Simulator")
+        #expect(ios.modeLabel == "iOS Simulator")
+
+        let tvos = KanbanBoardViewModelTestHooks.verificationBuildOverrides(forSDKRoot: "appletvos")
+        #expect(tvos.sdk == "appletvsimulator")
+        #expect(tvos.destination == "generic/platform=tvOS Simulator")
+        #expect(tvos.modeLabel == "tvOS Simulator")
+
+        let watch = KanbanBoardViewModelTestHooks.verificationBuildOverrides(forSDKRoot: "watchos")
+        #expect(watch.sdk == "watchsimulator")
+        #expect(watch.destination == "generic/platform=watchOS Simulator")
+        #expect(watch.modeLabel == "watchOS Simulator")
+
+        let vision = KanbanBoardViewModelTestHooks.verificationBuildOverrides(forSDKRoot: "xros")
+        #expect(vision.sdk == "xrsimulator")
+        #expect(vision.destination == "generic/platform=visionOS Simulator")
+        #expect(vision.modeLabel == "visionOS Simulator")
+
+        let mac = KanbanBoardViewModelTestHooks.verificationBuildOverrides(forSDKRoot: "macosx")
+        #expect(mac.sdk == nil)
+        #expect(mac.destination == nil)
+        #expect(mac.modeLabel == "Default")
+    }
+
+    @Test("xcode build settings parser extracts key values")
+    func xcodeBuildSettingsParserExtractsValues() {
+        let output = """
+        Build settings for action build and target Demo:
+            SDKROOT = iphoneos
+            PRODUCT_NAME = Demo
+        """
+
+        let sdkRoot = KanbanBoardViewModelTestHooks.parseXcodeBuildSettingValue("SDKROOT", output: output)
+        let product = KanbanBoardViewModelTestHooks.parseXcodeBuildSettingValue("PRODUCT_NAME", output: output)
+        let missing = KanbanBoardViewModelTestHooks.parseXcodeBuildSettingValue("SWIFT_VERSION", output: output)
+
+        #expect(sdkRoot == "iphoneos")
+        #expect(product == "Demo")
+        #expect(missing == nil)
+    }
+
     @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
     func startupWarningForCommandLineToolsOnly() {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])

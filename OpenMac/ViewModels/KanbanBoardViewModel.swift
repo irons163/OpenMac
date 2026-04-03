@@ -5058,6 +5058,43 @@ final class KanbanBoardViewModel: ObservableObject {
         return "sudo xcode-select -s \(shellQuoted(normalizedInstalledPath))"
     }
 
+    fileprivate static func parseXcodeBuildSettingValue(
+        _ key: String,
+        from output: String
+    ) -> String? {
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("\(key) = ") else { continue }
+            let value = trimmed.dropFirst((key + " = ").count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            return value
+        }
+        return nil
+    }
+
+    fileprivate static func verificationBuildOverrides(
+        forSDKRoot sdkRoot: String?
+    ) -> (sdk: String?, destination: String?, modeLabel: String) {
+        let normalized = sdkRoot?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        if normalized.contains("iphoneos") || normalized.contains("iphonesimulator") {
+            return ("iphonesimulator", "generic/platform=iOS Simulator", "iOS Simulator")
+        }
+        if normalized.contains("appletvos") || normalized.contains("appletvsimulator") {
+            return ("appletvsimulator", "generic/platform=tvOS Simulator", "tvOS Simulator")
+        }
+        if normalized.contains("watchos") || normalized.contains("watchsimulator") {
+            return ("watchsimulator", "generic/platform=watchOS Simulator", "watchOS Simulator")
+        }
+        if normalized.contains("xros") || normalized.contains("xrsimulator") {
+            return ("xrsimulator", "generic/platform=visionOS Simulator", "visionOS Simulator")
+        }
+        return (nil, nil, "Default")
+    }
+
     private static func shellQuoted(_ value: String) -> String {
         let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
         return "'\(escaped)'"
@@ -5530,9 +5567,25 @@ final class KanbanBoardViewModel: ObservableObject {
                 return .failed(reason: "no shared scheme found in \(projectName)")
             }
 
-            let buildCommand = """
-            xcodebuild \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path)) -scheme \(Self.shellQuoted(scheme)) -configuration Debug build
+            let buildSettingsCommand = """
+            xcodebuild \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path)) -scheme \(Self.shellQuoted(scheme)) -showBuildSettings
             """
+            let buildSettingsResult = try? Self.runShellCommand(buildSettingsCommand)
+            let sdkRoot: String?
+            if let buildSettingsResult, buildSettingsResult.code == 0 {
+                sdkRoot = Self.parseXcodeBuildSettingValue("SDKROOT", from: buildSettingsResult.output)
+            } else {
+                sdkRoot = nil
+            }
+            let overrides = Self.verificationBuildOverrides(forSDKRoot: sdkRoot)
+            var buildCommand = "xcodebuild \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path)) -scheme \(Self.shellQuoted(scheme)) -configuration Debug"
+            if let sdk = overrides.sdk {
+                buildCommand += " -sdk \(sdk)"
+            }
+            if let destination = overrides.destination {
+                buildCommand += " -destination \(Self.shellQuoted(destination))"
+            }
+            buildCommand += " build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM="
             let buildResult: (code: Int32, output: String)
             do {
                 buildResult = try Self.runShellCommand(buildCommand)
@@ -5549,6 +5602,7 @@ final class KanbanBoardViewModel: ObservableObject {
                     )
                 )
             }
+            checks.append("xcodebuild verification mode: \(overrides.modeLabel) (code signing bypass)")
             checks.append("xcodebuild succeeded (scheme: \(scheme))")
         }
 
@@ -8527,6 +8581,14 @@ enum KanbanBoardViewModelTestHooks {
             activeDeveloperDirectoryPath: activeDeveloperDirectoryPath,
             installedXcodeDeveloperDirectoryPath: installedXcodeDeveloperDirectoryPath
         )
+    }
+
+    static func parseXcodeBuildSettingValue(_ key: String, output: String) -> String? {
+        KanbanBoardViewModel.parseXcodeBuildSettingValue(key, from: output)
+    }
+
+    static func verificationBuildOverrides(forSDKRoot sdkRoot: String?) -> (sdk: String?, destination: String?, modeLabel: String) {
+        KanbanBoardViewModel.verificationBuildOverrides(forSDKRoot: sdkRoot)
     }
 }
 #endif
