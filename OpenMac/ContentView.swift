@@ -103,6 +103,7 @@ struct ContentView: View {
     @State private var pmAutoAssignAfterCreate = true
     @State private var pmCreateNewBoardForPlan = true
     @State private var pmPlanSummary = ""
+    @State private var pmLastGeneratedPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
     @State private var pmPlannerEngineMode: PMPlannerEngineMode = .builtIn
     @State private var pmTicketDeliveryProfile: PMTicketDeliveryProfile = .balanced
@@ -1274,6 +1275,7 @@ struct ContentView: View {
 
         pmProjectName = plan.projectName
         pmPlanSummary = plan.summary
+        rememberPMGeneratedPlanSummary(plan.summary)
         pmPlannedTickets = plan.tickets
         pmTestPlanText = Self.pmTestPlanText(
             projectName: pmProjectName,
@@ -1399,6 +1401,7 @@ struct ContentView: View {
         guard preparation.shouldStart else {
             if let summary = preparation.generatedPlanSummary {
                 pmPlanSummary = summary
+                rememberPMGeneratedPlanSummary(summary)
                 pmPlannedTickets = preparation.plannedTickets
             } else if preparation.status == .missingTickets {
                 pmPlanSummary = ""
@@ -1412,6 +1415,7 @@ struct ContentView: View {
         pmTestPlanText = preparation.testPlanText
         if let summary = preparation.generatedPlanSummary {
             pmPlanSummary = summary
+            rememberPMGeneratedPlanSummary(summary)
         }
         if preparation.didSwitchBoardContext {
             handleBoardContextChanged()
@@ -1833,6 +1837,12 @@ struct ContentView: View {
         pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
     }
 
+    private func rememberPMGeneratedPlanSummary(_ summary: String) {
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pmLastGeneratedPlanSummary = trimmed
+    }
+
     private func refreshPMPluginDiagnostics(announce: Bool = true) {
         viewModel.refreshPMPlanningPluginDiagnostics(announce: announce)
         pmPluginStatusLastScannedAt = Date()
@@ -1841,9 +1851,11 @@ struct ContentView: View {
     private func copyPMPlannerStatusSnapshot() {
         let names = viewModel.pmPlanningLocalPluginNames()
         let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
+        let lastEngineName = pmLastGeneratedEngineName ?? "-"
         let snapshot = [
             L10n.format("Board: %@", viewModel.selectedBoardName),
             "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
+            L10n.format("Last planning engine: %@", lastEngineName),
             L10n.format(
                 "Plugin discovery: %@ · Local plugins: %d",
                 viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
@@ -2987,6 +2999,22 @@ struct ContentView: View {
         return formatter.string(from: scannedAt)
     }
 
+    private var pmLastGeneratedEngineName: String? {
+        let trimmedSummary = pmLastGeneratedPlanSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else { return nil }
+        return Self.pmPlanEngineDisplayName(from: trimmedSummary) ?? viewModel.pmPlannerEngineMode.title
+    }
+
+    private var pmLastGeneratedEngineSource: PMPlanningEngineSource? {
+        let trimmedSummary = pmLastGeneratedPlanSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else { return nil }
+        return Self.pmPlanningEngineSource(
+            from: trimmedSummary,
+            selectedMode: viewModel.pmPlannerEngineMode,
+            localPluginCount: viewModel.pmPlanningLocalPluginCount()
+        )
+    }
+
     @ViewBuilder
     private func pmPlannerStatusSection() -> some View {
         let localPluginCount = viewModel.pmPlanningLocalPluginCount()
@@ -3023,6 +3051,24 @@ struct ContentView: View {
             Text(viewModel.pmPlanningPluginStatusSummaryText())
                 .font(.caption2)
                 .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            if let lastEngineName = pmLastGeneratedEngineName {
+                Text(L10n.format("Last planning engine: %@", lastEngineName))
+                    .font(.caption2)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+            }
+
+            if let lastEngineSource = pmLastGeneratedEngineSource {
+                Label(
+                    L10n.format("Engine Source: %@", lastEngineSource.label),
+                    systemImage: lastEngineSource.symbolName
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(lastEngineSource.color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(lastEngineSource.color.opacity(0.12), in: Capsule())
+            }
 
             if showingPluginDiagnostics {
                 Text(L10n.format("Detected plugins: %@", pmLocalPluginNamesPreviewText))

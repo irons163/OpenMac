@@ -660,3 +660,4 @@
 "PM Planner Status" = "PM 規劃器狀態";
 "Not scanned yet" = "尚未掃描";
 "Copy PM Planner Status" = "複製 PM 規劃器狀態";
+"Last planning engine: %@" = "最近規劃引擎：%@";

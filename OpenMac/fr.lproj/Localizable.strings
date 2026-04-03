@@ -661,3 +661,4 @@
 "PM Planner Status" = "État du planificateur PM";
 "Not scanned yet" = "Pas encore analysé";
 "Copy PM Planner Status" = "Copier l’état du planificateur PM";
+"Last planning engine: %@" = "Dernier moteur de planification : %@";
