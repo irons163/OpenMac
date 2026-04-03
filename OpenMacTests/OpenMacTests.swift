@@ -3955,6 +3955,135 @@ struct KanbanSupportTypeTests {
         #expect(content.gateMode == .flexible)
         #expect(content.requiredArtifacts.contains(.report))
     }
+
+    @Test("retryable execution error ids map to raw values")
+    func retryableExecutionErrorTypeIDs() {
+        for errorType in RetryableExecutionErrorType.allCases {
+            #expect(errorType.id == errorType.rawValue)
+        }
+    }
+
+    @Test("MCP descriptor id uses normalized server name")
+    func mcpDescriptorIDUsesNormalizedName() {
+        let descriptor = MCPServerDescriptor(name: "  Xcode Local  ")
+        #expect(descriptor.id == "xcode local")
+        #expect(descriptor.id == descriptor.normalizedName)
+    }
+
+    @Test("delivery enums expose stable ids and non-empty localized titles")
+    func deliveryEnumIDsAndTitles() {
+        for output in TaskDeliveryOutputType.allCases {
+            #expect(output.id == output.rawValue)
+            #expect(!output.title.isEmpty)
+        }
+
+        for gate in TaskDeliveryGateMode.allCases {
+            #expect(gate.id == gate.rawValue)
+            #expect(!gate.title.isEmpty)
+        }
+
+        for rule in TaskDeliveryArtifactRule.allCases {
+            #expect(rule.id == rule.rawValue)
+            #expect(!rule.title.isEmpty)
+        }
+
+        for artifact in TaskDeliveryArtifact.allCases {
+            #expect(artifact.id == artifact.rawValue)
+            #expect(!artifact.title.isEmpty)
+        }
+    }
+
+    @Test("PM delivery profiles expose ids titles and details")
+    func pmTicketDeliveryProfilesExposeMetadata() {
+        for profile in PMTicketDeliveryProfile.allCases {
+            #expect(profile.id == profile.rawValue)
+            #expect(!profile.title.isEmpty)
+            #expect(!profile.detail.isEmpty)
+        }
+    }
+
+    @Test("PM real artifact presets expose metadata and resolve expected policies")
+    func pmRealArtifactPresetMetadataAndResolvedPolicy() {
+        let basePolicy = ExecutionRealArtifactVerificationPolicy(
+            isEnabled: true,
+            requireInfoPlistExecutableKey: false,
+            requireXcodeBuild: true,
+            runVerificationOnlyOnTerminalTask: false,
+            enableDeterministicRepairCycle: false
+        )
+
+        for preset in PMRealArtifactVerificationPreset.allCases {
+            #expect(preset.id == preset.rawValue)
+            #expect(!preset.title.isEmpty)
+            #expect(!preset.detail.isEmpty)
+        }
+
+        let useDefaults = PMRealArtifactVerificationPreset.useDeveloperDefaults.resolvedPolicy(defaultPolicy: basePolicy)
+        #expect(useDefaults == basePolicy)
+
+        let disabled = PMRealArtifactVerificationPreset.disabled.resolvedPolicy(defaultPolicy: basePolicy)
+        #expect(disabled.isEnabled == false)
+        #expect(disabled.requireInfoPlistExecutableKey == basePolicy.requireInfoPlistExecutableKey)
+        #expect(disabled.requireXcodeBuild == basePolicy.requireXcodeBuild)
+
+        let standard = PMRealArtifactVerificationPreset.standard.resolvedPolicy(defaultPolicy: basePolicy)
+        #expect(standard.isEnabled)
+        #expect(standard.requireInfoPlistExecutableKey == false)
+        #expect(standard.requireXcodeBuild)
+
+        let strict = PMRealArtifactVerificationPreset.strict.resolvedPolicy(defaultPolicy: basePolicy)
+        #expect(strict.isEnabled)
+        #expect(strict.requireInfoPlistExecutableKey)
+        #expect(strict.requireXcodeBuild)
+    }
+
+    @Test("delivery contract defaults cover all output and gate combinations")
+    func taskDeliveryContractDefaultArtifactsCoverage() {
+        let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [
+            .app: [.files, .commands, .tests, .report],
+            .codeModule: [.files, .commands, .tests, .report],
+            .document: [.files, .report],
+            .image: [.images, .report],
+            .data: [.files, .commands, .report],
+            .mixed: [.report]
+        ]
+        for (output, expected) in strictExpected {
+            #expect(TaskDeliveryContract.defaultRequiredArtifacts(outputType: output, gateMode: .strict) == expected)
+        }
+
+        let flexibleExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [
+            .app: [.files, .report],
+            .codeModule: [.files, .report],
+            .document: [.report, .summary],
+            .image: [.images, .report],
+            .data: [.files, .report],
+            .mixed: [.report, .summary]
+        ]
+        for (output, expected) in flexibleExpected {
+            #expect(TaskDeliveryContract.defaultRequiredArtifacts(outputType: output, gateMode: .flexible) == expected)
+        }
+    }
+
+    @Test("delivery contract reset reapplies defaults for current mode")
+    func taskDeliveryContractResetDefaultsForCurrentMode() {
+        var contract = TaskDeliveryContract(
+            outputType: .app,
+            gateMode: .strict,
+            artifactRule: .any,
+            requiredArtifacts: [.summary]
+        )
+        contract.resetDefaultsForCurrentMode()
+        #expect(contract.artifactRule == .all)
+        #expect(contract.requiredArtifacts == [.files, .commands, .tests, .report])
+
+        contract.gateMode = .flexible
+        contract.outputType = .document
+        contract.artifactRule = .all
+        contract.requiredArtifacts = [.files]
+        contract.resetDefaultsForCurrentMode()
+        #expect(contract.artifactRule == .any)
+        #expect(contract.requiredArtifacts == [.report, .summary])
+    }
 }
 
 @Suite(.serialized)
@@ -7589,6 +7718,24 @@ struct KanbanPersistenceTests {
         #expect(decoded.enableDeterministicRepairCycle)
     }
 
+    @Test("real artifact policy decode falls back to defaults when primary keys are missing")
+    func realArtifactPolicyDecodeDefaultsWhenPrimaryKeysMissing() throws {
+        let json = """
+        {
+          "runVerificationOnlyOnTerminalTask": false,
+          "enableDeterministicRepairCycle": false
+        }
+        """.data(using: .utf8) ?? Data()
+
+        let decoded = try JSONDecoder().decode(ExecutionRealArtifactVerificationPolicy.self, from: json)
+
+        #expect(decoded.isEnabled == false)
+        #expect(decoded.requireInfoPlistExecutableKey == true)
+        #expect(decoded.requireXcodeBuild == true)
+        #expect(decoded.runVerificationOnlyOnTerminalTask == false)
+        #expect(decoded.enableDeterministicRepairCycle == false)
+    }
+
     @Test("imports workspace snapshot and persists board selection")
     func importsWorkspaceSnapshotAndPersistsSelection() throws {
         let deliveryTask = WorkTask(
@@ -8296,6 +8443,37 @@ struct KanbanPersistenceTests {
         #expect(policy.autoFetchEnabled)
         #expect(!policy.registryURL.isEmpty)
         #expect(policy.effectiveServers.contains(where: { $0.normalizedName == "xcode" }))
+    }
+
+    @Test("MCP effective servers are sorted by name and manual entries override duplicates")
+    func mcpEffectiveServersSortAndOverride() {
+        let builtin = MCPServerDescriptor(
+            name: "xcode",
+            bootstrapCommand: "builtin",
+            source: .builtin
+        )
+        let autoFetched = MCPServerDescriptor(
+            name: "alpha",
+            bootstrapCommand: "registry",
+            source: .registry
+        )
+        let manualOverride = MCPServerDescriptor(
+            name: "Xcode",
+            bootstrapCommand: "manual",
+            source: .manual
+        )
+
+        let policy = MCPServerPolicy(
+            autoFetchEnabled: true,
+            registryURL: "https://registry.modelcontextprotocol.io/v0.1/servers?limit=10",
+            autoFetchedServers: [autoFetched],
+            manualServers: [manualOverride, builtin]
+        )
+
+        let names = policy.effectiveServers.map(\.normalizedName)
+        #expect(names == ["alpha", "xcode"])
+        #expect(policy.effectiveServers.last?.source == .manual)
+        #expect(policy.effectiveServers.last?.bootstrapCommand == "manual")
     }
 
     @Test("MCP descriptor generates CLI-safe server name for namespaced registry entries")
