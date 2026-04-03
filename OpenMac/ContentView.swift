@@ -5411,6 +5411,10 @@ private struct PMPlannerSheet: View {
         }
         .padding(18)
         .frame(width: 760, height: 760)
+        .onChange(of: plannerEngineMode) { _, newMode in
+            guard newMode == .brainstormPluginPreferred else { return }
+            onRefreshPMPlugins()
+        }
     }
 }
 
