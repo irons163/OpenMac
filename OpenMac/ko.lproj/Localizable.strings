@@ -662,3 +662,4 @@
 "Not scanned yet" = "아직 스캔되지 않음";
 "Copy PM Planner Status" = "PM 플래너 상태 복사";
 "Last planning engine: %@" = "최근 계획 엔진: %@";
+"Last plan summary: %@" = "최근 계획 요약: %@";

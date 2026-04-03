@@ -1852,10 +1852,12 @@ struct ContentView: View {
         let names = viewModel.pmPlanningLocalPluginNames()
         let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
         let lastEngineName = pmLastGeneratedEngineName ?? "-"
+        let lastSummary = pmLastGeneratedSummaryPreview ?? "-"
         let snapshot = [
             L10n.format("Board: %@", viewModel.selectedBoardName),
             "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
             L10n.format("Last planning engine: %@", lastEngineName),
+            L10n.format("Last plan summary: %@", lastSummary),
             L10n.format(
                 "Plugin discovery: %@ · Local plugins: %d",
                 viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
@@ -3015,6 +3017,12 @@ struct ContentView: View {
         )
     }
 
+    private var pmLastGeneratedSummaryPreview: String? {
+        let trimmedSummary = pmLastGeneratedPlanSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else { return nil }
+        return Self.boardMessageCollapsedPreview(trimmedSummary)
+    }
+
     @ViewBuilder
     private func pmPlannerStatusSection() -> some View {
         let localPluginCount = viewModel.pmPlanningLocalPluginCount()
@@ -3068,6 +3076,13 @@ struct ContentView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(lastEngineSource.color.opacity(0.12), in: Capsule())
+            }
+
+            if let lastSummary = pmLastGeneratedSummaryPreview {
+                Text(L10n.format("Last plan summary: %@", lastSummary))
+                    .font(.caption2)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    .lineLimit(2)
             }
 
             if showingPluginDiagnostics {

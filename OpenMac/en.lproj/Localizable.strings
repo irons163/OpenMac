@@ -661,3 +661,4 @@
 "Not scanned yet" = "Not scanned yet";
 "Copy PM Planner Status" = "Copy PM Planner Status";
 "Last planning engine: %@" = "Last planning engine: %@";
+"Last plan summary: %@" = "Last plan summary: %@";

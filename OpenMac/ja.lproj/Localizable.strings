@@ -662,3 +662,4 @@
 "Not scanned yet" = "未スキャン";
 "Copy PM Planner Status" = "PM プランナー状態をコピー";
 "Last planning engine: %@" = "前回の計画エンジン: %@";
+"Last plan summary: %@" = "前回の計画サマリー: %@";

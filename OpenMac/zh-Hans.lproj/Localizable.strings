@@ -661,3 +661,4 @@
 "Not scanned yet" = "尚未扫描";
 "Copy PM Planner Status" = "复制 PM 规划器状态";
 "Last planning engine: %@" = "最近规划引擎：%@";
+"Last plan summary: %@" = "最近计划摘要：%@";
