@@ -658,3 +658,4 @@
 "Built-in Brainstorm fallback" = "내장 브레인스토밍 폴백";
 "Waiting for plan generation" = "계획 생성 대기 중";
 "Engine Source: %@" = "엔진 소스: %@";
+"PM Planner Status" = "PM 플래너 상태";

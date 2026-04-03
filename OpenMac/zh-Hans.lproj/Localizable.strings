@@ -657,3 +657,4 @@
 "Built-in Brainstorm fallback" = "内置头脑风暴回退";
 "Waiting for plan generation" = "等待生成计划";
 "Engine Source: %@" = "引擎来源：%@";
+"PM Planner Status" = "PM 规划器状态";

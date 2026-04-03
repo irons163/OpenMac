@@ -658,3 +658,4 @@
 "Built-in Brainstorm fallback" = "Repli brainstorming intégré";
 "Waiting for plan generation" = "En attente de génération du plan";
 "Engine Source: %@" = "Source du moteur : %@";
+"PM Planner Status" = "État du planificateur PM";

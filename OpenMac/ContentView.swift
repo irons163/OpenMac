@@ -227,6 +227,7 @@ struct ContentView: View {
                     )
 
                     BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
+                    pmPlannerStatusSection()
 
                     HStack(spacing: 12) {
                         TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
@@ -2938,6 +2939,43 @@ struct ContentView: View {
 
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
         viewModel.selectedBoardDependencyInsights
+    }
+
+    private var pmLocalPluginNamesPreviewText: String {
+        let names = viewModel.pmPlanningLocalPluginNames()
+        guard !names.isEmpty else { return "-" }
+        if names.count <= 3 {
+            return names.joined(separator: ", ")
+        }
+        let shown = names.prefix(3).joined(separator: ", ")
+        let remaining = names.count - 3
+        return shown + L10n.format(" and %d more", remaining)
+    }
+
+    @ViewBuilder
+    private func pmPlannerStatusSection() -> some View {
+        let localPluginCount = viewModel.pmPlanningLocalPluginCount()
+        let showingPluginDiagnostics = viewModel.pmPlannerEngineMode == .brainstormPluginPreferred
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.string("PM Planner Status"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            Text(viewModel.pmPlanningPluginStatusSummaryText())
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            if showingPluginDiagnostics {
+                Text(L10n.format("Detected plugins: %@", pmLocalPluginNamesPreviewText))
+                    .font(.caption2)
+                    .foregroundStyle(localPluginCount > 0
+                        ? BoardSemanticTextPalette.color(for: .success, scheme: effectiveColorScheme)
+                        : BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+            }
+        }
+        .padding(10)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var resolvedGitHubRepositoryPath: String {
