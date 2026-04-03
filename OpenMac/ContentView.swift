@@ -833,7 +833,22 @@ struct ContentView: View {
                 onCopyBlueprint: copyPMBlueprintFromSheet,
                 onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
-                onRefreshPMPlugins: { viewModel.refreshPMPlanningPluginDiagnostics() }
+                onRefreshPMPlugins: { viewModel.refreshPMPlanningPluginDiagnostics() },
+                onCopyPMPluginDiagnostics: {
+                    let names = viewModel.pmPlanningLocalPluginNames()
+                    let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
+                    let diagnostics = [
+                        "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
+                        L10n.format(
+                            "Plugin discovery: %@ · Local plugins: %d",
+                            viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
+                            names.count
+                        ),
+                        L10n.format("Plugins folder: %@", viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath),
+                        L10n.format("Detected plugins: %@", namesText)
+                    ].joined(separator: "\n")
+                    copyToPasteboard(diagnostics)
+                }
             )
         }
         .sheet(isPresented: $isShowingMCPServersSheet) {
@@ -4882,6 +4897,7 @@ private struct PMPlannerSheet: View {
     let onOpenPMPluginsFolder: () -> Void
     let onCopyPMPluginsPath: () -> Void
     let onRefreshPMPlugins: () -> Void
+    let onCopyPMPluginDiagnostics: () -> Void
 
     private var totalStoryPoints: Int {
         plannedTickets.reduce(0) { $0 + max(1, $1.storyPoints) }
@@ -5095,6 +5111,9 @@ private struct PMPlannerSheet: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                             Button(L10n.string("Copy PM Plugins Folder Path"), action: onCopyPMPluginsPath)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            Button(L10n.string("Copy PM Plugin Diagnostics"), action: onCopyPMPluginDiagnostics)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                         }

@@ -652,3 +652,4 @@
 "Rescanned PM plugins: %d detected (%@)" = "已重新扫描 PM 插件：检测到 %d 个（%@）";
 " and %d more" = " 以及另外 %d 个";
 "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "本地 PM 插件发现已停用。请启用自动发现以使用本地插件。";
+"Copy PM Plugin Diagnostics" = "复制 PM 插件诊断信息";
