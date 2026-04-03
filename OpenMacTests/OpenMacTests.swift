@@ -7231,6 +7231,8 @@ struct KanbanPersistenceTests {
         #expect(snapshot.executionRealArtifactVerificationPolicy?.isEnabled == true)
         #expect(snapshot.executionRealArtifactVerificationPolicy?.requireInfoPlistExecutableKey == false)
         #expect(snapshot.executionRealArtifactVerificationPolicy?.requireXcodeBuild == true)
+        #expect(snapshot.executionRealArtifactVerificationPolicy?.runVerificationOnlyOnTerminalTask == true)
+        #expect(snapshot.executionRealArtifactVerificationPolicy?.enableDeterministicRepairCycle == true)
     }
 
     @Test("real artifact defaults can be linked or overridden per board")
@@ -7245,6 +7247,8 @@ struct KanbanPersistenceTests {
         #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == false)
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.runVerificationOnlyOnTerminalTask == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.enableDeterministicRepairCycle == true)
 
         let boardAID = viewModel.selectedBoardID
         _ = viewModel.createBoard(name: "Board B")
@@ -7272,6 +7276,8 @@ struct KanbanPersistenceTests {
         )
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == true)
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.runVerificationOnlyOnTerminalTask == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.enableDeterministicRepairCycle == true)
 
         _ = viewModel.switchBoard(to: boardBID)
         #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == false)
@@ -7281,6 +7287,27 @@ struct KanbanPersistenceTests {
         #expect(viewModel.selectedBoardUsesDefaultRealArtifactVerificationPolicy == true)
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey == true)
         #expect(viewModel.executionRealArtifactVerificationPolicy.requireXcodeBuild == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.runVerificationOnlyOnTerminalTask == true)
+        #expect(viewModel.executionRealArtifactVerificationPolicy.enableDeterministicRepairCycle == true)
+    }
+
+    @Test("real artifact policy decode keeps backward compatibility without terminal-task and repair-cycle keys")
+    func realArtifactPolicyDecodeDefaultsTerminalTaskModeWhenMissing() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "requireInfoPlistExecutableKey": false,
+          "requireXcodeBuild": true
+        }
+        """.data(using: .utf8) ?? Data()
+
+        let decoded = try JSONDecoder().decode(ExecutionRealArtifactVerificationPolicy.self, from: json)
+
+        #expect(decoded.isEnabled)
+        #expect(decoded.requireInfoPlistExecutableKey == false)
+        #expect(decoded.requireXcodeBuild)
+        #expect(decoded.runVerificationOnlyOnTerminalTask)
+        #expect(decoded.enableDeterministicRepairCycle)
     }
 
     @Test("imports workspace snapshot and persists board selection")
@@ -7992,6 +8019,14 @@ struct KanbanPersistenceTests {
         #expect(policy.effectiveServers.contains(where: { $0.normalizedName == "xcode" }))
     }
 
+    @Test("MCP descriptor generates CLI-safe server name for namespaced registry entries")
+    func mcpDescriptorGeneratesCLISafeName() {
+        let descriptor = MCPServerDescriptor(name: "ai.appdeploy/deploy-app")
+
+        #expect(descriptor.normalizedName == "ai.appdeploy/deploy-app")
+        #expect(descriptor.cliServerName == "ai-appdeploy-deploy-app")
+    }
+
     @Test("persistent board loads MCP server policy from snapshot")
     func persistentBoardLoadsMCPPolicyFromSnapshot() {
         let manualServer = MCPServerDescriptor(
@@ -8047,6 +8082,25 @@ struct KanbanPersistenceTests {
         #expect(removed)
         #expect(viewModel.mcpServerPolicy.manualServers.isEmpty)
         #expect(store.savedSnapshots.count >= 3)
+    }
+
+    @Test("manual MCP server uses CLI-safe verification command when name includes unsupported characters")
+    func manualMCPServerUsesCLISafeVerificationCommand() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let added = viewModel.addManualMCPServer(
+            name: "ai.appdeploy/deploy-app",
+            bootstrapCommand: "echo setup",
+            keywordHintsText: "deploy"
+        )
+
+        #expect(added)
+        guard let server = viewModel.mcpServerPolicy.manualServers.first else {
+            Issue.record("Expected a manual MCP server to be saved")
+            return
+        }
+        #expect(server.cliServerName == "ai-appdeploy-deploy-app")
+        #expect(server.verificationCommand == "codex mcp get 'ai-appdeploy-deploy-app' --json")
     }
 
     @Test("agentName resolves unassigned, known, and unknown ids")
@@ -9562,6 +9616,304 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("run task execution auto-repairs missing PRODUCT_BUNDLE_IDENTIFIER during real verification")
+    func runTaskExecutionAutoRepairsMissingBundleIdentifierDuringRealVerification() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "Default Board"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+            .appendingPathComponent("RepairApp", isDirectory: true)
+        let projectURL = projectRootURL.appendingPathComponent("RepairApp.xcodeproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+        let projectFileURL = projectURL.appendingPathComponent("project.pbxproj")
+        let pbxproj = """
+        {
+            objects = {
+                A1 /* Debug */ = {
+                    isa = XCBuildConfiguration;
+                    buildSettings = {
+                        INFOPLIST_FILE = iOS/Info.plist;
+                        SDKROOT = iphoneos;
+                        PRODUCT_NAME = RepairApp;
+                        PRODUCT_BUNDLE_IDENTIFIER_PREFIX = com.example.repair;
+                    };
+                    name = Debug;
+                };
+                A2 /* Release */ = {
+                    isa = XCBuildConfiguration;
+                    buildSettings = {
+                        INFOPLIST_FILE = iOS/Info.plist;
+                        SDKROOT = iphoneos;
+                        PRODUCT_NAME = RepairApp;
+                        PRODUCT_BUNDLE_IDENTIFIER_PREFIX = com.example.repair;
+                    };
+                    name = Release;
+                };
+            };
+        }
+        """
+        try pbxproj.write(to: projectFileURL, atomically: true, encoding: .utf8)
+
+        let infoPlistURL = projectRootURL
+            .appendingPathComponent("iOS", isDirectory: true)
+            .appendingPathComponent("Info.plist")
+        try FileManager.default.createDirectory(at: infoPlistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let plistWithExecutable: [String: String] = [
+            "CFBundleIdentifier": "com.example.repair",
+            "CFBundleExecutable": "$(EXECUTABLE_NAME)"
+        ]
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: plistWithExecutable,
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(to: infoPlistURL, options: .atomic)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Build Repairable App",
+            details: "Deliver installable app output with strict verification.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Implementation complete
+        Actions taken:
+        - Built app modules
+        Evidence (files/commands/results):
+        - Files: RepairApp/RepairApp.xcodeproj, RepairApp/iOS/Info.plist
+        - Commands: swift test
+        - Tests: all green
+        - Results: ready for review
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: false,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+        let repairedPBX = try String(contentsOf: projectFileURL, encoding: .utf8)
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .succeeded)
+        #expect(updatedTask?.executionRecord?.lastError == nil)
+        #expect(updatedTask?.executionRecord?.lastOutputSummary?.contains("Auto-repair applied") == true)
+        #expect(repairedPBX.contains("PRODUCT_BUNDLE_IDENTIFIER = com.example.repair.repairapp.ios;"))
+    }
+
+    @Test("run task execution defers real verification for planning scope tasks")
+    func runTaskExecutionDefersRealVerificationForPlanningScopeTasks() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let agent = AgentProfile(name: "Planner", skills: ["planning"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Scope & Success Criteria",
+            details: """
+            Epic: Planning
+            Clarify project scope and measurable acceptance outcomes.
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Planning draft completed
+        Actions taken:
+        - Defined scope boundary and milestone path
+        Evidence (files/commands/results):
+        - Files: docs/scope.md
+        - Commands: rg -n \"scope\" docs/scope.md
+        - Tests: n/a for planning deliverable
+        - Results: scope and acceptance outcomes documented
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .succeeded)
+        #expect(updatedTask?.executionRecord?.lastError == nil)
+        #expect(updatedTask?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == false)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("run task execution defers strict app verification until downstream dependency chain completes")
+    func runTaskExecutionDefersStrictAppVerificationUntilDownstreamComplete() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let agent = AgentProfile(name: "Planner", skills: ["planning"], maxConcurrentTasks: 2)
+        let scopeTask = WorkTask(
+            title: "Scope & Success Criteria",
+            details: """
+            Epic: Planning
+            Clarify project scope and measurable acceptance outcomes.
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let architectureTask = WorkTask(
+            title: "Architecture & Delivery Plan",
+            details: """
+            Epic: Planning
+            Depends on: Scope & Success Criteria
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+
+        let summary = """
+        Summary: Scope complete
+        Actions taken:
+        - Defined scope boundary
+        Evidence (files/commands/results):
+        - Files: docs/scope.md
+        - Commands: rg -n "scope" docs/scope.md
+        - Tests: planning checklist validated
+        - Results: scope documented
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [scopeTask.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [scopeTask, architectureTask],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(scopeTask.id)
+        let updatedScope = viewModel.tasks.first(where: { $0.id == scopeTask.id })
+
+        #expect(executed)
+        #expect(updatedScope?.executionRecord?.status == .succeeded)
+        #expect(updatedScope?.executionRecord?.lastError == nil)
+        #expect(updatedScope?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == false)
+    }
+
+    @Test("run task execution keeps non-leaf tasks exempt from strict app verification even when downstream is completed")
+    func runTaskExecutionKeepsNonLeafTasksExemptEvenAfterDownstreamCompleted() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let agent = AgentProfile(name: "Planner", skills: ["planning"], maxConcurrentTasks: 2)
+        let scopeTask = WorkTask(
+            title: "Scope & Success Criteria",
+            details: """
+            Epic: Planning
+            Clarify project scope and measurable acceptance outcomes.
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let architectureTask = WorkTask(
+            title: "Architecture & Delivery Plan",
+            details: """
+            Epic: Planning
+            Depends on: Scope & Success Criteria
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 3,
+            status: .review,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .succeeded,
+                runCount: 1,
+                lastOutputSummary: "done",
+                lastError: nil,
+                lastDebugOutput: nil
+            ),
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+
+        let summary = """
+        Summary: Scope rerun complete
+        Actions taken:
+        - Updated scope details
+        Evidence (files/commands/results):
+        - Files: docs/scope.md
+        - Commands: rg -n "scope" docs/scope.md
+        - Tests: planning checklist validated
+        - Results: scope updated
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [scopeTask.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [scopeTask, architectureTask],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(scopeTask.id)
+        let updatedScope = viewModel.tasks.first(where: { $0.id == scopeTask.id })
+
+        #expect(executed)
+        #expect(updatedScope?.executionRecord?.status == .succeeded)
+        #expect(updatedScope?.executionRecord?.lastError == nil)
+        #expect(updatedScope?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == false)
+    }
+
     @Test("run task execution explains package-only output when strict app verification requires Xcode project")
     func runTaskExecutionExplainsPackageOnlyOutputForStrictAppVerification() throws {
         let temporaryRoot = FileManager.default.temporaryDirectory
@@ -9580,8 +9932,8 @@ struct KanbanPersistenceTests {
 
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
         let task = WorkTask(
-            title: "Build iOS MVP",
-            details: "Implement app features and verify installable output.",
+            title: "Release iOS MVP",
+            details: "Run final install validation and package app output for handoff.",
             requiredSkills: ["swiftui"],
             storyPoints: 5,
             status: .todo,
@@ -9619,6 +9971,160 @@ struct KanbanPersistenceTests {
         #expect(updatedTask?.executionRecord?.lastError == "Real install verification failed: detected Package.swift but no .xcodeproj/.xcworkspace. Strict app install verification requires an Xcode project/workspace")
         #expect(updatedTask?.executionRecord?.lastDebugOutput?.contains("Convert/generate an Xcode project") == true)
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("run task execution defers strict app verification for core implementation before release gates")
+    func runTaskExecutionDefersStrictAppVerificationForCoreImplementation() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "Default Board"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: projectRootURL, withIntermediateDirectories: true)
+        try Data("import PackageDescription\nlet package = Package(name: \"Timer\")\n".utf8)
+            .write(to: projectRootURL.appendingPathComponent("Package.swift"), options: .atomic)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Core Implementation",
+            details: """
+            Milestone: M2 MVP Complete
+            Epic: Core Product
+            Implement primary features and checkpoints.
+            Keep installable packaging for the final release gate.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 6,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Core implementation completed
+        Actions taken:
+        - Delivered key MVP modules
+        Evidence (files/commands/results):
+        - Files: Package.swift
+        - Commands: swift build
+        - Tests: core tests passed
+        - Results: ready for integration gate
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .succeeded)
+        #expect(updatedTask?.executionRecord?.lastError == nil)
+        #expect(updatedTask?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == false)
+    }
+
+    @Test("run task execution keeps m2 core implementation unblocked even when xcode project exists without Info plist")
+    func runTaskExecutionKeepsM2CoreImplementationUnblockedWithoutInfoPlist() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: temporaryRoot.path,
+            boardName: "TomatoClock"
+        )
+        let projectRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+            .appendingPathComponent("TomatoClock", isDirectory: true)
+        let xcodeprojURL = projectRootURL.appendingPathComponent("TomatoClock.xcodeproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: xcodeprojURL, withIntermediateDirectories: true)
+        // Intentionally no Info.plist to mirror the user-reported failure condition.
+
+        let agent = AgentProfile(name: "Auto Agent 1", skills: ["planning"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "蕃茄鐘 · Core Implementation",
+            details: """
+            Milestone: M2 MVP Complete
+            Epic: Core Product
+            Build the primary product capabilities described in the project brief.
+            Source brief: 蕃茄鐘 app, 支援 mac, iphone, ipad
+            Acceptance:
+            Depends on: 蕃茄鐘 · Architecture & Delivery Plan
+            - Implement end-to-end core user workflow.
+            - Handle expected edge cases and state transitions.
+            - Keep changes reviewable in incremental checkpoints.
+            技能：planning
+            Delivery: App • 嚴格
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 6,
+            status: .todo,
+            assignedAgentID: agent.id,
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let dependencyTask = WorkTask(
+            title: "蕃茄鐘 · Architecture & Delivery Plan",
+            details: """
+            Milestone: M1 Scope Locked
+            Epic: Planning
+            Depends on: 蕃茄鐘 · Scope & Success Criteria
+            """,
+            requiredSkills: ["planning"],
+            storyPoints: 3,
+            status: .review,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .succeeded,
+                runCount: 1,
+                lastOutputSummary: "done",
+                lastError: nil,
+                lastDebugOutput: nil
+            ),
+            deliveryContract: TaskDeliveryContract(outputType: .app, gateMode: .strict)
+        )
+        let summary = """
+        Summary: Core implementation checkpoint done
+        Actions taken:
+        - Delivered M2 core workflow
+        Evidence (files/commands/results):
+        - Files: TomatoClock.xcodeproj
+        - Commands: swift build
+        - Tests: smoke checks passed
+        - Results: ready for integration gate
+        """
+        let executor = StubTaskExecutor(outcomesByTaskID: [task.id: .success(summary: summary)])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task, dependencyTask],
+            agents: [agent],
+            executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true
+            ),
+            projectsDirectoryPathProvider: { temporaryRoot.path },
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+        let updatedTask = viewModel.tasks.first(where: { $0.id == task.id })
+
+        #expect(executed)
+        #expect(updatedTask?.executionRecord?.status == .succeeded)
+        #expect(updatedTask?.executionRecord?.lastError == nil)
+        #expect(updatedTask?.executionRecord?.lastOutputSummary?.contains("Real install verification passed") == false)
     }
 
     @Test("run task execution requires non-empty task details")

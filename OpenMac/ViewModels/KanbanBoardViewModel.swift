@@ -4348,10 +4348,14 @@ final class KanbanBoardViewModel: ObservableObject {
         guard executionRealArtifactVerificationPolicy.isEnabled else {
             return message("Real artifact verification is off")
         }
+        let executionMode = executionRealArtifactVerificationPolicy.runVerificationOnlyOnTerminalTask
+            ? message("Final task only")
+            : message("Any strict app task")
         return message(
-            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@)",
+            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@, mode: %@)",
             executionRealArtifactVerificationPolicy.requireInfoPlistExecutableKey ? message("On") : message("Off"),
-            executionRealArtifactVerificationPolicy.requireXcodeBuild ? message("On") : message("Off")
+            executionRealArtifactVerificationPolicy.requireXcodeBuild ? message("On") : message("Off"),
+            executionMode
         )
     }
 
@@ -4359,10 +4363,14 @@ final class KanbanBoardViewModel: ObservableObject {
         guard executionRealArtifactVerificationDefaultPolicy.isEnabled else {
             return message("Real artifact verification is off")
         }
+        let executionMode = executionRealArtifactVerificationDefaultPolicy.runVerificationOnlyOnTerminalTask
+            ? message("Final task only")
+            : message("Any strict app task")
         return message(
-            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@)",
+            "Real artifact verification is on (Info.plist: %@, xcodebuild: %@, mode: %@)",
             executionRealArtifactVerificationDefaultPolicy.requireInfoPlistExecutableKey ? message("On") : message("Off"),
-            executionRealArtifactVerificationDefaultPolicy.requireXcodeBuild ? message("On") : message("Off")
+            executionRealArtifactVerificationDefaultPolicy.requireXcodeBuild ? message("On") : message("Off"),
+            executionMode
         )
     }
 
@@ -4411,8 +4419,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let descriptor = MCPServerDescriptor(
             name: trimmedName,
+            remoteURL: nil,
             bootstrapCommand: trimmedBootstrapCommand,
-            verificationCommand: "codex mcp get \(Self.shellQuoted(trimmedName)) --json",
+            verificationCommand: "codex mcp get \(Self.shellQuoted(MCPServerDescriptor.cliSafeServerName(trimmedName))) --json",
             keywordHints: keywordHints,
             isEnabled: true,
             source: .manual,
@@ -4724,24 +4733,35 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func isMCPServerRegisteredAndEnabled(_ server: MCPServerDescriptor) -> Bool {
-        let verificationCommand = server.verificationCommand
-            ?? "codex mcp get \(Self.shellQuoted(server.name)) --json"
-        guard let result = try? Self.runShellCommand(verificationCommand) else {
-            return false
-        }
-        guard result.code == 0 else {
-            return false
-        }
+        let computedCommand = "codex mcp get \(Self.shellQuoted(server.cliServerName)) --json"
+        let fallbackCommand = server.verificationCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let commands = [computedCommand, fallbackCommand]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { partialResult, command in
+                if !partialResult.contains(command) {
+                    partialResult.append(command)
+                }
+            }
 
-        guard let outputData = result.output.data(using: .utf8),
-              let jsonObject = try? JSONSerialization.jsonObject(with: outputData) as? [String: Any] else {
+        for verificationCommand in commands {
+            guard let result = try? Self.runShellCommand(verificationCommand),
+                  result.code == 0 else {
+                continue
+            }
+
+            guard let outputData = result.output.data(using: .utf8),
+                  let jsonObject = try? JSONSerialization.jsonObject(with: outputData) as? [String: Any] else {
+                return true
+            }
+
+            if let enabled = jsonObject["enabled"] as? Bool {
+                return enabled
+            }
             return true
         }
 
-        if let enabled = jsonObject["enabled"] as? Bool {
-            return enabled
-        }
-        return true
+        return false
     }
 
     private func provisionMCPServer(
@@ -4763,7 +4783,12 @@ final class KanbanBoardViewModel: ObservableObject {
             )
         }
 
-        guard let result = try? Self.runShellCommand(bootstrapCommand) else {
+        let resolvedBootstrapCommand = repairedMCPBootstrapCommandIfNeeded(
+            rawCommand: bootstrapCommand,
+            preferredServerName: server.cliServerName
+        )
+
+        guard let result = try? Self.runShellCommand(resolvedBootstrapCommand) else {
             return (false, message("MCP bootstrap command failed to launch for %@", server.name))
         }
         guard result.code == 0 else {
@@ -4772,6 +4797,25 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         onProgress(message("MCP bootstrap completed: %@", server.name))
         return (true, result.output)
+    }
+
+    private func repairedMCPBootstrapCommandIfNeeded(
+        rawCommand: String,
+        preferredServerName: String
+    ) -> String {
+        let trimmed = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return rawCommand }
+
+        let lowercased = trimmed.lowercased()
+        guard lowercased.hasPrefix("codex mcp add ") else { return rawCommand }
+
+        guard let urlRange = trimmed.range(of: " --url ") else {
+            return rawCommand
+        }
+        let urlArgument = trimmed[urlRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !urlArgument.isEmpty else { return rawCommand }
+
+        return "codex mcp add \(Self.shellQuoted(preferredServerName)) --url \(urlArgument)"
     }
 
     private func provisionBuiltinXcodeMCPServer() -> (success: Bool, details: String) {
@@ -4905,16 +4949,17 @@ final class KanbanBoardViewModel: ObservableObject {
                 .first(where: { !$0.isEmpty }) else {
                 return nil
             }
-            let normalizedName = MCPServerDescriptor.normalizedServerName(name)
-            guard !seen.contains(normalizedName) else { return nil }
-            seen.insert(normalizedName)
+            let cliName = MCPServerDescriptor.cliSafeServerName(name)
+            guard !seen.contains(cliName) else { return nil }
+            seen.insert(cliName)
 
-            let bootstrapCommand = "codex mcp add \(shellQuoted(name)) --url \(shellQuoted(remoteURL))"
+            let bootstrapCommand = "codex mcp add \(shellQuoted(cliName)) --url \(shellQuoted(remoteURL))"
             let keywordHints = inferredKeywordHints(name: name, description: entry.server.description)
             return MCPServerDescriptor(
                 name: name,
+                remoteURL: remoteURL,
                 bootstrapCommand: bootstrapCommand,
-                verificationCommand: "codex mcp get \(shellQuoted(name)) --json",
+                verificationCommand: "codex mcp get \(shellQuoted(cliName)) --json",
                 keywordHints: keywordHints,
                 isEnabled: true,
                 source: .registry,
@@ -5177,6 +5222,46 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    private enum RealArtifactIntegrityIssueCode {
+        case missingBundleIdentifier
+    }
+
+    private struct RealArtifactIntegrityIssue {
+        let code: RealArtifactIntegrityIssueCode
+        let reason: String
+        let debugLog: String?
+    }
+
+    private struct RealArtifactIntegrityCheckResult {
+        let notes: [String]
+        let issue: RealArtifactIntegrityIssue?
+    }
+
+    private struct RealArtifactRepairResult {
+        let didRepair: Bool
+        let note: String?
+        let debugLog: String?
+    }
+
+    private struct PBXBuildSettingsSnapshot {
+        let hasInfoPlist: Bool
+        let sdkRoot: String?
+        let productName: String?
+        let bundleIdentifierPrefix: String?
+        let bundleIdentifier: String?
+        let lineIndexByKey: [String: Int]
+        let indentByKey: [String: String]
+
+        var isCandidateAppBuildSettings: Bool {
+            hasInfoPlist && sdkRoot != nil
+        }
+
+        var hasBundleIdentifier: Bool {
+            guard let bundleIdentifier else { return false }
+            return !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     private enum XcodeBuildContainer {
         case project(URL)
         case workspace(URL)
@@ -5243,9 +5328,97 @@ final class KanbanBoardViewModel: ObservableObject {
         let policy = executionRealArtifactVerificationPolicy
         guard policy.isEnabled else { return false }
         guard policy.requireInfoPlistExecutableKey || policy.requireXcodeBuild else { return false }
+        if policy.runVerificationOnlyOnTerminalTask,
+           !isTerminalTaskForRealArtifactVerification(task) {
+            return false
+        }
 
         let contract = task.resolvedDeliveryContract
-        return contract.gateMode == .strict && contract.outputType == .app
+        guard contract.gateMode == .strict && contract.outputType == .app else { return false }
+        return !shouldDeferRealArtifactVerification(for: task)
+    }
+
+    private func isTerminalTaskForRealArtifactVerification(_ task: WorkTask) -> Bool {
+        let normalizedTitle = Self.normalizedDependencyTitle(task.title)
+        guard !normalizedTitle.isEmpty else { return false }
+
+        return !tasks.contains { candidate in
+            guard candidate.id != task.id else { return false }
+            let dependencies = Self.parsedDependencyReferences(from: candidate.details)
+            return dependencies.contains(where: { $0.normalizedTitle == normalizedTitle })
+        }
+    }
+
+    private func shouldDeferRealArtifactVerification(for task: WorkTask) -> Bool {
+        let context = "\(task.title)\n\(task.details)".lowercased()
+
+        // Keep M2 core-implementation execution unblocked; strict install checks
+        // should happen at quality/release gates.
+        let isM2CoreImplementation =
+            context.contains("milestone: m2") &&
+            (context.contains("core implementation") ||
+             (context.contains("core") && context.contains("implementation")) ||
+             context.contains("epic: core product"))
+        if isM2CoreImplementation {
+            return true
+        }
+
+        let verifyNowSignals = [
+            "quality gate",
+            "integration & quality gate",
+            "release",
+            "handoff",
+            "real install verification",
+            "strict app install verification",
+            "install verification",
+            "final install validation",
+            "build and run",
+            "archive",
+            "testflight",
+            "xcodebuild",
+            "simulator",
+            ".xcodeproj",
+            ".xcworkspace",
+            "cfbundleexecutable",
+            "ipa",
+            "審查",
+            "整合與品質閘門",
+            "品質",
+            "發佈",
+            "交付",
+            "上架",
+            "真實安裝驗證",
+            "安裝驗證"
+        ]
+        if verifyNowSignals.contains(where: { context.contains($0) }) {
+            return false
+        }
+
+        let deferSignals = [
+            "epic: planning",
+            "scope",
+            "success criteria",
+            "architecture",
+            "delivery plan",
+            "roadmap",
+            "requirements",
+            "spec",
+            "specification",
+            "docs",
+            "document",
+            "risk spike",
+            "research",
+            "core implementation",
+            "epic: core product",
+            "mvp complete",
+            "實作",
+            "規劃",
+            "需求",
+            "藍圖",
+            "說明文件"
+        ]
+
+        return deferSignals.contains { context.contains($0) }
     }
 
     private func runRealArtifactVerification(for _: WorkTask) -> RealArtifactVerificationResult {
@@ -5259,17 +5432,60 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         let containerResolution = resolveXcodeBuildContainer(in: boardScopedProjectsURL)
-        guard let container = containerResolution.container else {
+        guard let resolvedContainer = containerResolution.container else {
             return .failed(
                 reason: containerResolution.failureReason ?? "no Xcode project or workspace found in \(boardScopedProjectsPath)",
                 debugLog: containerResolution.debugLog
             )
         }
-        let projectName = container.displayName
-        let projectRootURL = container.url.deletingLastPathComponent()
+
+        var container = resolvedContainer
+        var projectName = container.displayName
+        var projectRootURL = container.url.deletingLastPathComponent()
 
         var checks: [String] = ["Real install verification passed"]
         checks.append("Project: \(projectName)")
+        var repairAttempts = 0
+        let maxRepairAttempts = policy.enableDeterministicRepairCycle ? 1 : 0
+
+        while true {
+            let integrityResult = runRealArtifactIntegrityChecks(
+                for: container,
+                projectName: projectName,
+                projectRootURL: projectRootURL
+            )
+            checks.append(contentsOf: integrityResult.notes)
+            guard let issue = integrityResult.issue else { break }
+
+            guard repairAttempts < maxRepairAttempts else {
+                return .failed(reason: issue.reason, debugLog: issue.debugLog)
+            }
+
+            let repair = attemptDeterministicRealArtifactRepair(
+                for: issue,
+                container: container,
+                projectRootURL: projectRootURL
+            )
+            guard repair.didRepair else {
+                return .failed(reason: issue.reason, debugLog: repair.debugLog ?? issue.debugLog)
+            }
+            repairAttempts += 1
+            if let note = repair.note, !note.isEmpty {
+                checks.append(note)
+            }
+
+            let refreshedResolution = resolveXcodeBuildContainer(in: boardScopedProjectsURL)
+            guard let refreshedContainer = refreshedResolution.container else {
+                return .failed(
+                    reason: refreshedResolution.failureReason ?? "no Xcode project or workspace found in \(boardScopedProjectsPath)",
+                    debugLog: refreshedResolution.debugLog
+                )
+            }
+            container = refreshedContainer
+            projectName = container.displayName
+            projectRootURL = container.url.deletingLastPathComponent()
+            checks.append("Re-verified project container after deterministic repair")
+        }
 
         if policy.requireInfoPlistExecutableKey {
             let plistCandidates = discoverInfoPlistURLs(near: projectRootURL)
@@ -5337,6 +5553,377 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         return .passed(note: checks.joined(separator: " · "))
+    }
+
+    private func runRealArtifactIntegrityChecks(
+        for container: XcodeBuildContainer,
+        projectName: String,
+        projectRootURL: URL
+    ) -> RealArtifactIntegrityCheckResult {
+        let projectURLs = resolvedProjectURLsForIntegrityChecks(container: container, projectRootURL: projectRootURL)
+        guard !projectURLs.isEmpty else {
+            return RealArtifactIntegrityCheckResult(notes: [], issue: nil)
+        }
+
+        var totalCandidateBuildSettings = 0
+        var missingContexts: [String] = []
+
+        for projectURL in projectURLs {
+            guard let content = loadPBXProjectContent(for: projectURL) else { continue }
+            let snapshots = parsePBXBuildSettingsSnapshots(from: content)
+            let candidateSnapshots = snapshots.filter(\.isCandidateAppBuildSettings)
+            totalCandidateBuildSettings += candidateSnapshots.count
+            let projectMissing = candidateSnapshots
+                .filter { !$0.hasBundleIdentifier }
+                .map { snapshot in
+                    let descriptor = descriptorForBundleIdentifierRepair(from: snapshot)
+                    return "\(projectURL.lastPathComponent): \(descriptor)"
+                }
+            missingContexts.append(contentsOf: projectMissing)
+        }
+
+        guard missingContexts.isEmpty else {
+            let contextText = missingContexts.joined(separator: " | ")
+            let reason = "missing PRODUCT_BUNDLE_IDENTIFIER in Xcode target build settings"
+            let debugLog = """
+            Integrity check failed for \(projectName).
+            Missing contexts: \(contextText)
+            Deterministic repair can add PRODUCT_BUNDLE_IDENTIFIER into candidate build settings blocks.
+            """
+            return RealArtifactIntegrityCheckResult(
+                notes: [],
+                issue: RealArtifactIntegrityIssue(
+                    code: .missingBundleIdentifier,
+                    reason: reason,
+                    debugLog: debugLog
+                )
+            )
+        }
+
+        let note = totalCandidateBuildSettings > 0
+            ? "Integrity check passed: PRODUCT_BUNDLE_IDENTIFIER present in \(totalCandidateBuildSettings) build setting block(s)"
+            : "Integrity check skipped: no candidate app build settings found"
+        return RealArtifactIntegrityCheckResult(notes: [note], issue: nil)
+    }
+
+    private func attemptDeterministicRealArtifactRepair(
+        for issue: RealArtifactIntegrityIssue,
+        container: XcodeBuildContainer,
+        projectRootURL: URL
+    ) -> RealArtifactRepairResult {
+        switch issue.code {
+        case .missingBundleIdentifier:
+            let projectURLs = resolvedProjectURLsForIntegrityChecks(container: container, projectRootURL: projectRootURL)
+            guard !projectURLs.isEmpty else {
+                return RealArtifactRepairResult(
+                    didRepair: false,
+                    note: nil,
+                    debugLog: issue.debugLog
+                )
+            }
+
+            var repairedProjects: [String] = []
+            var skippedProjects: [String] = []
+            for projectURL in projectURLs {
+                let repairResult = repairMissingBundleIdentifier(inXcodeProject: projectURL)
+                if repairResult.modified {
+                    repairedProjects.append(projectURL.lastPathComponent)
+                } else {
+                    skippedProjects.append(projectURL.lastPathComponent)
+                }
+            }
+
+            guard !repairedProjects.isEmpty else {
+                let detail = (issue.debugLog ?? "")
+                    + (skippedProjects.isEmpty ? "" : "\nNo deterministic patch applied for: \(skippedProjects.joined(separator: ", "))")
+                return RealArtifactRepairResult(
+                    didRepair: false,
+                    note: nil,
+                    debugLog: detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : detail
+                )
+            }
+
+            let note = "Auto-repair applied: added PRODUCT_BUNDLE_IDENTIFIER in \(repairedProjects.joined(separator: ", "))"
+            let debug = skippedProjects.isEmpty
+                ? nil
+                : "Skipped projects (already valid or not patchable): \(skippedProjects.joined(separator: ", "))"
+            return RealArtifactRepairResult(didRepair: true, note: note, debugLog: debug)
+        }
+    }
+
+    private func resolvedProjectURLsForIntegrityChecks(
+        container: XcodeBuildContainer,
+        projectRootURL: URL
+    ) -> [URL] {
+        switch container {
+        case let .project(projectURL):
+            return [projectURL]
+        case .workspace:
+            let discoveredProjects = discoverXcodeProjectURLs(in: projectRootURL)
+            return discoveredProjects.isEmpty ? [] : discoveredProjects
+        }
+    }
+
+    private func repairMissingBundleIdentifier(inXcodeProject projectURL: URL) -> (modified: Bool, debugLog: String?) {
+        let projectFileURL = projectURL.appendingPathComponent("project.pbxproj")
+        guard let content = loadPBXProjectContent(for: projectURL) else {
+            return (false, "Unable to read \(projectFileURL.path)")
+        }
+
+        let rewrite = rewritePBXProjectWithMissingBundleIdentifiersFilled(content)
+        guard rewrite.fixedCount > 0, rewrite.content != content else {
+            return (false, rewrite.debugLog)
+        }
+
+        do {
+            try rewrite.content.write(to: projectFileURL, atomically: true, encoding: .utf8)
+            let debug = "Updated \(projectFileURL.lastPathComponent): inserted PRODUCT_BUNDLE_IDENTIFIER in \(rewrite.fixedCount) block(s)"
+            return (true, debug)
+        } catch {
+            return (false, "Failed to write \(projectFileURL.path): \(error)")
+        }
+    }
+
+    private func rewritePBXProjectWithMissingBundleIdentifiersFilled(_ content: String) -> (content: String, fixedCount: Int, debugLog: String?) {
+        var lines = content.components(separatedBy: "\n")
+        let defaultPrefix = inferredBundleIdentifierPrefix(fromPBXProjectContent: content) ?? "com.generated.app"
+        var fixedCount = 0
+        var index = 0
+
+        while index < lines.count {
+            guard lines[index].contains("buildSettings = {") else {
+                index += 1
+                continue
+            }
+
+            let startIndex = index
+            var endIndex = index
+            var balance = braceDelta(in: lines[index])
+            while balance > 0, endIndex + 1 < lines.count {
+                endIndex += 1
+                balance += braceDelta(in: lines[endIndex])
+            }
+
+            guard balance == 0, endIndex >= startIndex else {
+                index += 1
+                continue
+            }
+
+            var blockLines = Array(lines[startIndex...endIndex])
+            let snapshot = parsePBXBuildSettingsSnapshot(from: blockLines)
+            guard snapshot.isCandidateAppBuildSettings else {
+                index = endIndex + 1
+                continue
+            }
+            guard !snapshot.hasBundleIdentifier else {
+                index = endIndex + 1
+                continue
+            }
+
+            let insertionIndent = snapshot.indentByKey["PRODUCT_NAME"]
+                ?? snapshot.indentByKey["INFOPLIST_FILE"]
+                ?? snapshot.indentByKey["SDKROOT"]
+                ?? "\t\t\t\t"
+            let bundleIdentifier = synthesizedBundleIdentifier(
+                from: snapshot,
+                defaultPrefix: defaultPrefix
+            )
+            let replacementLine = "\(insertionIndent)PRODUCT_BUNDLE_IDENTIFIER = \(bundleIdentifier);"
+
+            if let existingLineIndex = snapshot.lineIndexByKey["PRODUCT_BUNDLE_IDENTIFIER"] {
+                blockLines[existingLineIndex] = replacementLine
+            } else {
+                blockLines.insert(replacementLine, at: max(1, blockLines.count - 1))
+            }
+
+            lines.replaceSubrange(startIndex...endIndex, with: blockLines)
+            fixedCount += 1
+            index = startIndex + blockLines.count
+        }
+
+        let updatedContent = lines.joined(separator: "\n")
+        let debugLog: String?
+        if fixedCount > 0 {
+            debugLog = "Deterministic repair synthesized PRODUCT_BUNDLE_IDENTIFIER with prefix \(defaultPrefix)"
+        } else {
+            debugLog = "No candidate buildSettings block required PRODUCT_BUNDLE_IDENTIFIER repair"
+        }
+        return (updatedContent, fixedCount, debugLog)
+    }
+
+    private func parsePBXBuildSettingsSnapshots(from content: String) -> [PBXBuildSettingsSnapshot] {
+        let lines = content.components(separatedBy: "\n")
+        var snapshots: [PBXBuildSettingsSnapshot] = []
+        var index = 0
+
+        while index < lines.count {
+            guard lines[index].contains("buildSettings = {") else {
+                index += 1
+                continue
+            }
+
+            let startIndex = index
+            var endIndex = index
+            var balance = braceDelta(in: lines[index])
+            while balance > 0, endIndex + 1 < lines.count {
+                endIndex += 1
+                balance += braceDelta(in: lines[endIndex])
+            }
+            guard balance == 0, endIndex >= startIndex else {
+                index += 1
+                continue
+            }
+
+            let blockLines = Array(lines[startIndex...endIndex])
+            snapshots.append(parsePBXBuildSettingsSnapshot(from: blockLines))
+            index = endIndex + 1
+        }
+
+        return snapshots
+    }
+
+    private func parsePBXBuildSettingsSnapshot(from blockLines: [String]) -> PBXBuildSettingsSnapshot {
+        var values: [String: String] = [:]
+        var lineIndexByKey: [String: Int] = [:]
+        var indentByKey: [String: String] = [:]
+
+        for (lineIndex, line) in blockLines.enumerated() {
+            guard let parsed = parsePBXBuildSetting(from: line) else { continue }
+            values[parsed.key] = parsed.value
+            lineIndexByKey[parsed.key] = lineIndex
+            indentByKey[parsed.key] = parsed.indent
+        }
+
+        return PBXBuildSettingsSnapshot(
+            hasInfoPlist: values["INFOPLIST_FILE"] != nil,
+            sdkRoot: values["SDKROOT"],
+            productName: values["PRODUCT_NAME"],
+            bundleIdentifierPrefix: values["PRODUCT_BUNDLE_IDENTIFIER_PREFIX"],
+            bundleIdentifier: values["PRODUCT_BUNDLE_IDENTIFIER"],
+            lineIndexByKey: lineIndexByKey,
+            indentByKey: indentByKey
+        )
+    }
+
+    private func parsePBXBuildSetting(from line: String) -> (key: String, value: String, indent: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains(" = "), trimmed.hasSuffix(";") else { return nil }
+        let components = trimmed.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard components.count == 2 else { return nil }
+        let rawKey = String(components[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawKey.isEmpty else { return nil }
+        let rawValue = String(components[1])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .dropLast()
+        let value = String(rawValue).trimmingCharacters(in: .whitespacesAndNewlines)
+        let indent = String(line.prefix { $0 == "\t" || $0 == " " })
+        return (rawKey, value, indent)
+    }
+
+    private func descriptorForBundleIdentifierRepair(from snapshot: PBXBuildSettingsSnapshot) -> String {
+        let product = normalizedPBXBuildSettingValue(snapshot.productName) ?? "unknown-product"
+        let sdk = normalizedPBXBuildSettingValue(snapshot.sdkRoot) ?? "unknown-sdk"
+        return "product=\(product), sdk=\(sdk)"
+    }
+
+    private func synthesizedBundleIdentifier(
+        from snapshot: PBXBuildSettingsSnapshot,
+        defaultPrefix: String
+    ) -> String {
+        let prefix = normalizedBundleIdentifierPrefix(snapshot.bundleIdentifierPrefix) ?? defaultPrefix
+        let product = sanitizedBundleIdentifierComponent(
+            normalizedPBXBuildSettingValue(snapshot.productName) ?? ""
+        )
+        let platformSuffix = platformSuffixForSDKRoot(snapshot.sdkRoot)
+
+        var components: [String] = [prefix]
+        if !product.isEmpty, product != "target-name" {
+            components.append(product)
+        }
+        components.append(platformSuffix)
+        return components.joined(separator: ".")
+    }
+
+    private func normalizedBundleIdentifierPrefix(_ rawPrefix: String?) -> String? {
+        guard var prefix = normalizedPBXBuildSettingValue(rawPrefix), !prefix.isEmpty else {
+            return nil
+        }
+        if prefix.contains("$(") {
+            return nil
+        }
+        prefix = prefix.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return prefix.isEmpty ? nil : prefix
+    }
+
+    private func normalizedPBXBuildSettingValue(_ value: String?) -> String? {
+        guard var value else { return nil }
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+            value.removeFirst()
+            value.removeLast()
+        }
+        value = value.replacingOccurrences(of: "$(", with: "")
+        value = value.replacingOccurrences(of: ")", with: "")
+        value = value.replacingOccurrences(of: "\"", with: "")
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func sanitizedBundleIdentifierComponent(_ value: String) -> String {
+        let lowercased = value.lowercased()
+        var component = ""
+        var previousWasSeparator = false
+        for character in lowercased {
+            if character.isLetter || character.isNumber {
+                component.append(character)
+                previousWasSeparator = false
+            } else if !previousWasSeparator {
+                component.append("-")
+                previousWasSeparator = true
+            }
+        }
+        return component.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private func platformSuffixForSDKRoot(_ sdkRoot: String?) -> String {
+        guard let sdkRoot = normalizedPBXBuildSettingValue(sdkRoot)?.lowercased() else {
+            return "app"
+        }
+        if sdkRoot.contains("iphoneos") { return "ios" }
+        if sdkRoot.contains("macosx") { return "macos" }
+        if sdkRoot.contains("appletvos") { return "tvos" }
+        if sdkRoot.contains("watchos") { return "watchos" }
+        if sdkRoot.contains("xros") { return "visionos" }
+        return "app"
+    }
+
+    private func inferredBundleIdentifierPrefix(fromPBXProjectContent content: String) -> String? {
+        for line in content.split(whereSeparator: \.isNewline) {
+            guard let parsed = parsePBXBuildSetting(from: String(line)),
+                  parsed.key == "PRODUCT_BUNDLE_IDENTIFIER_PREFIX",
+                  let normalized = normalizedBundleIdentifierPrefix(parsed.value) else {
+                continue
+            }
+            return normalized
+        }
+        return nil
+    }
+
+    private func loadPBXProjectContent(for projectURL: URL) -> String? {
+        let projectFileURL = projectURL.appendingPathComponent("project.pbxproj")
+        return try? String(contentsOf: projectFileURL, encoding: .utf8)
+    }
+
+    private func braceDelta(in line: String) -> Int {
+        var delta = 0
+        for character in line {
+            if character == "{" {
+                delta += 1
+            } else if character == "}" {
+                delta -= 1
+            }
+        }
+        return delta
     }
 
     private func resolvedBoardScopedProjectsDirectoryPath() -> String {

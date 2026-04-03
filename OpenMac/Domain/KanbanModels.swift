@@ -428,15 +428,50 @@ struct ExecutionRealArtifactVerificationPolicy: Equatable, Codable {
     var isEnabled: Bool
     var requireInfoPlistExecutableKey: Bool
     var requireXcodeBuild: Bool
+    var runVerificationOnlyOnTerminalTask: Bool
+    var enableDeterministicRepairCycle: Bool
 
     init(
-        isEnabled: Bool = true,
+        isEnabled: Bool = false,
         requireInfoPlistExecutableKey: Bool = true,
-        requireXcodeBuild: Bool = true
+        requireXcodeBuild: Bool = true,
+        runVerificationOnlyOnTerminalTask: Bool = true,
+        enableDeterministicRepairCycle: Bool = true
     ) {
         self.isEnabled = isEnabled
         self.requireInfoPlistExecutableKey = requireInfoPlistExecutableKey
         self.requireXcodeBuild = requireXcodeBuild
+        self.runVerificationOnlyOnTerminalTask = runVerificationOnlyOnTerminalTask
+        self.enableDeterministicRepairCycle = enableDeterministicRepairCycle
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case requireInfoPlistExecutableKey
+        case requireXcodeBuild
+        case runVerificationOnlyOnTerminalTask
+        case enableDeterministicRepairCycle
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+        requireInfoPlistExecutableKey =
+            try container.decodeIfPresent(Bool.self, forKey: .requireInfoPlistExecutableKey) ?? true
+        requireXcodeBuild = try container.decodeIfPresent(Bool.self, forKey: .requireXcodeBuild) ?? true
+        runVerificationOnlyOnTerminalTask =
+            try container.decodeIfPresent(Bool.self, forKey: .runVerificationOnlyOnTerminalTask) ?? true
+        enableDeterministicRepairCycle =
+            try container.decodeIfPresent(Bool.self, forKey: .enableDeterministicRepairCycle) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(requireInfoPlistExecutableKey, forKey: .requireInfoPlistExecutableKey)
+        try container.encode(requireXcodeBuild, forKey: .requireXcodeBuild)
+        try container.encode(runVerificationOnlyOnTerminalTask, forKey: .runVerificationOnlyOnTerminalTask)
+        try container.encode(enableDeterministicRepairCycle, forKey: .enableDeterministicRepairCycle)
     }
 }
 
@@ -448,6 +483,7 @@ enum MCPServerSourceType: String, Codable, Equatable {
 
 struct MCPServerDescriptor: Identifiable, Equatable, Codable {
     var name: String
+    var remoteURL: String?
     var bootstrapCommand: String?
     var verificationCommand: String?
     var keywordHints: [String]
@@ -457,9 +493,11 @@ struct MCPServerDescriptor: Identifiable, Equatable, Codable {
 
     nonisolated var id: String { Self.normalizedServerName(name) }
     nonisolated var normalizedName: String { Self.normalizedServerName(name) }
+    nonisolated var cliServerName: String { Self.cliSafeServerName(name) }
 
     nonisolated init(
         name: String,
+        remoteURL: String? = nil,
         bootstrapCommand: String? = nil,
         verificationCommand: String? = nil,
         keywordHints: [String] = [],
@@ -468,6 +506,7 @@ struct MCPServerDescriptor: Identifiable, Equatable, Codable {
         notes: String? = nil
     ) {
         self.name = Self.normalizedLabel(name)
+        self.remoteURL = Self.normalizedOptionalText(remoteURL)
         self.bootstrapCommand = Self.normalizedOptionalText(bootstrapCommand)
         self.verificationCommand = Self.normalizedOptionalText(verificationCommand)
         self.keywordHints = Self.normalizedKeywordHints(keywordHints)
@@ -478,6 +517,26 @@ struct MCPServerDescriptor: Identifiable, Equatable, Codable {
 
     nonisolated static func normalizedServerName(_ value: String) -> String {
         normalizedLabel(value).lowercased()
+    }
+
+    nonisolated static func cliSafeServerName(_ value: String) -> String {
+        let source = normalizedServerName(value)
+        var safe = ""
+        var previousWasSeparator = false
+
+        for character in source {
+            let isAllowed = character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_")
+            if isAllowed {
+                safe.append(character)
+                previousWasSeparator = false
+            } else if !previousWasSeparator {
+                safe.append("-")
+                previousWasSeparator = true
+            }
+        }
+
+        let trimmed = safe.trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+        return trimmed.isEmpty ? "mcp-server" : trimmed
     }
 
     nonisolated private static func normalizedLabel(_ value: String) -> String {
@@ -569,6 +628,7 @@ struct MCPServerPolicy: Equatable, Codable {
             normalized.append(
                 MCPServerDescriptor(
                     name: rawServer.name,
+                    remoteURL: rawServer.remoteURL,
                     bootstrapCommand: rawServer.bootstrapCommand,
                     verificationCommand: rawServer.verificationCommand,
                     keywordHints: rawServer.keywordHints,
