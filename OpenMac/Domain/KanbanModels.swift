@@ -943,6 +943,23 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
     }
 }
 
+struct PMPlannerUIExtensionDescriptor: Equatable, Identifiable {
+    enum Source: String, Codable {
+        case builtIn
+        case localPlugin
+    }
+
+    var id: String
+    var pluginID: String
+    var pluginName: String
+    var slot: String
+    var title: String
+    var subtitle: String
+    var componentType: String
+    var priority: Int
+    var source: Source
+}
+
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
     case strict
     case flexible

@@ -4766,6 +4766,85 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.pmPlanningLocalPluginCount() == 2)
     }
 
+    @Test("PM planner extensions are manifest-driven and keep built-in brainstorm fallback")
+    func pmPlannerExtensionsIncludeLocalAndBuiltInFallback() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("risk-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.risk",
+          "name": "Risk Plugin",
+          "enabled": true,
+          "uiExtensions": [
+            {
+              "id": "risk-scan",
+              "slot": "pm.planner",
+              "title": "Risk Scan",
+              "subtitle": "Find major risks before execution.",
+              "component": "risk.v1",
+              "priority": 25,
+              "enabled": true
+            }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let extensions = viewModel.pmPlannerExtensions()
+        #expect(extensions.contains(where: { $0.id == "com.example.risk.risk-scan" && $0.componentType == "risk.v1" }))
+        #expect(extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
+    }
+
+    @Test("PM planner extensions hide built-in brainstorm when plugin provides brainstorm component")
+    func pmPlannerExtensionsPreferPluginBrainstormWhenAvailable() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("brainstorm-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.brainstorm",
+          "name": "Plugin Brainstorm",
+          "enabled": true,
+          "uiExtensions": [
+            {
+              "id": "brainstorm",
+              "slot": "pm.planner",
+              "title": "Plugin Brainstorm",
+              "component": "brainstorm.v1",
+              "priority": 80,
+              "enabled": true
+            }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let extensions = viewModel.pmPlannerExtensions()
+        #expect(extensions.contains(where: { $0.id == "com.example.brainstorm.brainstorm" }))
+        #expect(!extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
+    }
+
     @Test("refresh PM plugin diagnostics announces detected plugin summary")
     func refreshPMPlanningPluginDiagnosticsAnnouncesSummary() throws {
         let fileManager = FileManager.default

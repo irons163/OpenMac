@@ -24,6 +24,17 @@ Plugins/
   "id": "com.example.brainstormer",
   "name": "Example Brainstormer",
   "capabilities": ["pm.plan.generate"],
+  "uiExtensions": [
+    {
+      "id": "brainstorm",
+      "slot": "pm.planner",
+      "title": "Brainstorm Extension",
+      "subtitle": "Run brainstorm rounds and fold results into project brief.",
+      "component": "brainstorm.v1",
+      "priority": 100,
+      "enabled": true
+    }
+  ],
   "entrypoint": "./run.sh",
   "enabled": true
 }
@@ -37,6 +48,20 @@ Required:
 
 Optional:
 - `enabled` (boolean, default `true`)
+- `uiExtensions` (array): declares PM extension UI cards that OpenMac can render.
+
+## `uiExtensions` fields
+
+- `id` (string, required): stable extension id under this plugin.
+- `slot` (string, required): where to render it. Current supported slot: `pm.planner`.
+- `title` (string, optional): card title.
+- `subtitle` (string, optional): helper text under title.
+- `component` (string, required): UI component type.
+  - Current supported value: `brainstorm.v1`
+- `priority` (number, optional, default `0`): higher renders earlier.
+- `enabled` (boolean, optional, default `true`).
+
+If no local `brainstorm.v1` extension is found, OpenMac inserts a built-in brainstorm extension as fallback.
 
 ## Runtime contract
 

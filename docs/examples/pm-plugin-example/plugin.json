@@ -2,6 +2,17 @@
   "id": "com.openmac.examples.brainstorm",
   "name": "OpenMac AI Brainstorm",
   "capabilities": ["pm.plan.generate"],
+  "uiExtensions": [
+    {
+      "id": "brainstorm",
+      "slot": "pm.planner",
+      "title": "Brainstorm Extension",
+      "subtitle": "Use OpenMac runtime to brainstorm ideas and fold them back into your project brief.",
+      "component": "brainstorm.v1",
+      "priority": 100,
+      "enabled": true
+    }
+  ],
   "entrypoint": "./run.sh",
   "enabled": true
 }

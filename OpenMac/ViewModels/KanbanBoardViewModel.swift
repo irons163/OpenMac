@@ -4610,6 +4610,29 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
+    func pmPlannerExtensions(slot: String = KanbanBoardViewModel.pmPlannerExtensionSlot) -> [PMPlannerUIExtensionDescriptor] {
+        let localExtensions = pmPlanningPluginPolicy.autoDiscoverLocalPlugins
+            ? detectedLocalPMPlannerExtensions(
+                in: pmPlanningPluginPolicy.pluginsDirectoryPath,
+                slot: slot
+            )
+            : []
+
+        let hasBrainstormComponent = localExtensions.contains {
+            Self.normalizedPMPlannerComponentType($0.componentType) == Self.pmPlannerBrainstormComponent
+        }
+        if hasBrainstormComponent {
+            return localExtensions
+        }
+
+        return (localExtensions + [Self.builtInBrainstormPMPlannerExtension(slot: slot)]).sorted {
+            if $0.priority == $1.priority {
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            return $0.priority > $1.priority
+        }
+    }
+
     func refreshPMPlanningPluginDiagnostics(announce: Bool = true) {
         let names = pmPlanningLocalPluginNames()
         objectWillChange.send()
@@ -5127,6 +5150,73 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func detectedLocalPMPlanningPlugins(in directoryPath: String) -> [String] {
+        detectedLocalPMPlannerPluginRecords(in: directoryPath)
+            .filter { record in
+                let capabilities = Set(record.manifest.capabilities ?? [])
+                return capabilities.contains(Self.pmPlanningPluginCapability)
+            }
+            .map { record in
+                let resolvedName = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return resolvedName.isEmpty ? record.directoryURL.lastPathComponent : resolvedName
+            }
+            .sorted { lhs, rhs in
+                lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+    }
+
+    private func detectedLocalPMPlannerExtensions(
+        in directoryPath: String,
+        slot: String
+    ) -> [PMPlannerUIExtensionDescriptor] {
+        let normalizedSlot = slot.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedSlot.isEmpty else { return [] }
+
+        let extensions = detectedLocalPMPlannerPluginRecords(in: directoryPath).flatMap { record -> [PMPlannerUIExtensionDescriptor] in
+            let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !pluginID.isEmpty else { return [] }
+            let pluginName = {
+                let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
+            }()
+
+            return (record.manifest.uiExtensions ?? []).compactMap { extensionManifest in
+                guard extensionManifest.enabled ?? true else { return nil }
+                let extensionSlot = (extensionManifest.slot ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard extensionSlot == normalizedSlot else { return nil }
+
+                let extensionID = (extensionManifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let component = Self.normalizedPMPlannerComponentType(extensionManifest.component ?? "")
+                guard !extensionID.isEmpty, !component.isEmpty else { return nil }
+
+                let title = {
+                    let trimmed = (extensionManifest.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? pluginName : trimmed
+                }()
+                let subtitle = (extensionManifest.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+                return PMPlannerUIExtensionDescriptor(
+                    id: "\(pluginID).\(extensionID)",
+                    pluginID: pluginID,
+                    pluginName: pluginName,
+                    slot: extensionSlot,
+                    title: title,
+                    subtitle: subtitle,
+                    componentType: component,
+                    priority: extensionManifest.priority ?? 0,
+                    source: .localPlugin
+                )
+            }
+        }
+
+        return extensions.sorted { lhs, rhs in
+            if lhs.priority == rhs.priority {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.priority > rhs.priority
+        }
+    }
+
+    private func detectedLocalPMPlannerPluginRecords(in directoryPath: String) -> [LocalPMPlanningPluginRecord] {
         let trimmedPath = directoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPath.isEmpty else { return [] }
 
@@ -5143,7 +5233,7 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         let candidateDirectories = [directoryURL] + childEntries
-        let plugins = candidateDirectories.compactMap { entryURL -> String? in
+        return candidateDirectories.compactMap { entryURL in
             guard let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey]),
                   values.isDirectory == true else {
                 return nil
@@ -5161,18 +5251,37 @@ final class KanbanBoardViewModel: ObservableObject {
             }
 
             guard manifest.enabled ?? true else { return nil }
-            let capabilities = Set(manifest.capabilities ?? [])
-            guard capabilities.contains(Self.pmPlanningPluginCapability) else { return nil }
-
-            let resolvedName = (manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return resolvedName.isEmpty ? entryURL.lastPathComponent : resolvedName
+            return LocalPMPlanningPluginRecord(manifest: manifest, directoryURL: entryURL)
         }
-        return plugins.sorted { lhs, rhs in
-            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+    }
+
+    private static func builtInBrainstormPMPlannerExtension(slot: String) -> PMPlannerUIExtensionDescriptor {
+        PMPlannerUIExtensionDescriptor(
+            id: "openmac.builtin.brainstorm",
+            pluginID: "openmac.builtin.brainstorm",
+            pluginName: "OpenMac",
+            slot: slot,
+            title: L10n.string("Brainstorm Extension"),
+            subtitle: L10n.string("Use OpenMac runtime to brainstorm ideas and fold them back into your project brief."),
+            componentType: pmPlannerBrainstormComponent,
+            priority: -100,
+            source: .builtIn
+        )
+    }
+
+    private static func normalizedPMPlannerComponentType(_ rawValue: String) -> String {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "brainstorm", "brainstorm.v1", "pm.brainstorm.v1":
+            return pmPlannerBrainstormComponent
+        default:
+            return normalized
         }
     }
 
     private static let pmPlanningPluginCapability = "pm.plan.generate"
+    private static let pmPlannerExtensionSlot = "pm.planner"
+    private static let pmPlannerBrainstormComponent = "brainstorm.v1"
 
     private static func pmPluginNamesPreview(_ names: [String], maxShown: Int = 3) -> String {
         let normalized = names
@@ -5188,9 +5297,26 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private struct LocalPMPlanningPluginManifestSummary: Decodable {
+        let id: String?
         let name: String?
         let capabilities: [String]?
         let enabled: Bool?
+        let uiExtensions: [LocalPMPlanningUIExtensionManifestSummary]?
+    }
+
+    private struct LocalPMPlanningUIExtensionManifestSummary: Decodable {
+        let id: String?
+        let slot: String?
+        let title: String?
+        let subtitle: String?
+        let component: String?
+        let priority: Int?
+        let enabled: Bool?
+    }
+
+    private struct LocalPMPlanningPluginRecord {
+        let manifest: LocalPMPlanningPluginManifestSummary
+        let directoryURL: URL
     }
 
     private func shouldSyncMCPRegistry(lastSyncedAt: Date?) -> Bool {

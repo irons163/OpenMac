@@ -8,7 +8,7 @@ It supports:
 
 ## Files
 
-- `plugin.json`: PM plugin manifest (`pm.plan.generate`)
+- `plugin.json`: PM plugin manifest (`pm.plan.generate`) + PM planner `uiExtensions`
 - `run.sh`: shell entrypoint used by OpenMac
 - `run.py`: AI planner implementation
 
