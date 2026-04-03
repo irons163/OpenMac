@@ -80,3 +80,13 @@ If output is invalid or empty, OpenMac will fallback to built-in planning.
 - Entry scripts should write only JSON to stdout for best parsing reliability.
 - OpenMac enforces a command timeout (current default: 45 seconds).
 - Use the PM Planner "Planning Engine" selector to switch between built-in and plugin-preferred mode.
+
+## Real AI Example
+
+`docs/examples/pm-plugin-example` now contains a real AI plugin example (not static mock output):
+
+- `run.py` can call either:
+  - OpenAI-compatible API (`OPENAI_API_KEY` / `OPENAI_COMPAT_API_KEY`)
+  - Codex CLI (`codex login`)
+- Configure via `OPENMAC_PM_PLUGIN_AUTH=auto|openai|codex`
+- See `docs/examples/pm-plugin-example/README.md` for setup details.

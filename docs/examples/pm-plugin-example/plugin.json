@@ -1,6 +1,6 @@
 {
   "id": "com.openmac.examples.brainstorm",
-  "name": "OpenMac Example Brainstorm",
+  "name": "OpenMac AI Brainstorm",
   "capabilities": ["pm.plan.generate"],
   "entrypoint": "./run.sh",
   "enabled": true
