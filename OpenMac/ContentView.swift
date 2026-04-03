@@ -2973,6 +2973,21 @@ struct ContentView: View {
                         ? BoardSemanticTextPalette.color(for: .success, scheme: effectiveColorScheme)
                         : BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
             }
+
+            HStack(spacing: 8) {
+                Button(L10n.string("Rescan PM Plugins")) {
+                    viewModel.refreshPMPlanningPluginDiagnostics()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!showingPluginDiagnostics)
+
+                Button(L10n.string("PM Plan Project")) {
+                    openPMPlannerSheet()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(10)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
