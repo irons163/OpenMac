@@ -654,3 +654,7 @@
 " and %d more" = " and %d more";
 "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins.";
 "Copy PM Plugin Diagnostics" = "Copy PM Plugin Diagnostics";
+"Local PM Plugin" = "Plugin PM local";
+"Built-in Brainstorm fallback" = "Repli brainstorming intégré";
+"Waiting for plan generation" = "En attente de génération du plan";
+"Engine Source: %@" = "Source du moteur : %@";

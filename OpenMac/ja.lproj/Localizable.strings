@@ -654,3 +654,7 @@
 " and %d more" = " and %d more";
 "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins.";
 "Copy PM Plugin Diagnostics" = "Copy PM Plugin Diagnostics";
+"Local PM Plugin" = "ローカル PM プラグイン";
+"Built-in Brainstorm fallback" = "内蔵ブレインストーミングへのフォールバック";
+"Waiting for plan generation" = "計画生成待ち";
+"Engine Source: %@" = "エンジンソース: %@";

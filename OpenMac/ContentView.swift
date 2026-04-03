@@ -2371,6 +2371,41 @@ struct ContentView: View {
         return nil
     }
 
+    fileprivate static func pmPlanningEngineSource(
+        from planSummary: String,
+        selectedMode: PMPlannerEngineMode,
+        localPluginCount: Int
+    ) -> PMPlanningEngineSource {
+        let trimmedSummary = planSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else {
+            return .waitingForPlan
+        }
+
+        if let detectedEngine = pmPlanEngineDisplayName(from: trimmedSummary) {
+            let normalized = detectedEngine
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if normalized.contains("built-in brainstorm") {
+                return .builtInBrainstormFallback
+            }
+            if normalized.contains("built-in planner")
+                || normalized == PMPlannerEngineMode.builtIn.title.lowercased() {
+                return .builtInPlanner
+            }
+            if normalized.contains("built-in") {
+                return .builtInBrainstormFallback
+            }
+            return .localPlugin
+        }
+
+        switch selectedMode {
+        case .builtIn:
+            return .builtInPlanner
+        case .brainstormPluginPreferred:
+            return localPluginCount > 0 ? .builtInBrainstormFallback : .builtInPlanner
+        }
+    }
+
     fileprivate static func pmTestPlanText(
         projectName: String,
         projectBrief: String,
@@ -4850,6 +4885,52 @@ private struct GlobalTaskSearchSheet: View {
     }
 }
 
+fileprivate enum PMPlanningEngineSource {
+    case localPlugin
+    case builtInBrainstormFallback
+    case builtInPlanner
+    case waitingForPlan
+
+    var label: String {
+        switch self {
+        case .localPlugin:
+            return L10n.string("Local PM Plugin")
+        case .builtInBrainstormFallback:
+            return L10n.string("Built-in Brainstorm fallback")
+        case .builtInPlanner:
+            return L10n.string("Built-in Planner")
+        case .waitingForPlan:
+            return L10n.string("Waiting for plan generation")
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .localPlugin:
+            return .green
+        case .builtInBrainstormFallback:
+            return .orange
+        case .builtInPlanner:
+            return .blue
+        case .waitingForPlan:
+            return .secondary
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .localPlugin:
+            return "puzzlepiece.fill"
+        case .builtInBrainstormFallback:
+            return "arrow.triangle.2.circlepath"
+        case .builtInPlanner:
+            return "cpu"
+        case .waitingForPlan:
+            return "hourglass"
+        }
+    }
+}
+
 private struct PMPlannerSheet: View {
     @Binding var projectName: String
     @Binding var projectBrief: String
@@ -4962,6 +5043,14 @@ private struct PMPlannerSheet: View {
         return names.joined(separator: ", ")
     }
 
+    private var planningEngineSource: PMPlanningEngineSource {
+        ContentView.pmPlanningEngineSource(
+            from: planSummary,
+            selectedMode: plannerEngineMode,
+            localPluginCount: pmLocalPluginCount
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.string("PM Plan Project"))
@@ -5064,6 +5153,16 @@ private struct PMPlannerSheet: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(.quaternary, in: Capsule())
+
+                Label(
+                    L10n.format("Engine Source: %@", planningEngineSource.label),
+                    systemImage: planningEngineSource.symbolName
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(planningEngineSource.color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(planningEngineSource.color.opacity(0.12), in: Capsule())
 
                 if plannerEngineMode == .brainstormPluginPreferred {
                     VStack(alignment: .leading, spacing: 4) {
@@ -7878,6 +7977,18 @@ enum ContentViewTestHooks {
 
     static func pmPlanEngineDisplayName(from planSummary: String) -> String? {
         ContentView.pmPlanEngineDisplayName(from: planSummary)
+    }
+
+    static func pmPlanningEngineSourceLabel(
+        from planSummary: String,
+        selectedMode: PMPlannerEngineMode,
+        localPluginCount: Int
+    ) -> String {
+        ContentView.pmPlanningEngineSource(
+            from: planSummary,
+            selectedMode: selectedMode,
+            localPluginCount: localPluginCount
+        ).label
     }
 
     static func pmRoadmapText(

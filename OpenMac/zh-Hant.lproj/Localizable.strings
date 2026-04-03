@@ -653,3 +653,7 @@
 " and %d more" = " 以及另外 %d 個";
 "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "本機 PM 插件探索已停用。請開啟自動探索以使用本機插件。";
 "Copy PM Plugin Diagnostics" = "複製 PM 插件診斷資訊";
+"Local PM Plugin" = "本機 PM 插件";
+"Built-in Brainstorm fallback" = "內建腦力激盪回退";
+"Waiting for plan generation" = "等待產生計畫";
+"Engine Source: %@" = "引擎來源：%@";

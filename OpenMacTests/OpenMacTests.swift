@@ -6225,6 +6225,46 @@ struct ContentViewLogicTests {
         #expect(ContentViewTestHooks.pmPlanEngineDisplayName(from: mixedCase) == "Built-in Brainstorm plugin")
     }
 
+    @Test("pm planning engine source label reflects plugin, fallback, built-in, and waiting states")
+    func pmPlanningEngineSourceLabelCoverage() {
+        let pluginSummary = """
+        PM plan generated.
+        Planning engine: Demo Brainstorm Plugin
+        """
+        #expect(
+            ContentViewTestHooks.pmPlanningEngineSourceLabel(
+                from: pluginSummary,
+                selectedMode: .brainstormPluginPreferred,
+                localPluginCount: 1
+            ) == "Local PM Plugin"
+        )
+
+        let fallbackSummary = "Planning engine: Built-in Brainstorm plugin"
+        #expect(
+            ContentViewTestHooks.pmPlanningEngineSourceLabel(
+                from: fallbackSummary,
+                selectedMode: .brainstormPluginPreferred,
+                localPluginCount: 1
+            ) == "Built-in Brainstorm fallback"
+        )
+
+        #expect(
+            ContentViewTestHooks.pmPlanningEngineSourceLabel(
+                from: "PM plan generated without engine marker.",
+                selectedMode: .builtIn,
+                localPluginCount: 0
+            ) == "Built-in Planner"
+        )
+
+        #expect(
+            ContentViewTestHooks.pmPlanningEngineSourceLabel(
+                from: "",
+                selectedMode: .brainstormPluginPreferred,
+                localPluginCount: 0
+            ) == "Waiting for plan generation"
+        )
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()

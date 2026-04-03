@@ -654,3 +654,7 @@
 " and %d more" = " and %d more";
 "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins." = "Local PM plugin discovery is disabled. Enable auto-discover to use local plugins.";
 "Copy PM Plugin Diagnostics" = "Copy PM Plugin Diagnostics";
+"Local PM Plugin" = "로컬 PM 플러그인";
+"Built-in Brainstorm fallback" = "내장 브레인스토밍 폴백";
+"Waiting for plan generation" = "계획 생성 대기 중";
+"Engine Source: %@" = "엔진 소스: %@";
