@@ -6148,21 +6148,44 @@ struct ExecutionCheckpointIntegrationTests {
 }
 
 struct GitHubPRFlowUseCaseTests {
+    private struct StubError: Error {}
+
+    private func makeRequest(
+        repositoryPath: String = "/repo",
+        boardName: String = "Board",
+        baseBranch: String = "main",
+        remoteName: String = "origin",
+        branchPrefix: String = "openmac",
+        commitMessage: String = "chore: sync",
+        prTitle: String = "PR",
+        prBody: String = "Body",
+        qualityGateEnabled: Bool = false,
+        qualityGateCommands: [String] = []
+    ) -> GitHubPRFlowRequest {
+        GitHubPRFlowRequest(
+            repositoryPath: repositoryPath,
+            boardName: boardName,
+            baseBranch: baseBranch,
+            remoteName: remoteName,
+            branchPrefix: branchPrefix,
+            commitMessage: commitMessage,
+            prTitle: prTitle,
+            prBody: prBody,
+            qualityGateEnabled: qualityGateEnabled,
+            qualityGateCommands: qualityGateCommands
+        )
+    }
+
     @Test("github PR flow use case runs git+gh command sequence and extracts PR URL")
     func githubPRFlowRunsHappyPath() {
         let fixedDate = Date(timeIntervalSince1970: 0)
         var invokedCommands: [[String]] = []
 
         let result = GitHubPRFlowUseCase.run(
-            request: GitHubPRFlowRequest(
+            request: makeRequest(
                 repositoryPath: "/repo",
                 boardName: "Dating App Board",
-                baseBranch: "main",
-                remoteName: "origin",
-                branchPrefix: "openmac",
-                commitMessage: "chore: sync",
-                prTitle: "[OpenMac] Sync",
-                prBody: "Body"
+                prTitle: "[OpenMac] Sync"
             ),
             now: fixedDate,
             commandRunner: { executablePath, arguments, _ in
@@ -6189,16 +6212,7 @@ struct GitHubPRFlowUseCaseTests {
     @Test("github PR flow use case fails when no staged changes exist")
     func githubPRFlowFailsWhenNoStagedChanges() {
         let result = GitHubPRFlowUseCase.run(
-            request: GitHubPRFlowRequest(
-                repositoryPath: "/repo",
-                boardName: "Board",
-                baseBranch: "main",
-                remoteName: "origin",
-                branchPrefix: "openmac",
-                commitMessage: "chore: sync",
-                prTitle: "PR",
-                prBody: "Body"
-            ),
+            request: makeRequest(),
             commandRunner: { _, arguments, _ in
                 if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
                     return (0, "true")
@@ -6218,15 +6232,7 @@ struct GitHubPRFlowUseCaseTests {
     func githubPRFlowQualityGateBlocksOnFailure() {
         var invokedCommands: [[String]] = []
         let result = GitHubPRFlowUseCase.run(
-            request: GitHubPRFlowRequest(
-                repositoryPath: "/repo",
-                boardName: "Board",
-                baseBranch: "main",
-                remoteName: "origin",
-                branchPrefix: "openmac",
-                commitMessage: "chore: sync",
-                prTitle: "PR",
-                prBody: "Body",
+            request: makeRequest(
                 qualityGateEnabled: true,
                 qualityGateCommands: ["swift test"]
             ),
@@ -6253,15 +6259,7 @@ struct GitHubPRFlowUseCaseTests {
         let fixedDate = Date(timeIntervalSince1970: 0)
         var invokedCommands: [[String]] = []
         let result = GitHubPRFlowUseCase.run(
-            request: GitHubPRFlowRequest(
-                repositoryPath: "/repo",
-                boardName: "Board",
-                baseBranch: "main",
-                remoteName: "origin",
-                branchPrefix: "openmac",
-                commitMessage: "chore: sync",
-                prTitle: "PR",
-                prBody: "Body",
+            request: makeRequest(
                 qualityGateEnabled: true,
                 qualityGateCommands: ["swift test", "swiftlint"]
             ),
@@ -6285,6 +6283,242 @@ struct GitHubPRFlowUseCaseTests {
         #expect(invokedCommands.contains(where: { $0 == ["/bin/zsh", "-lc", "swift test"] }))
         #expect(invokedCommands.contains(where: { $0 == ["/bin/zsh", "-lc", "swiftlint"] }))
         #expect(invokedCommands.count == 9)
+    }
+
+    @Test("github PR flow requires repository path")
+    func githubPRFlowRequiresRepositoryPath() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(repositoryPath: "  "),
+            commandRunner: { _, _, _ in
+                Issue.record("command runner should not execute when repository path is empty")
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Repository path is required")
+        #expect(result.debugLog.isEmpty)
+    }
+
+    @Test("github PR flow fails when folder is not a git repository")
+    func githubPRFlowFailsWhenFolderIsNotGitRepository() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (1, "fatal: not a git repository")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Folder is not a git repository")
+        #expect(result.debugLog.contains("rev-parse --is-inside-work-tree"))
+    }
+
+    @Test("github PR flow quality gate requires commands when enabled")
+    func githubPRFlowQualityGateRequiresCommands() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(
+                qualityGateEnabled: true,
+                qualityGateCommands: ["  ", "\n"]
+            ),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Quality gate is enabled but no commands configured")
+    }
+
+    @Test("github PR flow fails when creating branch fails")
+    func githubPRFlowFailsWhenBranchCreateFails() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            now: fixedDate,
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments.starts(with: ["git", "checkout", "-b"]) {
+                    return (128, "already exists")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.branchName == "openmac/board-19700101-000000")
+        #expect(result.message == "Failed to create git branch")
+    }
+
+    @Test("github PR flow fails when staging changes fails")
+    func githubPRFlowFailsWhenGitAddFails() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "add", "-A"] {
+                    return (1, "cannot add")
+                }
+                if arguments.starts(with: ["git", "checkout", "-b"]) {
+                    return (0, "")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Failed to stage changes")
+    }
+
+    @Test("github PR flow fails when commit fails")
+    func githubPRFlowFailsWhenCommitFails() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments == ["git", "commit", "-m", "chore: sync"] {
+                    return (1, "commit failed")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Failed to create git commit")
+    }
+
+    @Test("github PR flow fails when push fails")
+    func githubPRFlowFailsWhenPushFails() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        let expectedBranch = "openmac/board-19700101-000000"
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            now: fixedDate,
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments == ["git", "push", "-u", "origin", expectedBranch] {
+                    return (1, "remote rejected")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Failed to push branch")
+    }
+
+    @Test("github PR flow returns install guidance when gh command is missing")
+    func githubPRFlowReportsMissingGitHubCLI() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(
+                boardName: "My Board",
+                baseBranch: "  ",
+                prTitle: "  "
+            ),
+            now: fixedDate,
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments.starts(with: ["gh", "pr", "create"]) {
+                    return (127, "zsh: command not found: gh")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message.contains("GitHub CLI not found. Install gh") == true)
+        #expect(result.message.contains("--base main") == true)
+    }
+
+    @Test("github PR flow returns generic message when gh create fails for other reasons")
+    func githubPRFlowReportsGenericPRFailure() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments.starts(with: ["gh", "pr", "create"]) {
+                    return (1, "HTTP 422")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message == "Failed to create GitHub pull request")
+    }
+
+    @Test("github PR flow succeeds without PR URL by returning branch summary message")
+    func githubPRFlowSucceedsWithoutURLInCreateOutput() {
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            now: fixedDate,
+            commandRunner: { _, arguments, _ in
+                if arguments == ["git", "rev-parse", "--is-inside-work-tree"] {
+                    return (0, "true")
+                }
+                if arguments == ["git", "diff", "--cached", "--quiet"] {
+                    return (1, "")
+                }
+                if arguments.starts(with: ["gh", "pr", "create"]) {
+                    return (0, "created")
+                }
+                return (0, "")
+            }
+        )
+
+        #expect(result.succeeded)
+        #expect(result.pullRequestURL == nil)
+        #expect(result.message == "GitHub PR created for branch openmac/board-19700101-000000")
+    }
+
+    @Test("github PR flow catches command runner thrown errors")
+    func githubPRFlowCatchesCommandRunnerError() {
+        let result = GitHubPRFlowUseCase.run(
+            request: makeRequest(),
+            commandRunner: { _, _, _ in
+                throw StubError()
+            }
+        )
+
+        #expect(!result.succeeded)
+        #expect(result.message.contains("GitHub PR flow failed") == true)
+    }
+
+    @Test("github PR flow helper returns nil when output has no pull request URL")
+    func githubPRFlowPullRequestURLNoMatchReturnsNil() {
+        #expect(GitHubPRFlowUseCase.pullRequestURL(from: "created successfully") == nil)
     }
 }
 
