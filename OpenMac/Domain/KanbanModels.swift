@@ -892,6 +892,57 @@ enum PMRealArtifactVerificationPreset: String, CaseIterable, Codable, Identifiab
     }
 }
 
+enum PMPlannerEngineMode: String, CaseIterable, Codable, Identifiable {
+    case builtIn
+    case brainstormPluginPreferred
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .builtIn:
+            return L10n.string("Built-in Planner")
+        case .brainstormPluginPreferred:
+            return L10n.string("Brainstorm Plugin (Preferred)")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .builtIn:
+            return L10n.string("Use OpenMac built-in PM planner only.")
+        case .brainstormPluginPreferred:
+            return L10n.string("Try plugin-based brainstorm planning first, then fallback to built-in planner.")
+        }
+    }
+}
+
+struct PMPlanningPluginPolicy: Equatable, Codable {
+    nonisolated static let defaultRelativePath = "Library/Application Support/OpenMac/Plugins"
+
+    var autoDiscoverLocalPlugins: Bool
+    var pluginsDirectoryPath: String
+
+    init(
+        autoDiscoverLocalPlugins: Bool = true,
+        pluginsDirectoryPath: String = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+    ) {
+        self.autoDiscoverLocalPlugins = autoDiscoverLocalPlugins
+        let trimmedPath = pluginsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPath.isEmpty {
+            self.pluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+        } else {
+            self.pluginsDirectoryPath = (trimmedPath as NSString).expandingTildeInPath
+        }
+    }
+
+    nonisolated static func defaultPluginsDirectoryURL(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent(defaultRelativePath, isDirectory: true)
+    }
+}
+
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {
     case strict
     case flexible

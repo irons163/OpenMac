@@ -104,6 +104,7 @@ struct ContentView: View {
     @State private var pmCreateNewBoardForPlan = true
     @State private var pmPlanSummary = ""
     @State private var pmPlannedTickets: [PMPlannedTicket] = []
+    @State private var pmPlannerEngineMode: PMPlannerEngineMode = .builtIn
     @State private var pmTicketDeliveryProfile: PMTicketDeliveryProfile = .balanced
     @State private var pmRealArtifactVerificationPreset: PMRealArtifactVerificationPreset = .useDeveloperDefaults
     @State private var pmSelectedTemplateID = "custom"
@@ -150,6 +151,8 @@ struct ContentView: View {
     @State private var mcpManualBootstrapCommand = ""
     @State private var mcpManualKeywordHints = ""
     @State private var isMCPRegistrySyncing = false
+    @State private var pmPluginsAutoDiscover = true
+    @State private var pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -669,6 +672,29 @@ struct ContentView: View {
                         openMCPServersSheet()
                     }
                     Divider()
+                    Text(L10n.string("PM Plugins"))
+                    Text(viewModel.pmPlanningPluginStatusSummaryText())
+                        .font(.caption2.monospaced())
+                    Toggle(L10n.string("Auto-discover local PM plugins"), isOn: $pmPluginsAutoDiscover)
+                    Button(L10n.string("Apply PM Plugin Settings")) {
+                        applyPMPluginSettings()
+                    }
+                    Text(pmPluginsDirectoryPath)
+                        .font(.caption2.monospaced())
+                    Button(L10n.string("Choose PM Plugins Folder...")) {
+                        choosePMPluginsDirectory()
+                    }
+                    Button(L10n.string("Use Default PM Plugins Folder")) {
+                        useDefaultPMPluginsDirectory()
+                    }
+                    .disabled(isUsingDefaultPMPluginsDirectory)
+                    Button(L10n.string("Open PM Plugins Folder in Finder")) {
+                        openPMPluginsDirectoryInFinder()
+                    }
+                    Button(L10n.string("Copy PM Plugins Folder Path")) {
+                        copyToPasteboard(pmPluginsDirectoryPath)
+                    }
+                    Divider()
                     Text(L10n.string("Projects Folder"))
                     Text(resolvedCodexProjectsDirectoryPath)
                         .font(.caption2.monospaced())
@@ -770,6 +796,7 @@ struct ContentView: View {
                 autoCreateMissingDependenciesDuringCycle: $autoCycleAutoCreateMissingDependencies,
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
+                plannerEngineMode: $pmPlannerEngineMode,
                 ticketDeliveryProfile: $pmTicketDeliveryProfile,
                 realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
                 selectedTemplateID: $pmSelectedTemplateID,
@@ -956,6 +983,7 @@ struct ContentView: View {
             syncQualitySafetyGateDraftFromViewModel()
             syncRealArtifactVerificationDraftFromViewModel()
             syncMCPDraftFromViewModel()
+            syncPMPluginDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
             viewModel.showXcodeDeveloperDirectoryWarningIfNeeded()
             viewModel.syncMCPServerRegistryInBackgroundIfNeeded()
@@ -1147,6 +1175,7 @@ struct ContentView: View {
         pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmPlannerEngineMode = viewModel.pmPlannerEngineMode
         pmTicketDeliveryProfile = .balanced
         pmRealArtifactVerificationPreset = inferredPMRealArtifactVerificationPresetForSelectedBoard()
         pmTestPlanText = ""
@@ -1163,6 +1192,7 @@ struct ContentView: View {
         pmBlueprintQualityBar = ""
         pmPlanSummary = ""
         pmPlannedTickets = []
+        pmPlannerEngineMode = .builtIn
         pmTicketDeliveryProfile = .balanced
         pmRealArtifactVerificationPreset = .useDeveloperDefaults
         pmTestPlanText = ""
@@ -1208,6 +1238,7 @@ struct ContentView: View {
     }
 
     private func generatePMPlanFromSheet() {
+        viewModel.updatePMPlannerEngineMode(pmPlannerEngineMode, announce: false)
         guard let plan = viewModel.previewProjectPlan(
             projectName: pmProjectName,
             projectBrief: pmProjectBrief
@@ -1299,6 +1330,7 @@ struct ContentView: View {
     }
 
     private func runPMOneClickFlowFromSheet() {
+        viewModel.updatePMPlannerEngineMode(pmPlannerEngineMode, announce: false)
         let preparation = PMAutopilotSheetUseCase.prepareForRun(
             isAutoCycleRunning: isAutoCycleRunning,
             isBatchRunning: isBatchRunning,
@@ -1460,6 +1492,7 @@ struct ContentView: View {
         normalizeAssigneeFilterSelection()
         syncSelectedAgentConsoleSelection()
         syncMCPDraftFromViewModel()
+        syncPMPluginDraftFromViewModel()
     }
 
     private func openWIPSettings() {
@@ -1768,6 +1801,20 @@ struct ContentView: View {
         let policy = viewModel.mcpServerPolicy
         mcpAutoFetchEnabled = policy.autoFetchEnabled
         mcpRegistryURL = policy.registryURL
+    }
+
+    private func syncPMPluginDraftFromViewModel() {
+        pmPlannerEngineMode = viewModel.pmPlannerEngineMode
+        pmPluginsAutoDiscover = viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins
+        pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
+    }
+
+    private func applyPMPluginSettings() {
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: pmPluginsAutoDiscover,
+            pluginsDirectoryPath: resolvedPMPluginsDirectoryPath
+        )
+        pmPluginsDirectoryPath = viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
     }
 
     private func openMCPServersSheet() {
@@ -2791,6 +2838,19 @@ struct ContentView: View {
         codexProjectsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var resolvedPMPluginsDirectoryPath: String {
+        let trimmed = pmPluginsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+        }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
+    private var isUsingDefaultPMPluginsDirectory: Bool {
+        let normalized = resolvedPMPluginsDirectoryPath
+        return normalized == PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+    }
+
     private var globalTaskSearchResults: [GlobalTaskSearchResult] {
         viewModel.globalTaskSearchResults(query: globalTaskSearchQuery)
     }
@@ -2862,6 +2922,23 @@ struct ContentView: View {
         ensureCodexProjectsDirectoryExists()
     }
 
+    private func choosePMPluginsDirectory() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.title = L10n.string("Choose PM Plugins Folder")
+        panel.message = L10n.string("Select a folder that contains PM planning plugins (one subfolder per plugin).")
+        panel.prompt = L10n.string("Use Folder")
+        panel.directoryURL = URL(fileURLWithPath: resolvedPMPluginsDirectoryPath, isDirectory: true)
+
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
+        guard modalResponse == .OK, let url else { return }
+        pmPluginsDirectoryPath = url.path
+        applyPMPluginSettings()
+    }
+
     private func chooseGitHubRepositoryDirectory() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -2883,6 +2960,11 @@ struct ContentView: View {
         ensureCodexProjectsDirectoryExists()
     }
 
+    private func useDefaultPMPluginsDirectory() {
+        pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+        applyPMPluginSettings()
+    }
+
     private func openCodexProjectsDirectoryInFinder() {
         do {
             let url = try Self.codexDirectoryEnsurer(resolvedCodexProjectsDirectoryPath)
@@ -2890,6 +2972,18 @@ struct ContentView: View {
         } catch {
             presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
         }
+    }
+
+    private func openPMPluginsDirectoryInFinder() {
+        let path = resolvedPMPluginsDirectoryPath
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            presentCodexProjectsDirectoryError(error, attemptedPath: path)
+            return
+        }
+        Self.workspaceActivator([url])
     }
 
     private func openGitHubRepositoryInFinder() {
@@ -4723,6 +4817,7 @@ private struct PMPlannerSheet: View {
     @Binding var autoCreateMissingDependenciesDuringCycle: Bool
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
+    @Binding var plannerEngineMode: PMPlannerEngineMode
     @Binding var ticketDeliveryProfile: PMTicketDeliveryProfile
     @Binding var realArtifactVerificationPreset: PMRealArtifactVerificationPreset
     @Binding var selectedTemplateID: String
@@ -4876,6 +4971,23 @@ private struct PMPlannerSheet: View {
             Text(L10n.string("PM templates prefill the project brief so you can generate tickets faster."))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Planning Engine"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker(L10n.string("Planning Engine"), selection: $plannerEngineMode) {
+                    ForEach(PMPlannerEngineMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(plannerEngineMode.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.string("Delivery Mode"))

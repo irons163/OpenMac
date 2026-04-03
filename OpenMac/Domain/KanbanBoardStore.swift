@@ -19,6 +19,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy?
     var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy?
     var mcpServerPolicy: MCPServerPolicy?
+    var pmPlannerEngineMode: PMPlannerEngineMode?
+    var pmPlanningPluginPolicy: PMPlanningPluginPolicy?
 
     init(
         tasks: [WorkTask],
@@ -38,7 +40,9 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         dagExecutionPolicy: DAGExecutionPolicy? = nil,
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy? = nil,
         executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil,
-        mcpServerPolicy: MCPServerPolicy? = nil
+        mcpServerPolicy: MCPServerPolicy? = nil,
+        pmPlannerEngineMode: PMPlannerEngineMode? = nil,
+        pmPlanningPluginPolicy: PMPlanningPluginPolicy? = nil
     ) {
         self.tasks = tasks
         self.agents = agents
@@ -58,6 +62,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.executionQualitySafetyGatePolicy = executionQualitySafetyGatePolicy
         self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
         self.mcpServerPolicy = mcpServerPolicy
+        self.pmPlannerEngineMode = pmPlannerEngineMode
+        self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
     }
 
     init(
@@ -83,7 +89,9 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             dagExecutionPolicy: nil,
             executionQualitySafetyGatePolicy: nil,
             executionRealArtifactVerificationPolicy: nil,
-            mcpServerPolicy: nil
+            mcpServerPolicy: nil,
+            pmPlannerEngineMode: nil,
+            pmPlanningPluginPolicy: nil
         )
     }
 }

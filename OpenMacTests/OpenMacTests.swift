@@ -4425,6 +4425,174 @@ struct KanbanSupportTypeTests {
         #expect(strict.requireXcodeBuild)
     }
 
+    @Test("PM planner engine modes expose ids titles and details")
+    func pmPlannerEngineModeMetadata() {
+        for mode in PMPlannerEngineMode.allCases {
+            #expect(mode.id == mode.rawValue)
+            #expect(!mode.title.isEmpty)
+            #expect(!mode.detail.isEmpty)
+        }
+    }
+
+    @Test("PM planning plugin policy expands default and custom plugin paths")
+    func pmPlanningPluginPolicyNormalizesPath() {
+        let defaultPolicy = PMPlanningPluginPolicy()
+        #expect(defaultPolicy.autoDiscoverLocalPlugins)
+        #expect(!defaultPolicy.pluginsDirectoryPath.isEmpty)
+
+        let custom = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: false,
+            pluginsDirectoryPath: "~/Library/Application Support/OpenMac/CustomPlugins"
+        )
+        #expect(custom.autoDiscoverLocalPlugins == false)
+        #expect(custom.pluginsDirectoryPath.hasPrefix("/"))
+        #expect(custom.pluginsDirectoryPath.contains("CustomPlugins"))
+    }
+
+    @Test("extensible planner plugin mode injects built-in brainstorm ticket when local plugins are disabled")
+    func extensiblePlannerBuiltInBrainstormFallback() {
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (1, "", "not used")
+            }
+        )
+
+        let plan = planner.generatePlan(
+            projectName: "Demo",
+            projectBrief: "Build a scheduling app with sync and offline support.",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(autoDiscoverLocalPlugins: false)
+        )
+
+        #expect(plan != nil)
+        #expect(plan?.tickets.first?.title.localizedCaseInsensitiveContains("brainstorm") == true)
+        #expect(plan?.summary.contains("Built-in Brainstorm plugin") == true)
+    }
+
+    @Test("extensible planner prefers local plugin output when available")
+    func extensiblePlannerUsesLocalPluginOutput() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let pluginDir = root.appendingPathComponent("demo-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+
+        let manifest = """
+        {
+          "id": "com.example.demo",
+          "name": "Demo Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """
+        try manifest.data(using: .utf8)?.write(to: pluginDir.appendingPathComponent("plugin.json"))
+
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (
+                    0,
+                    """
+                    {
+                      "projectName": "Plugin Plan",
+                      "summary": "Plugin summary",
+                      "tickets": [
+                        {
+                          "title": "Plugin Plan · Scope",
+                          "details": "Acceptance:\\nDepends on: none\\n- validate scope",
+                          "requiredSkills": ["planning"],
+                          "storyPoints": 2,
+                          "epic": "Planning",
+                          "milestone": "M1"
+                        }
+                      ]
+                    }
+                    """,
+                    ""
+                )
+            }
+        )
+
+        let plan = planner.generatePlan(
+            projectName: "Ignored",
+            projectBrief: "brief",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(
+                autoDiscoverLocalPlugins: true,
+                pluginsDirectoryPath: root.path
+            )
+        )
+
+        #expect(plan?.projectName == "Plugin Plan")
+        #expect(plan?.tickets.count == 1)
+        #expect(plan?.summary.contains("Planning engine: Demo Plugin") == true)
+    }
+
+    @Test("extensible planner discovers plugin when policy path points to plugin folder directly")
+    func extensiblePlannerDiscoversPluginAtRootPath() throws {
+        let fileManager = FileManager.default
+        let pluginDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: pluginDir)
+        }
+
+        let manifest = """
+        {
+          "id": "com.example.direct",
+          "name": "Direct Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """
+        try manifest.data(using: .utf8)?.write(to: pluginDir.appendingPathComponent("plugin.json"))
+
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (
+                    0,
+                    """
+                    {
+                      "projectName": "Direct Plugin Plan",
+                      "summary": "Direct root plugin summary",
+                      "tickets": [
+                        {
+                          "title": "Direct Plugin Plan · Scope",
+                          "details": "Acceptance:\\nDepends on: none\\n- clarify scope",
+                          "requiredSkills": ["planning"],
+                          "storyPoints": 2
+                        }
+                      ]
+                    }
+                    """,
+                    ""
+                )
+            }
+        )
+
+        let plan = planner.generatePlan(
+            projectName: "Ignored",
+            projectBrief: "brief",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(
+                autoDiscoverLocalPlugins: true,
+                pluginsDirectoryPath: pluginDir.path
+            )
+        )
+
+        #expect(plan?.projectName == "Direct Plugin Plan")
+        #expect(plan?.summary.contains("Planning engine: Direct Plugin") == true)
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

@@ -1508,6 +1508,8 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var selectedBoardUsesDefaultRealArtifactVerificationPolicy: Bool
     @Published private(set) var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy
     @Published private(set) var mcpServerPolicy: MCPServerPolicy
+    @Published private(set) var pmPlannerEngineMode: PMPlannerEngineMode
+    @Published private(set) var pmPlanningPluginPolicy: PMPlanningPluginPolicy
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1711,11 +1713,13 @@ final class KanbanBoardViewModel: ObservableObject {
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
         executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy = .init(),
         mcpServerPolicy: MCPServerPolicy = .init(),
+        pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
+        pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         },
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
-        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        projectPlanner: any ProjectPlanning = ExtensibleProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
         gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
@@ -1757,6 +1761,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.selectedBoardUsesDefaultRealArtifactVerificationPolicy = true
         self.executionRealArtifactVerificationPolicy = resolvedRealArtifactPolicy
         self.mcpServerPolicy = mcpServerPolicy
+        self.pmPlannerEngineMode = pmPlannerEngineMode
+        self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -1784,11 +1790,13 @@ final class KanbanBoardViewModel: ObservableObject {
         executionQualitySafetyGatePolicy: ExecutionQualitySafetyGatePolicy = .init(),
         executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy = .init(),
         mcpServerPolicy: MCPServerPolicy = .init(),
+        pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
+        pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         },
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
-        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        projectPlanner: any ProjectPlanning = ExtensibleProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         boardStore: KanbanBoardStore? = nil,
         gitCommandRunner: @escaping GitCommandRunner = GitHubPRFlowUseCase.runSystemCommand,
@@ -1837,6 +1845,8 @@ final class KanbanBoardViewModel: ObservableObject {
         self.selectedBoardUsesDefaultRealArtifactVerificationPolicy = selectedBoardUsesDefaultRealArtifactVerificationPolicy
         self.executionRealArtifactVerificationPolicy = resolvedSelectedBoardRealArtifactPolicy
         self.mcpServerPolicy = mcpServerPolicy
+        self.pmPlannerEngineMode = pmPlannerEngineMode
+        self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -2126,7 +2136,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
                     executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
-                    mcpServerPolicy: mcpServerPolicy
+                    mcpServerPolicy: mcpServerPolicy,
+                    pmPlannerEngineMode: pmPlannerEngineMode,
+                    pmPlanningPluginPolicy: pmPlanningPluginPolicy
                 )
             )
         } catch {
@@ -2167,7 +2179,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     dagExecutionPolicy: dagExecutionPolicy,
                     executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
                     executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
-                    mcpServerPolicy: mcpServerPolicy
+                    mcpServerPolicy: mcpServerPolicy,
+                    pmPlannerEngineMode: pmPlannerEngineMode,
+                    pmPlanningPluginPolicy: pmPlanningPluginPolicy
                 )
             )
         } catch {
@@ -2454,6 +2468,8 @@ final class KanbanBoardViewModel: ObservableObject {
             executionQualitySafetyGatePolicy = snapshot.executionQualitySafetyGatePolicy ?? .init()
             executionRealArtifactVerificationDefaultPolicy = snapshot.executionRealArtifactVerificationPolicy ?? .init()
             mcpServerPolicy = snapshot.mcpServerPolicy ?? .init()
+            pmPlannerEngineMode = snapshot.pmPlannerEngineMode ?? .builtIn
+            pmPlanningPluginPolicy = snapshot.pmPlanningPluginPolicy ?? .init()
             mcpReadinessCacheByServerName = [:]
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
                 importedBoards.contains { board in
@@ -2504,6 +2520,12 @@ final class KanbanBoardViewModel: ObservableObject {
             if let importedMCPPolicy = snapshot.mcpServerPolicy {
                 mcpServerPolicy = importedMCPPolicy
                 mcpReadinessCacheByServerName = [:]
+            }
+            if let importedPlannerMode = snapshot.pmPlannerEngineMode {
+                pmPlannerEngineMode = importedPlannerMode
+            }
+            if let importedPluginPolicy = snapshot.pmPlanningPluginPolicy {
+                pmPlanningPluginPolicy = importedPluginPolicy
             }
             if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
                 taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
@@ -2968,11 +2990,24 @@ final class KanbanBoardViewModel: ObservableObject {
             return nil
         }
 
-        guard let plan = projectPlanner.generatePlan(
-            projectName: projectName,
-            projectBrief: trimmedBrief,
-            availableAgents: agents
-        ),
+        let generatedPlan: PMProjectPlan?
+        if let configurablePlanner = projectPlanner as? any ConfigurableProjectPlanning {
+            generatedPlan = configurablePlanner.generatePlan(
+                projectName: projectName,
+                projectBrief: trimmedBrief,
+                availableAgents: agents,
+                mode: pmPlannerEngineMode,
+                pluginPolicy: pmPlanningPluginPolicy
+            )
+        } else {
+            generatedPlan = projectPlanner.generatePlan(
+                projectName: projectName,
+                projectBrief: trimmedBrief,
+                availableAgents: agents
+            )
+        }
+
+        guard let plan = generatedPlan,
             !plan.tickets.isEmpty else {
             lastBoardMessage = message("PM planner could not generate actionable tickets")
             lastBoardMessageSeverity = .warning
@@ -2994,12 +3029,26 @@ final class KanbanBoardViewModel: ObservableObject {
             return nil
         }
 
-        guard let blueprintPlanner = projectPlanner as? any ProjectBlueprintPlanning,
-              let blueprint = blueprintPlanner.generateBlueprint(
-                  projectName: projectName,
-                  projectBrief: trimmedBrief,
-                  availableAgents: agents
-              ),
+        let generatedBlueprint: PMProjectBlueprint?
+        if let configurablePlanner = projectPlanner as? any ConfigurableProjectPlanning {
+            generatedBlueprint = configurablePlanner.generateBlueprint(
+                projectName: projectName,
+                projectBrief: trimmedBrief,
+                availableAgents: agents,
+                mode: pmPlannerEngineMode,
+                pluginPolicy: pmPlanningPluginPolicy
+            )
+        } else if let blueprintPlanner = projectPlanner as? any ProjectBlueprintPlanning {
+            generatedBlueprint = blueprintPlanner.generateBlueprint(
+                projectName: projectName,
+                projectBrief: trimmedBrief,
+                availableAgents: agents
+            )
+        } else {
+            generatedBlueprint = nil
+        }
+
+        guard let blueprint = generatedBlueprint,
               !blueprint.tickets.isEmpty else {
             lastBoardMessage = message("PM planner could not generate actionable tickets")
             lastBoardMessageSeverity = .warning
@@ -4374,6 +4423,41 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    func updatePMPlannerEngineMode(_ mode: PMPlannerEngineMode, announce: Bool = true) {
+        pmPlannerEngineMode = mode
+        persistBoardState()
+        guard announce else { return }
+        lastBoardMessage = message("Updated PM planning engine mode")
+        lastBoardMessageSeverity = .info
+    }
+
+    func updatePMPlanningPluginPolicy(
+        autoDiscoverLocalPlugins: Bool,
+        pluginsDirectoryPath: String,
+        announce: Bool = true
+    ) {
+        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pluginsDirectoryPath
+        )
+        persistBoardState()
+        guard announce else { return }
+        lastBoardMessage = message("Updated PM plugin settings")
+        lastBoardMessageSeverity = .info
+    }
+
+    func pmPlanningPluginStatusSummaryText() -> String {
+        let localPluginCount = detectedLocalPMPlanningPluginCount(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        let modeTitle = pmPlannerEngineMode.title
+        let discoveryText = pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? message("On") : message("Off")
+        return message(
+            "PM plugins: mode=%@ · discovery=%@ · local=%d",
+            modeTitle,
+            discoveryText,
+            localPluginCount
+        )
+    }
+
     func updateMCPServerPolicy(
         autoFetchEnabled: Bool,
         registryURL: String
@@ -4871,6 +4955,38 @@ final class KanbanBoardViewModel: ObservableObject {
                     : lastFailureDetails
             )
         )
+    }
+
+    private func detectedLocalPMPlanningPluginCount(in directoryPath: String) -> Int {
+        let trimmedPath = directoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return 0 }
+
+        let expandedPath = (trimmedPath as NSString).expandingTildeInPath
+        let directoryURL = URL(fileURLWithPath: expandedPath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: directoryURL.path) else { return 0 }
+
+        guard let childEntries = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+
+        let candidateDirectories = [directoryURL] + childEntries
+        return candidateDirectories.reduce(0) { count, entryURL in
+            guard let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey]),
+                  values.isDirectory == true else {
+                return count
+            }
+
+            let hasManifest = FileManager.default.fileExists(
+                atPath: entryURL.appendingPathComponent("plugin.json").path
+            ) || FileManager.default.fileExists(
+                atPath: entryURL.appendingPathComponent("manifest.json").path
+            )
+            return hasManifest ? count + 1 : count
+        }
     }
 
     private func shouldSyncMCPRegistry(lastSyncedAt: Date?) -> Bool {
@@ -8181,7 +8297,9 @@ final class KanbanBoardViewModel: ObservableObject {
             dagExecutionPolicy: dagExecutionPolicy,
             executionQualitySafetyGatePolicy: executionQualitySafetyGatePolicy,
             executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
-            mcpServerPolicy: mcpServerPolicy
+            mcpServerPolicy: mcpServerPolicy,
+            pmPlannerEngineMode: pmPlannerEngineMode,
+            pmPlanningPluginPolicy: pmPlanningPluginPolicy
         )
         try? boardStore.save(snapshot)
     }
@@ -8191,7 +8309,7 @@ extension KanbanBoardViewModel {
     static func persistentBoard(
         boardStore: KanbanBoardStore = FileKanbanBoardStore(),
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
-        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        projectPlanner: any ProjectPlanning = ExtensibleProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
@@ -8223,6 +8341,8 @@ extension KanbanBoardViewModel {
                     executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
                     executionRealArtifactVerificationPolicy: snapshot.executionRealArtifactVerificationPolicy ?? .init(),
                     mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
+                    pmPlannerEngineMode: snapshot.pmPlannerEngineMode ?? .builtIn,
+                    pmPlanningPluginPolicy: snapshot.pmPlanningPluginPolicy ?? .init(),
                     projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
@@ -8250,6 +8370,8 @@ extension KanbanBoardViewModel {
                 executionQualitySafetyGatePolicy: snapshot.executionQualitySafetyGatePolicy ?? .init(),
                 executionRealArtifactVerificationPolicy: snapshot.executionRealArtifactVerificationPolicy ?? .init(),
                 mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
+                pmPlannerEngineMode: snapshot.pmPlannerEngineMode ?? .builtIn,
+                pmPlanningPluginPolicy: snapshot.pmPlanningPluginPolicy ?? .init(),
                 projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,
@@ -8275,7 +8397,7 @@ extension KanbanBoardViewModel {
     static func demoBoard(
         boardStore: KanbanBoardStore? = nil,
         assignmentEngine: AutoAssignmentEngine = AutoAssignmentEngine(),
-        projectPlanner: any ProjectPlanning = RuleBasedProjectPlanner(),
+        projectPlanner: any ProjectPlanning = ExtensibleProjectPlanner(),
         taskExecutor: any AgentTaskExecuting = DefaultAgentTaskExecutor(),
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
