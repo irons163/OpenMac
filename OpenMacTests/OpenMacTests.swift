@@ -6025,6 +6025,28 @@ struct ContentActionUseCaseTests {
 }
 
 struct DependencyGraphInsightsUseCaseTests {
+    @Test("dependency insights returns empty summary when active task set is empty")
+    func dependencyInsightsHandlesNoActiveTasks() {
+        let doneTask = WorkTask(
+            title: "Done",
+            details: "Completed",
+            requiredSkills: ["qa"],
+            storyPoints: 2,
+            status: .done,
+            assignedAgentID: nil
+        )
+
+        let insights = DependencyGraphInsightsUseCase.build(tasks: [doneTask])
+
+        #expect(insights.totalTaskDependencies == 0)
+        #expect(insights.externalDependencyCount == 0)
+        #expect(insights.blockedTaskCount == 0)
+        #expect(insights.criticalPathStoryPoints == 0)
+        #expect(insights.criticalPathTaskIDs.isEmpty)
+        #expect(insights.criticalPathTaskTitles.isEmpty)
+        #expect(insights.cycleTaskTitles.isEmpty)
+    }
+
     @Test("dependency insights computes blocked count, external dependencies, and critical path")
     func dependencyInsightsComputesCriticalPath() {
         let spec = WorkTask(
@@ -6097,6 +6119,67 @@ struct DependencyGraphInsightsUseCaseTests {
         #expect(insights.cycleTaskTitles.count == 2)
         #expect(insights.cycleTaskTitles.contains("A"))
         #expect(insights.cycleTaskTitles.contains("B"))
+    }
+
+    @Test("dependency insights prefers earliest duplicate title and resolves equal-weight tie path deterministically")
+    func dependencyInsightsPrefersEarliestDuplicateTitleAndTieBreak() {
+        let foundationTitle = "Foundation"
+        let foundationLateID = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+        let foundationEarlyID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let alphaID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
+        let betaID = UUID(uuidString: "00000000-0000-0000-0000-0000000000BB")!
+        let createdEarly = Date(timeIntervalSince1970: 100)
+        let createdLate = Date(timeIntervalSince1970: 200)
+
+        let foundationLate = WorkTask(
+            id: foundationLateID,
+            title: foundationTitle,
+            details: "Later duplicate task",
+            requiredSkills: ["architecture"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil,
+            createdAt: createdLate
+        )
+        let foundationEarly = WorkTask(
+            id: foundationEarlyID,
+            title: foundationTitle,
+            details: "Earlier duplicate task",
+            requiredSkills: ["architecture"],
+            storyPoints: 1,
+            status: .review,
+            assignedAgentID: nil,
+            createdAt: createdEarly
+        )
+        let alpha = WorkTask(
+            id: alphaID,
+            title: "Alpha",
+            details: "Depends on: \(foundationTitle)",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let beta = WorkTask(
+            id: betaID,
+            title: "Beta",
+            details: "Depends on: \(foundationTitle)",
+            requiredSkills: ["backend"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+
+        let insights = DependencyGraphInsightsUseCase.build(tasks: [foundationLate, foundationEarly, alpha, beta])
+
+        #expect(insights.externalDependencyCount == 0)
+        #expect(insights.blockedTaskCount == 0)
+        #expect(insights.totalTaskDependencies == 2)
+        #expect(insights.criticalPathStoryPoints == 3)
+        #expect(insights.criticalPathTaskTitles.count == 2)
+        #expect(insights.criticalPathTaskTitles.first == foundationTitle)
+        #expect(Set(insights.criticalPathTaskTitles.suffix(1)).isSubset(of: Set(["Alpha", "Beta"])))
+        #expect(insights.cycleTaskTitles.isEmpty)
     }
 }
 
@@ -13355,6 +13438,55 @@ struct ExecutionSummaryBuilderTests {
         ))
     }
 
+    @Test("no runnable batch message prioritizes approval branch before quota and dependencies")
+    func noRunnableBatchMessageApprovalBlocked() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 3,
+            approvalBlockedCount: 1,
+            quotaBlockedCount: 2
+        )
+
+        #expect(message == L10n.format(
+            "%d assigned %@ awaiting human approval before batch run.",
+            1,
+            L10n.string("task")
+        ))
+    }
+
+    @Test("no runnable batch message uses quota branch when approval is clear")
+    func noRunnableBatchMessageQuotaBlocked() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 1,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 2
+        )
+
+        #expect(message == L10n.format(
+            "%d assigned %@ blocked by quota limits. Increase quota or reset usage before batch run.",
+            2,
+            L10n.string("tasks")
+        ))
+    }
+
+    @Test("no runnable batch message uses quality safety branch before dependency branch")
+    func noRunnableBatchMessageQualitySafetyBlocked() {
+        let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
+            detailsMissingCount: 0,
+            dependencyBlockedCount: 2,
+            approvalBlockedCount: 0,
+            quotaBlockedCount: 0,
+            qualitySafetyBlockedCount: 1
+        )
+
+        #expect(message == L10n.format(
+            "%d assigned %@ blocked by quality/safety gate. Fix task quality notes before batch run.",
+            1,
+            L10n.string("task")
+        ))
+    }
+
     @Test("no runnable batch message falls back to generic text")
     func noRunnableBatchMessageFallback() {
         let message = ExecutionSummaryBuilder.noRunnableAssignedBatchMessage(
@@ -13381,6 +13513,7 @@ struct ExecutionSummaryBuilderTests {
             dependencyBlockedCount: 1,
             approvalBlockedCount: 1,
             quotaBlockedCount: 1,
+            qualitySafetyBlockedCount: 2,
             wasCancelled: true
         )
 
@@ -13393,6 +13526,7 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains(L10n.format("%d missing details", 2)))
         #expect(message.contains(L10n.format("%d awaiting approval", 1)))
         #expect(message.contains(L10n.format("%d blocked by quota", 1)))
+        #expect(message.contains(L10n.format("%d blocked by quality/safety gate", 2)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 1)))
     }
 
@@ -13435,7 +13569,8 @@ struct ExecutionSummaryBuilderTests {
             remainingDetailsMissing: 1,
             remainingDependencyBlocked: 5,
             remainingApprovalBlocked: 1,
-            remainingQuotaBlocked: 2
+            remainingQuotaBlocked: 2,
+            remainingQualitySafetyBlocked: 3
         )
 
         #expect(message.contains(L10n.format("Auto cycle finished · %d pass(es) · %d started", 3, 4)))
@@ -13444,6 +13579,7 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains(L10n.format("%d missing details", 1)))
         #expect(message.contains(L10n.format("%d awaiting approval", 1)))
         #expect(message.contains(L10n.format("%d blocked by quota", 2)))
+        #expect(message.contains(L10n.format("%d blocked by quality/safety gate", 3)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 5)))
     }
 
@@ -13461,7 +13597,8 @@ struct ExecutionSummaryBuilderTests {
             remainingDetailsMissing: 2,
             remainingDependencyBlocked: 3,
             remainingApprovalBlocked: 1,
-            remainingQuotaBlocked: 2
+            remainingQuotaBlocked: 2,
+            remainingQualitySafetyBlocked: 4
         )
 
         #expect(message.contains(L10n.format(
@@ -13479,6 +13616,7 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains(L10n.format("%d missing details", 2)))
         #expect(message.contains(L10n.format("%d awaiting approval", 1)))
         #expect(message.contains(L10n.format("%d blocked by quota", 2)))
+        #expect(message.contains(L10n.format("%d blocked by quality/safety gate", 4)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 3)))
     }
 }
