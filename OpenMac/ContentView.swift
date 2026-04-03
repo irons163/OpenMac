@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -156,6 +157,8 @@ struct ContentView: View {
     @State private var pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
     @State private var pmPluginStatusLastScannedAt: Date?
     @State private var pmLastGeneratedPlanAt: Date?
+    @State private var pmStatusReferenceNow = Date()
+    private static let pmStatusAutoRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -1032,6 +1035,9 @@ struct ContentView: View {
         }
         .onChange(of: viewModel.selectedBoardID) { _, _ in
             handleBoardContextChanged()
+        }
+        .onReceive(Self.pmStatusAutoRefreshTimer) { refreshedAt in
+            pmStatusReferenceNow = refreshedAt
         }
         .alert(L10n.string("Delete Board?"), isPresented: $isShowingDeleteBoardAlert) {
             Button(L10n.string("Cancel"), role: .cancel) {}
@@ -3018,7 +3024,7 @@ struct ContentView: View {
         }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: generatedAt, relativeTo: Date())
+        return formatter.localizedString(for: generatedAt, relativeTo: pmStatusReferenceNow)
     }
 
     private func shortDateTimeString(_ date: Date) -> String {
@@ -3052,7 +3058,7 @@ struct ContentView: View {
 
     private var pmLastPlanFreshnessState: Bool? {
         guard let generatedAt = pmLastGeneratedPlanAt else { return nil }
-        return Date().timeIntervalSince(generatedAt) <= 10 * 60
+        return pmStatusReferenceNow.timeIntervalSince(generatedAt) <= 10 * 60
     }
 
     private var pmLastPlanFreshnessLabel: String {
