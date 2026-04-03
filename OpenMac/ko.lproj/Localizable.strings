@@ -663,3 +663,8 @@
 "Copy PM Planner Status" = "PM 플래너 상태 복사";
 "Last planning engine: %@" = "최근 계획 엔진: %@";
 "Last plan summary: %@" = "최근 계획 요약: %@";
+"Last plan generated: %@" = "최근 계획 생성: %@";
+"Plan freshness: %@" = "계획 신선도: %@";
+"Fresh" = "최신";
+"Stale" = "오래됨";
+"No plan" = "계획 없음";

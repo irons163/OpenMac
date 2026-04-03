@@ -155,6 +155,7 @@ struct ContentView: View {
     @State private var pmPluginsAutoDiscover = true
     @State private var pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
     @State private var pmPluginStatusLastScannedAt: Date?
+    @State private var pmLastGeneratedPlanAt: Date?
     fileprivate static var savePanelResultProvider: (NSSavePanel) -> (NSApplication.ModalResponse, URL?) = { panel in
         (panel.runModal(), panel.url)
     }
@@ -1841,6 +1842,7 @@ struct ContentView: View {
         let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         pmLastGeneratedPlanSummary = trimmed
+        pmLastGeneratedPlanAt = Date()
     }
 
     private func refreshPMPluginDiagnostics(announce: Bool = true) {
@@ -1853,10 +1855,13 @@ struct ContentView: View {
         let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
         let lastEngineName = pmLastGeneratedEngineName ?? "-"
         let lastSummary = pmLastGeneratedSummaryPreview ?? "-"
+        let lastGeneratedAt = pmLastGeneratedPlanAtText
         let snapshot = [
             L10n.format("Board: %@", viewModel.selectedBoardName),
             "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
             L10n.format("Last planning engine: %@", lastEngineName),
+            L10n.format("Last plan generated: %@", lastGeneratedAt),
+            L10n.format("Plan freshness: %@", pmLastPlanFreshnessLabel),
             L10n.format("Last plan summary: %@", lastSummary),
             L10n.format(
                 "Plugin discovery: %@ · Local plugins: %d",
@@ -2995,10 +3000,21 @@ struct ContentView: View {
         guard let scannedAt = pmPluginStatusLastScannedAt else {
             return L10n.string("Not scanned yet")
         }
+        return shortDateTimeString(scannedAt)
+    }
+
+    private var pmLastGeneratedPlanAtText: String {
+        guard let generatedAt = pmLastGeneratedPlanAt else {
+            return L10n.string("Not scanned yet")
+        }
+        return shortDateTimeString(generatedAt)
+    }
+
+    private func shortDateTimeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
-        return formatter.string(from: scannedAt)
+        return formatter.string(from: date)
     }
 
     private var pmLastGeneratedEngineName: String? {
@@ -3021,6 +3037,27 @@ struct ContentView: View {
         let trimmedSummary = pmLastGeneratedPlanSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSummary.isEmpty else { return nil }
         return Self.boardMessageCollapsedPreview(trimmedSummary)
+    }
+
+    private var pmLastPlanFreshnessState: Bool? {
+        guard let generatedAt = pmLastGeneratedPlanAt else { return nil }
+        return Date().timeIntervalSince(generatedAt) <= 10 * 60
+    }
+
+    private var pmLastPlanFreshnessLabel: String {
+        guard let isFresh = pmLastPlanFreshnessState else {
+            return L10n.string("No plan")
+        }
+        return isFresh ? L10n.string("Fresh") : L10n.string("Stale")
+    }
+
+    private var pmLastPlanFreshnessColor: Color {
+        guard let isFresh = pmLastPlanFreshnessState else {
+            return BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme)
+        }
+        return isFresh
+            ? BoardSemanticTextPalette.color(for: .success, scheme: effectiveColorScheme)
+            : BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme)
     }
 
     @ViewBuilder
@@ -3065,6 +3102,17 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
             }
+
+            Text(L10n.format("Last plan generated: %@", pmLastGeneratedPlanAtText))
+                .font(.caption2)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            Label(L10n.format("Plan freshness: %@", pmLastPlanFreshnessLabel), systemImage: "clock.badge.checkmark")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(pmLastPlanFreshnessColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(pmLastPlanFreshnessColor.opacity(0.12), in: Capsule())
 
             if let lastEngineSource = pmLastGeneratedEngineSource {
                 Label(

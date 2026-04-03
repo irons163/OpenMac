@@ -662,3 +662,8 @@
 "Copy PM Planner Status" = "Copy PM Planner Status";
 "Last planning engine: %@" = "Last planning engine: %@";
 "Last plan summary: %@" = "Last plan summary: %@";
+"Last plan generated: %@" = "Last plan generated: %@";
+"Plan freshness: %@" = "Plan freshness: %@";
+"Fresh" = "Fresh";
+"Stale" = "Stale";
+"No plan" = "No plan";

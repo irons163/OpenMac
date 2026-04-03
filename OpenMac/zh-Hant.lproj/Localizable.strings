@@ -662,3 +662,8 @@
 "Copy PM Planner Status" = "複製 PM 規劃器狀態";
 "Last planning engine: %@" = "最近規劃引擎：%@";
 "Last plan summary: %@" = "最近計畫摘要：%@";
+"Last plan generated: %@" = "最近計畫產生：%@";
+"Plan freshness: %@" = "計畫新鮮度：%@";
+"Fresh" = "新鮮";
+"Stale" = "過期";
+"No plan" = "尚無計畫";

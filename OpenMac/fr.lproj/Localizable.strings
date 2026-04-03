@@ -663,3 +663,8 @@
 "Copy PM Planner Status" = "Copier l’état du planificateur PM";
 "Last planning engine: %@" = "Dernier moteur de planification : %@";
 "Last plan summary: %@" = "Dernier résumé du plan : %@";
+"Last plan generated: %@" = "Dernier plan généré : %@";
+"Plan freshness: %@" = "Fraîcheur du plan : %@";
+"Fresh" = "Récent";
+"Stale" = "Obsolète";
+"No plan" = "Aucun plan";
