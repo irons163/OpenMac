@@ -4655,6 +4655,59 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.pmPlanningLocalPluginCount() == 2)
     }
 
+    @Test("refresh PM plugin diagnostics announces detected plugin summary")
+    func refreshPMPlanningPluginDiagnosticsAnnouncesSummary() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        for name in ["Alpha Plugin", "Beta Plugin", "Gamma Plugin", "Delta Plugin"] {
+            let folderName = name.replacingOccurrences(of: " ", with: "-").lowercased()
+            let pluginURL = root.appendingPathComponent(folderName, isDirectory: true)
+            try fileManager.createDirectory(at: pluginURL, withIntermediateDirectories: true)
+            try """
+            {
+              "id": "com.example.\(folderName)",
+              "name": "\(name)",
+              "capabilities": ["pm.plan.generate"],
+              "enabled": true
+            }
+            """.data(using: .utf8)?.write(to: pluginURL.appendingPathComponent("plugin.json"))
+        }
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+        viewModel.refreshPMPlanningPluginDiagnostics()
+
+        #expect(viewModel.lastBoardMessage?.contains("Rescanned PM plugins: 4 detected") == true)
+        #expect(viewModel.lastBoardMessage?.contains(" and 1 more") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("refresh PM plugin diagnostics warns when no plugin is detected")
+    func refreshPMPlanningPluginDiagnosticsWarnsForNone() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+        viewModel.refreshPMPlanningPluginDiagnostics()
+
+        #expect(viewModel.lastBoardMessage == "Rescanned PM plugins: none detected")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

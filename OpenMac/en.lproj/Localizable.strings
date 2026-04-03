@@ -648,3 +648,6 @@
 "No local PM plugins detected. Planner will fallback to built-in logic." = "No local PM plugins detected. Planner will fallback to built-in logic.";
 "Detected plugins: %@" = "Detected plugins: %@";
 "Rescan PM Plugins" = "Rescan PM Plugins";
+"Rescanned PM plugins: none detected" = "Rescanned PM plugins: none detected";
+"Rescanned PM plugins: %d detected (%@)" = "Rescanned PM plugins: %d detected (%@)";
+" and %d more" = " and %d more";

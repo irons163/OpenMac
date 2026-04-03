@@ -4466,8 +4466,21 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
-    func refreshPMPlanningPluginDiagnostics() {
+    func refreshPMPlanningPluginDiagnostics(announce: Bool = true) {
+        let names = pmPlanningLocalPluginNames()
         objectWillChange.send()
+        guard announce else { return }
+        if names.isEmpty {
+            lastBoardMessage = message("Rescanned PM plugins: none detected")
+            lastBoardMessageSeverity = .warning
+            return
+        }
+        lastBoardMessage = message(
+            "Rescanned PM plugins: %d detected (%@)",
+            names.count,
+            Self.pmPluginNamesPreview(names)
+        )
+        lastBoardMessageSeverity = .info
     }
 
     func updateMCPServerPolicy(
@@ -5016,6 +5029,19 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private static let pmPlanningPluginCapability = "pm.plan.generate"
+
+    private static func pmPluginNamesPreview(_ names: [String], maxShown: Int = 3) -> String {
+        let normalized = names
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalized.isEmpty else { return "-" }
+        if normalized.count <= maxShown {
+            return normalized.joined(separator: ", ")
+        }
+        let shown = normalized.prefix(maxShown).joined(separator: ", ")
+        let remaining = normalized.count - maxShown
+        return shown + L10n.format(" and %d more", remaining)
+    }
 
     private struct LocalPMPlanningPluginManifestSummary: Decodable {
         let name: String?

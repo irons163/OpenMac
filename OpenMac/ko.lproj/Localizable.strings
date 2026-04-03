@@ -649,3 +649,6 @@
 "No local PM plugins detected. Planner will fallback to built-in logic." = "No local PM plugins detected. Planner will fallback to built-in logic.";
 "Detected plugins: %@" = "감지된 플러그인: %@";
 "Rescan PM Plugins" = "PM 플러그인 다시 스캔";
+"Rescanned PM plugins: none detected" = "Rescanned PM plugins: none detected";
+"Rescanned PM plugins: %d detected (%@)" = "Rescanned PM plugins: %d detected (%@)";
+" and %d more" = " and %d more";
