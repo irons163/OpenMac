@@ -643,3 +643,6 @@
 "Updated PM planning engine mode" = "已更新 PM 规划引擎模式";
 "Updated PM plugin settings" = "已更新 PM 插件设置";
 "PM plugins: mode=%@ · discovery=%@ · local=%d" = "PM 插件：模式=%@ · 发现=%@ · 本机=%d";
+"Plugin discovery: %@ · Local plugins: %d" = "插件探索：%@ · 本地插件：%d";
+"Plugins folder: %@" = "插件文件夹：%@";
+"No local PM plugins detected. Planner will fallback to built-in logic." = "未检测到本地 PM 插件，将回退到内置规划逻辑。";

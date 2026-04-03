@@ -4458,6 +4458,10 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    func pmPlanningLocalPluginCount() -> Int {
+        detectedLocalPMPlanningPluginCount(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+    }
+
     func updateMCPServerPolicy(
         autoFetchEnabled: Bool,
         registryURL: String

@@ -797,6 +797,9 @@ struct ContentView: View {
                 planSummary: pmPlanSummary,
                 plannedTickets: $pmPlannedTickets,
                 plannerEngineMode: $pmPlannerEngineMode,
+                pmPluginsAutoDiscover: viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+                pmPluginsDirectoryPath: viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath,
+                pmLocalPluginCount: viewModel.pmPlanningLocalPluginCount(),
                 ticketDeliveryProfile: $pmTicketDeliveryProfile,
                 realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
                 selectedTemplateID: $pmSelectedTemplateID,
@@ -2327,6 +2330,26 @@ struct ContentView: View {
         }
 
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func pmPlanEngineDisplayName(from planSummary: String) -> String? {
+        let trimmedSummary = planSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else { return nil }
+
+        let prefix = "Planning engine:"
+        let lines = trimmedSummary
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for line in lines.reversed() {
+            guard let range = line.range(of: prefix, options: [.caseInsensitive]) else { continue }
+            let rawName = line[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rawName.isEmpty {
+                return rawName
+            }
+        }
+        return nil
     }
 
     fileprivate static func pmTestPlanText(
@@ -4818,6 +4841,9 @@ private struct PMPlannerSheet: View {
     let planSummary: String
     @Binding var plannedTickets: [PMPlannedTicket]
     @Binding var plannerEngineMode: PMPlannerEngineMode
+    let pmPluginsAutoDiscover: Bool
+    let pmPluginsDirectoryPath: String
+    let pmLocalPluginCount: Int
     @Binding var ticketDeliveryProfile: PMTicketDeliveryProfile
     @Binding var realArtifactVerificationPreset: PMRealArtifactVerificationPreset
     @Binding var selectedTemplateID: String
@@ -4893,6 +4919,13 @@ private struct PMPlannerSheet: View {
             blueprintQualityBar
         ]
         return fields.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private var effectivePlanningEngineName: String {
+        if let detected = ContentView.pmPlanEngineDisplayName(from: planSummary) {
+            return detected
+        }
+        return plannerEngineMode.title
     }
 
     var body: some View {
@@ -4987,6 +5020,45 @@ private struct PMPlannerSheet: View {
                 Text(plannerEngineMode.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    Text(L10n.string("Planning Engine"))
+                        .font(.caption2.weight(.semibold))
+                    Text(effectivePlanningEngineName)
+                        .font(.caption2.weight(.semibold))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary, in: Capsule())
+
+                if plannerEngineMode == .brainstormPluginPreferred {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(
+                            L10n.format(
+                                "Plugin discovery: %@ · Local plugins: %d",
+                                pmPluginsAutoDiscover ? L10n.string("On") : L10n.string("Off"),
+                                pmLocalPluginCount
+                            )
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        Text(
+                            L10n.format(
+                                "Plugins folder: %@",
+                                pmPluginsDirectoryPath
+                            )
+                        )
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        if pmPluginsAutoDiscover && pmLocalPluginCount == 0 {
+                            Text(L10n.string("No local PM plugins detected. Planner will fallback to built-in logic."))
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(8)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -5052,6 +5124,9 @@ private struct PMPlannerSheet: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(L10n.format("Planned with delivery mode: %@", ticketDeliveryProfile.title))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(L10n.string("Planning Engine")): \(effectivePlanningEngineName)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text(L10n.format("Execution verification: %@", realArtifactVerificationPreset.title))
@@ -7733,6 +7808,10 @@ enum ContentViewTestHooks {
             tickets: tickets,
             testPlan: testPlan
         )
+    }
+
+    static func pmPlanEngineDisplayName(from planSummary: String) -> String? {
+        ContentView.pmPlanEngineDisplayName(from: planSummary)
     }
 
     static func pmRoadmapText(

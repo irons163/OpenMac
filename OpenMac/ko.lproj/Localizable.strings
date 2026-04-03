@@ -644,3 +644,6 @@
 "Updated PM planning engine mode" = "PM 계획 엔진 모드를 업데이트했습니다";
 "Updated PM plugin settings" = "PM 플러그인 설정을 업데이트했습니다";
 "PM plugins: mode=%@ · discovery=%@ · local=%d" = "PM 플러그인: 모드=%@ · 검색=%@ · 로컬=%d";
+"Plugin discovery: %@ · Local plugins: %d" = "Plugin discovery: %@ · Local plugins: %d";
+"Plugins folder: %@" = "Plugins folder: %@";
+"No local PM plugins detected. Planner will fallback to built-in logic." = "No local PM plugins detected. Planner will fallback to built-in logic.";

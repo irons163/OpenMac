@@ -644,3 +644,6 @@
 "Updated PM planning engine mode" = "Mode du moteur de planification PM mis à jour";
 "Updated PM plugin settings" = "Paramètres des plugins PM mis à jour";
 "PM plugins: mode=%@ · discovery=%@ · local=%d" = "Plugins PM : mode=%@ · découverte=%@ · local=%d";
+"Plugin discovery: %@ · Local plugins: %d" = "Plugin discovery: %@ · Local plugins: %d";
+"Plugins folder: %@" = "Plugins folder: %@";
+"No local PM plugins detected. Planner will fallback to built-in logic." = "No local PM plugins detected. Planner will fallback to built-in logic.";

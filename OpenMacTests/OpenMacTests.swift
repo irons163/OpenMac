@@ -6095,6 +6095,21 @@ struct ContentViewLogicTests {
         #expect(text.contains("Unit and integration checks."))
     }
 
+    @Test("pm plan engine display name parser extracts planning engine line when present")
+    func pmPlanEngineDisplayNameCoverage() {
+        let summary = """
+        PM plan generated for "Youbike" with 6 ticket(s), complexity level 5.
+        Planning engine: Demo Plugin
+        """
+        #expect(ContentViewTestHooks.pmPlanEngineDisplayName(from: summary) == "Demo Plugin")
+
+        let noEngine = "PM plan generated without explicit engine marker."
+        #expect(ContentViewTestHooks.pmPlanEngineDisplayName(from: noEngine) == nil)
+
+        let mixedCase = "planning engine: Built-in Brainstorm plugin"
+        #expect(ContentViewTestHooks.pmPlanEngineDisplayName(from: mixedCase) == "Built-in Brainstorm plugin")
+    }
+
     @Test("content subviews can render representative body states")
     func renderSubviewBodiesForCoverage() {
         let renderedCount = ContentViewTestHooks.renderSubviewBodiesForCoverage()
