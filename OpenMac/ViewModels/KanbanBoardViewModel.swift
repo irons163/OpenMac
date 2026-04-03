@@ -3018,6 +3018,60 @@ final class KanbanBoardViewModel: ObservableObject {
         return plan
     }
 
+    func runPMBrainstormRoundInBackground(
+        projectName: String,
+        projectBrief: String,
+        focus: String,
+        previousTranscript: String,
+        onProgress: @escaping (_ update: String) -> Void,
+        completion: @escaping (_ output: String?, _ errorMessage: String?) -> Void
+    ) {
+        let trimmedBrief = projectBrief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBrief.isEmpty else {
+            lastBoardMessage = message("Project brief is required")
+            lastBoardMessageSeverity = .warning
+            completion(nil, message("PM brainstorm requires a non-empty project brief"))
+            return
+        }
+
+        let resolvedProjectName = {
+            let trimmedName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedName.isEmpty ? selectedBoardName : trimmedName
+        }()
+        let agent = preferredPMBrainstormAgent()
+        let brainstormTask = pmBrainstormTask(
+            projectName: resolvedProjectName,
+            projectBrief: trimmedBrief,
+            focus: focus,
+            previousTranscript: previousTranscript,
+            agent: agent
+        )
+
+        runOnBackground {
+            let outcome = self.executeTaskWithBoardScopedProjectsDirectory(
+                task: brainstormTask,
+                agent: agent
+            ) { update in
+                self.runOnMain {
+                    onProgress(update)
+                }
+            }
+
+            self.runOnMain {
+                switch outcome {
+                case let .success(summary):
+                    self.lastBoardMessage = self.message("PM brainstorm completed with %@", agent.name)
+                    self.lastBoardMessageSeverity = .info
+                    completion(summary, nil)
+                case let .failure(errorMessage):
+                    self.lastBoardMessage = self.message("PM brainstorm failed: %@", errorMessage)
+                    self.lastBoardMessageSeverity = .warning
+                    completion(nil, errorMessage)
+                }
+            }
+        }
+    }
+
     func previewProjectBlueprint(
         projectName: String,
         projectBrief: String
@@ -3057,6 +3111,96 @@ final class KanbanBoardViewModel: ObservableObject {
 
         lastBoardMessage = nil
         return blueprint
+    }
+
+    private func preferredPMBrainstormAgent() -> AgentProfile {
+        let prioritizedSkills: Set<String> = ["planning", "research", "product", "architecture", "analysis", "pm"]
+        let runtimeAgents = agents.filter { resolvedPMBrainstormRuntimeProfile(for: $0).provider == .openAICompatible }
+
+        if let prioritizedAgent = runtimeAgents.first(where: { !$0.skills.isDisjoint(with: prioritizedSkills) }) {
+            return resolvingPMBrainstormRuntime(for: prioritizedAgent)
+        }
+        if let runtimeAgent = runtimeAgents.first {
+            return resolvingPMBrainstormRuntime(for: runtimeAgent)
+        }
+        if let firstAgent = agents.first {
+            return resolvingPMBrainstormRuntime(for: firstAgent)
+        }
+        return AgentProfile(
+            name: message("PM Brainstorm Agent"),
+            skills: ["planning", "research"],
+            maxConcurrentTasks: 1,
+            runtimeProfile: .defaultCodexBridge
+        )
+    }
+
+    private func resolvingPMBrainstormRuntime(for agent: AgentProfile) -> AgentProfile {
+        AgentProfile(
+            id: agent.id,
+            name: agent.name,
+            skills: Array(agent.skills),
+            maxConcurrentTasks: agent.maxConcurrentTasks,
+            runtimeProfile: resolvedPMBrainstormRuntimeProfile(for: agent)
+        )
+    }
+
+    private func resolvedPMBrainstormRuntimeProfile(for agent: AgentProfile) -> AgentRuntimeProfile {
+        agent.runtimeProfile ?? .defaultCodexBridge
+    }
+
+    private func pmBrainstormTask(
+        projectName: String,
+        projectBrief: String,
+        focus: String,
+        previousTranscript: String,
+        agent: AgentProfile
+    ) -> WorkTask {
+        let trimmedFocus = focus.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recentTranscript = previousTranscript
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .suffix(4_000)
+        let details = """
+        You are OpenMac's built-in brainstorm extension.
+        Help refine this product brief into an execution-ready PM input.
+
+        Project: \(projectName)
+        Current brief:
+        \(projectBrief)
+
+        Focus:
+        \(trimmedFocus.isEmpty ? "General product + delivery brainstorming." : trimmedFocus)
+
+        Prior brainstorm transcript (latest context):
+        \(recentTranscript.isEmpty ? "(none)" : recentTranscript)
+
+        Return plain text using EXACT tags:
+        [UPDATED_BRIEF]
+        ...
+        [/UPDATED_BRIEF]
+        [DECISIONS]
+        - ...
+        [/DECISIONS]
+        [OPEN_QUESTIONS]
+        - ...
+        [/OPEN_QUESTIONS]
+        [NEXT_EXPERIMENTS]
+        - ...
+        [/NEXT_EXPERIMENTS]
+
+        Rules:
+        - Keep UPDATED_BRIEF concise and directly actionable.
+        - Preserve user intent and avoid unnecessary scope expansion.
+        - Output only those tagged sections.
+        """
+
+        return WorkTask(
+            title: message("PM Brainstorm: %@", projectName),
+            details: details,
+            requiredSkills: ["planning", "research"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
     }
 
     func projectBlueprintExportData(

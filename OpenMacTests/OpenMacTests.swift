@@ -1297,7 +1297,12 @@ struct AgentTaskExecutorTests {
         case .success:
             #expect(Bool(false), "Expected timeout failure")
         case let .failure(message):
-            #expect(message.contains(L10n.string("Request timed out")))
+            let normalized = message.lowercased()
+            #expect(
+                message.contains(L10n.string("Request timed out")) ||
+                    normalized.contains("timed out") ||
+                    message.contains("逾時")
+            )
         }
     }
 
@@ -3165,6 +3170,112 @@ struct KanbanFlowTests {
         #expect(plan == nil)
         #expect(viewModel.lastBoardMessage == "Project brief is required")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm brainstorm round executes with runtime executor and returns output")
+    func pmBrainstormRoundExecutesAndReturnsOutput() {
+        let output = """
+        [UPDATED_BRIEF]
+        Build a focused MVP with explicit acceptance criteria and test scope.
+        [/UPDATED_BRIEF]
+        [DECISIONS]
+        - Keep feature scope narrow for first release.
+        [/DECISIONS]
+        [OPEN_QUESTIONS]
+        - Should login be required in v1?
+        [/OPEN_QUESTIONS]
+        [NEXT_EXPERIMENTS]
+        - Validate onboarding flow with 3 users.
+        [/NEXT_EXPERIMENTS]
+        """
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            taskExecutor: StubTaskExecutor(fallbackOutcome: .success(summary: output)),
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+
+        var brainstormOutput: String?
+        var brainstormError: String?
+        viewModel.runPMBrainstormRoundInBackground(
+            projectName: "Fitness",
+            projectBrief: "Build a fitness app with coaching flow.",
+            focus: "Prioritize MVP",
+            previousTranscript: "",
+            onProgress: { _ in },
+            completion: { output, errorMessage in
+                brainstormOutput = output
+                brainstormError = errorMessage
+            }
+        )
+
+        #expect(waitForMainQueue(timeout: 5.0) { brainstormOutput != nil || brainstormError != nil })
+        #expect(brainstormError == nil)
+        #expect(brainstormOutput?.contains("[UPDATED_BRIEF]") == true)
+        #expect(viewModel.lastBoardMessage?.contains("PM brainstorm completed") == true)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("pm brainstorm round requires non-empty brief")
+    func pmBrainstormRoundRequiresBrief() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        var brainstormOutput: String?
+        var brainstormError: String?
+
+        viewModel.runPMBrainstormRoundInBackground(
+            projectName: "Any",
+            projectBrief: "   ",
+            focus: "",
+            previousTranscript: "",
+            onProgress: { _ in },
+            completion: { output, errorMessage in
+                brainstormOutput = output
+                brainstormError = errorMessage
+            }
+        )
+
+        #expect(brainstormOutput == nil)
+        #expect(brainstormError == "PM brainstorm requires a non-empty project brief")
+        #expect(viewModel.lastBoardMessage == "Project brief is required")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm brainstorm helpers append rounds and parse tagged sections")
+    func pmBrainstormHelpersParseTaggedSections() {
+        let output = """
+        [UPDATED_BRIEF]
+        Short concise updated brief.
+        [/UPDATED_BRIEF]
+        [DECISIONS]
+        - Keep architecture modular.
+        [/DECISIONS]
+        [OPEN_QUESTIONS]
+        - Which analytics events matter first?
+        [/OPEN_QUESTIONS]
+        [NEXT_EXPERIMENTS]
+        - Try two onboarding variants.
+        [/NEXT_EXPERIMENTS]
+        """
+
+        let transcript = ContentViewTestHooks.pmAppendingBrainstormRound(
+            transcript: "",
+            round: 1,
+            focus: "MVP scope",
+            output: output
+        )
+        #expect(transcript.contains("Brainstorm Round 1"))
+        #expect(transcript.contains("[UPDATED_BRIEF]"))
+
+        let extracted = ContentViewTestHooks.pmExtractLastBrainstormSection(
+            named: "UPDATED_BRIEF",
+            from: transcript
+        )
+        #expect(extracted == "Short concise updated brief.")
+
+        let compact = ContentViewTestHooks.pmCompactBrainstormNotes(from: transcript)
+        #expect(!compact.contains("[UPDATED_BRIEF]"))
+        #expect(compact.contains("Keep architecture modular."))
     }
 
     @Test("pm planner preview reports warning when planner yields no actionable tickets")

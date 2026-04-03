@@ -117,6 +117,11 @@ struct ContentView: View {
     @State private var pmBlueprintConstraints = ""
     @State private var pmBlueprintQualityBar = ""
     @State private var pmTestPlanText = ""
+    @State private var pmBrainstormFocus = ""
+    @State private var pmBrainstormTranscript = ""
+    @State private var pmBrainstormStatusText = ""
+    @State private var pmBrainstormRoundCount = 0
+    @State private var pmBrainstormIsRunning = false
     @State private var autoRetryEnabled = true
     @State private var autoRetryMaxRetries = 2
     @State private var autoRetryBackoffSeconds = 1.0
@@ -818,6 +823,11 @@ struct ContentView: View {
                 blueprintTechScope: $pmBlueprintTechScope,
                 blueprintConstraints: $pmBlueprintConstraints,
                 blueprintQualityBar: $pmBlueprintQualityBar,
+                brainstormFocus: $pmBrainstormFocus,
+                brainstormTranscript: $pmBrainstormTranscript,
+                brainstormStatusText: $pmBrainstormStatusText,
+                brainstormRoundCount: $pmBrainstormRoundCount,
+                isBrainstormRunning: $pmBrainstormIsRunning,
                 testPlanText: pmTestPlanText,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
@@ -826,6 +836,9 @@ struct ContentView: View {
                 onApplyTemplateAndGenerate: applyAndGeneratePMTemplateFromSheet,
                 onApplyBlueprint: applyPMBlueprintFromSheet,
                 onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
+                onRunBrainstormRound: runPMBrainstormRoundFromSheet,
+                onApplyBrainstormToBrief: applyPMBrainstormToBriefFromSheet,
+                onClearBrainstorm: clearPMBrainstormFromSheet,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
                 onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
@@ -1211,6 +1224,11 @@ struct ContentView: View {
         pmTicketDeliveryProfile = .balanced
         pmRealArtifactVerificationPreset = inferredPMRealArtifactVerificationPresetForSelectedBoard()
         pmTestPlanText = ""
+        pmBrainstormFocus = ""
+        pmBrainstormTranscript = ""
+        pmBrainstormStatusText = ""
+        pmBrainstormRoundCount = 0
+        pmBrainstormIsRunning = false
         isShowingPMPlannerSheet = true
     }
 
@@ -1228,6 +1246,11 @@ struct ContentView: View {
         pmTicketDeliveryProfile = .balanced
         pmRealArtifactVerificationPreset = .useDeveloperDefaults
         pmTestPlanText = ""
+        pmBrainstormFocus = ""
+        pmBrainstormTranscript = ""
+        pmBrainstormStatusText = ""
+        pmBrainstormRoundCount = 0
+        pmBrainstormIsRunning = false
         isShowingPMPlannerSheet = false
     }
 
@@ -1267,6 +1290,81 @@ struct ContentView: View {
     private func applyAndGeneratePMBlueprintFromSheet() {
         applyPMBlueprintFromSheet()
         generatePMPlanFromSheet()
+    }
+
+    private func runPMBrainstormRoundFromSheet() {
+        guard !pmBrainstormIsRunning else { return }
+        let trimmedBrief = pmProjectBrief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBrief.isEmpty else {
+            pmBrainstormStatusText = L10n.string("PM brainstorm requires a non-empty project brief")
+            return
+        }
+
+        pmBrainstormIsRunning = true
+        pmBrainstormStatusText = L10n.string("Brainstorm round in progress...")
+
+        viewModel.runPMBrainstormRoundInBackground(
+            projectName: pmProjectName,
+            projectBrief: trimmedBrief,
+            focus: pmBrainstormFocus,
+            previousTranscript: pmBrainstormTranscript,
+            onProgress: { update in
+                pmBrainstormStatusText = update.trimmingCharacters(in: .whitespacesAndNewlines)
+            },
+            completion: { output, errorMessage in
+                pmBrainstormIsRunning = false
+                if let output {
+                    pmBrainstormRoundCount += 1
+                    pmBrainstormStatusText = L10n.format("Brainstorm round %d completed", pmBrainstormRoundCount)
+                    pmBrainstormTranscript = Self.pmAppendingBrainstormRound(
+                        transcript: pmBrainstormTranscript,
+                        round: pmBrainstormRoundCount,
+                        focus: pmBrainstormFocus,
+                        output: output
+                    )
+                } else if let errorMessage {
+                    pmBrainstormStatusText = L10n.format("Brainstorm failed: %@", errorMessage)
+                }
+            }
+        )
+    }
+
+    private func applyPMBrainstormToBriefFromSheet() {
+        let trimmedTranscript = pmBrainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else { return }
+
+        if let updatedBrief = Self.pmExtractLastBrainstormSection(
+            named: "UPDATED_BRIEF",
+            from: trimmedTranscript
+        ), !updatedBrief.isEmpty {
+            pmProjectBrief = updatedBrief
+            pmPlanSummary = ""
+            pmPlannedTickets = []
+            pmTestPlanText = ""
+            pmBrainstormStatusText = L10n.string("Applied brainstorm result to project brief")
+            return
+        }
+
+        let notes = Self.pmCompactBrainstormNotes(from: trimmedTranscript)
+        guard !notes.isEmpty else { return }
+        let existingBrief = pmProjectBrief.trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingBrief.isEmpty {
+            pmProjectBrief = notes
+        } else {
+            pmProjectBrief = existingBrief + "\n\n\(L10n.string("Brainstorm Notes")):\n\(notes)"
+        }
+        pmPlanSummary = ""
+        pmPlannedTickets = []
+        pmTestPlanText = ""
+        pmBrainstormStatusText = L10n.string("No brainstorm brief section found. Added brainstorm notes to project brief.")
+    }
+
+    private func clearPMBrainstormFromSheet() {
+        pmBrainstormFocus = ""
+        pmBrainstormTranscript = ""
+        pmBrainstormStatusText = ""
+        pmBrainstormRoundCount = 0
+        pmBrainstormIsRunning = false
     }
 
     private func generatePMPlanFromSheet() {
@@ -2294,6 +2392,64 @@ struct ContentView: View {
         }
 
         return renderedSections.joined(separator: "\n\n")
+    }
+
+    fileprivate static func pmAppendingBrainstormRound(
+        transcript: String,
+        round: Int,
+        focus: String,
+        output: String
+    ) -> String {
+        let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedOutput.isEmpty else {
+            return transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let roundLabel = L10n.format("Brainstorm Round %d", max(1, round))
+        let trimmedFocus = focus.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmedFocus.isEmpty ? roundLabel : "\(roundLabel) · \(trimmedFocus)"
+        let block = "### \(title)\n\(trimmedOutput)"
+        let existing = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existing.isEmpty else { return block }
+        return existing + "\n\n---\n\n" + block
+    }
+
+    fileprivate static func pmExtractLastBrainstormSection(named sectionName: String, from text: String) -> String? {
+        let trimmedName = sectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return nil }
+
+        let startTag = "[\(trimmedName)]"
+        let endTag = "[/\(trimmedName)]"
+        guard let startRange = text.range(of: startTag, options: [.caseInsensitive, .backwards]) else {
+            return nil
+        }
+        guard let endRange = text.range(
+            of: endTag,
+            options: [.caseInsensitive],
+            range: startRange.upperBound..<text.endIndex
+        ) else {
+            return nil
+        }
+
+        let content = text[startRange.upperBound..<endRange.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return content.isEmpty ? nil : content
+    }
+
+    fileprivate static func pmCompactBrainstormNotes(from text: String) -> String {
+        text
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { line in
+                guard !line.isEmpty else { return false }
+                if line == "---" { return false }
+                if line.hasPrefix("[") && line.hasSuffix("]") { return false }
+                if line.hasPrefix("###") { return false }
+                return true
+            }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func pmBriefTemplateDefinitions() -> [PMBriefTemplateDefinition] {
@@ -5206,6 +5362,11 @@ private struct PMPlannerSheet: View {
     @Binding var blueprintTechScope: String
     @Binding var blueprintConstraints: String
     @Binding var blueprintQualityBar: String
+    @Binding var brainstormFocus: String
+    @Binding var brainstormTranscript: String
+    @Binding var brainstormStatusText: String
+    @Binding var brainstormRoundCount: Int
+    @Binding var isBrainstormRunning: Bool
     let testPlanText: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
@@ -5214,6 +5375,9 @@ private struct PMPlannerSheet: View {
     let onApplyTemplateAndGenerate: () -> Void
     let onApplyBlueprint: () -> Void
     let onApplyBlueprintAndGenerate: () -> Void
+    let onRunBrainstormRound: () -> Void
+    let onApplyBrainstormToBrief: () -> Void
+    let onClearBrainstorm: () -> Void
     let onGeneratePlan: () -> Void
     let onGenerateTestPlan: () -> Void
     let onCreateMissingAgents: () -> Void
@@ -5370,6 +5534,77 @@ private struct PMPlannerSheet: View {
                                     .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
                             )
                     }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text(L10n.string("Brainstorm Extension"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            if isBrainstormRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Spacer()
+                            if brainstormRoundCount > 0 {
+                                Text(L10n.format("Brainstorm Round %d", brainstormRoundCount))
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(.quaternary, in: Capsule())
+                            }
+                        }
+
+                        Text(L10n.string("Use OpenMac runtime to brainstorm ideas and fold them back into your project brief."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        TextField(L10n.string("Brainstorm Focus (optional)"), text: $brainstormFocus)
+
+                        if !brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(brainstormStatusText)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextEditor(text: $brainstormTranscript)
+                                .font(.system(size: 13, weight: .regular, design: .default))
+                                .frame(minHeight: 130, maxHeight: 200)
+                                .padding(4)
+                                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                )
+                            if brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(L10n.string("No brainstorm output yet. Run a brainstorm round to collect ideas."))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            Button(L10n.string("Run Brainstorm Round"), action: onRunBrainstormRound)
+                                .disabled(
+                                    isBrainstormRunning ||
+                                        projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                )
+                            Button(L10n.string("Apply Brainstorm to Brief"), action: onApplyBrainstormToBrief)
+                                .disabled(brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button(L10n.string("Clear Brainstorm"), action: onClearBrainstorm)
+                                .disabled(
+                                    brainstormFocus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                                        brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                                        brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                                        brainstormRoundCount == 0
+                                )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
 
             Text(L10n.string("Describe your goal, scope, and constraints. PM planner will turn this into executable tickets."))
                 .font(.caption)
@@ -8182,6 +8417,28 @@ enum ContentViewTestHooks {
             projectName: &projectName,
             projectBrief: &projectBrief
         )
+    }
+
+    static func pmAppendingBrainstormRound(
+        transcript: String,
+        round: Int,
+        focus: String,
+        output: String
+    ) -> String {
+        ContentView.pmAppendingBrainstormRound(
+            transcript: transcript,
+            round: round,
+            focus: focus,
+            output: output
+        )
+    }
+
+    static func pmExtractLastBrainstormSection(named sectionName: String, from text: String) -> String? {
+        ContentView.pmExtractLastBrainstormSection(named: sectionName, from: text)
+    }
+
+    static func pmCompactBrainstormNotes(from text: String) -> String {
+        ContentView.pmCompactBrainstormNotes(from: text)
     }
 
     static func pmTestPlanText(
