@@ -33,9 +33,69 @@ private final class MockURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+private final class HangingURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        // Intentionally no callbacks to simulate a hanging network request.
+    }
+
+    override func stopLoading() {}
+}
+
+private final class NoHTTPResponseURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        client?.urlProtocol(self, didLoad: Data("{\"choices\":[]}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class EmptyHTTPBodyURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://example.com")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private func makeMockedURLSession() -> URLSession {
+    makeMockedURLSession(protocolClass: MockURLProtocol.self)
+}
+
+private func makeMockedURLSession(protocolClass: URLProtocol.Type) -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [MockURLProtocol.self]
+    configuration.protocolClasses = [protocolClass]
     return URLSession(configuration: configuration)
 }
 
@@ -958,6 +1018,24 @@ struct AgentTaskExecutorTests {
         #expect(update == "Codex error: connection dropped during stream")
     }
 
+    @Test("codex progress parser supports agent message updates in item.updated events")
+    func codexProgressParsesUpdatedAgentMessageEvent() {
+        let line = #"{"type":"item.updated","item":{"type":"agent_message","text":"Working on migration..."}}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Working on migration...")
+    }
+
+    @Test("codex progress parser prefixes error_message when event type is error")
+    func codexProgressPrefixesErrorMessageForErrorEvents() {
+        let line = #"{"type":"turn.error","error_message":"token expired"}"#
+
+        let update = DefaultAgentTaskExecutor.codexProgressUpdate(from: line)
+
+        #expect(update == "Codex error: token expired")
+    }
+
     @Test("codex progress parser ignores non-item json events")
     func codexProgressIgnoresNonItemEvents() {
         let line = #"{"type":"turn.started","turn_id":"abc"}"#
@@ -1187,6 +1265,114 @@ struct AgentTaskExecutorTests {
         }
     }
 
+    @Test("openai compatible api key mode fails with timeout when request hangs")
+    func openAICompatibleAPIKeyTimeout() {
+        let task = WorkTask(
+            title: "Timeout scenario",
+            details: "Network hang",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .apiKey
+            )
+        )
+        let session = makeMockedURLSession(protocolClass: HangingURLProtocol.self)
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "sk-test"] },
+            urlSession: session,
+            timeoutSeconds: 0.02
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected timeout failure")
+        case let .failure(message):
+            #expect(message.contains(L10n.string("Request timed out")))
+        }
+    }
+
+    @Test("openai compatible api key mode fails on invalid non-http response")
+    func openAICompatibleAPIKeyInvalidResponse() {
+        let task = WorkTask(
+            title: "Invalid response scenario",
+            details: "No HTTP response",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .apiKey
+            )
+        )
+        let session = makeMockedURLSession(protocolClass: NoHTTPResponseURLProtocol.self)
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "sk-test"] },
+            urlSession: session,
+            timeoutSeconds: 1
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected invalid-response failure")
+        case let .failure(message):
+            #expect(message.contains(L10n.string("Invalid response")))
+        }
+    }
+
+    @Test("openai compatible api key mode fails on empty response body")
+    func openAICompatibleAPIKeyEmptyResponseBody() {
+        let task = WorkTask(
+            title: "Empty body scenario",
+            details: "HTTP response without data",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "API Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-4.1-mini",
+                openAIAuthMode: .apiKey
+            )
+        )
+        let session = makeMockedURLSession(protocolClass: EmptyHTTPBodyURLProtocol.self)
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { ["OPENAI_API_KEY": "sk-test"] },
+            urlSession: session,
+            timeoutSeconds: 1
+        )
+
+        let outcome = executor.execute(task: task, agent: agent)
+
+        switch outcome {
+        case .success:
+            #expect(Bool(false), "Expected empty-response failure")
+        case let .failure(message):
+            #expect(message.contains("OpenAI"))
+        }
+    }
+
     @Test("agent task executing protocol default progress overload delegates to base execute")
     func agentTaskExecutingDefaultProgressOverloadDelegates() {
         struct StubExecutor: AgentTaskExecuting {
@@ -1330,6 +1516,42 @@ struct AgentTaskExecutorTests {
 
         let unknown = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("")
         #expect(unknown == "Unknown Codex Bridge error")
+    }
+
+    @Test("codex failure summary filters metadata lines and truncates metadata-only output")
+    func codexFailureSummaryFiltersMetadataAndTruncates() {
+        let withActionableLine = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            """
+            OpenAI Codex v0.118.0-alpha.2
+            --------
+            workdir: /tmp
+            model: gpt-5
+            provider: openai
+            approval: never
+            sandbox: read-only
+            reasoning effort: high
+            session id: abc
+            user
+            actionable failure line should remain visible
+            """
+        )
+        #expect(withActionableLine == "actionable failure line should remain visible")
+
+        let metadataOnlyLong = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            """
+            OpenAI Codex v0.118.0-alpha.2
+            --------
+            workdir: /tmp/very/long/path/that/keeps/going/for/a/while
+            model: gpt-5-super-long-name-with-many-suffixes
+            provider: openai
+            approval: never
+            sandbox: read-only
+            reasoning summaries: none
+            session id: 019d33bd-1393-7c33-ac83-e5c5ca6bb4d4
+            user
+            """
+        )
+        #expect(metadataOnlyLong.hasSuffix("..."))
     }
 
     @Test("codex failure detectors classify usage-limit and unsupported-model messages")
@@ -1515,6 +1737,45 @@ struct AgentTaskExecutorTests {
         )
 
         #expect(summary.contains("RAW OUTPUT LINE"))
+    }
+
+    @Test("default codex bridge runner surfaces projects directory preparation failures")
+    func defaultCodexBridgeRunnerReportsWorkdirPreparationFailure() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-dir-prep-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let script = try makeExecutableScript(
+            contents: """
+            #!/bin/sh
+            echo 'should not run when workdir prep fails'
+            exit 0
+            """,
+            in: tempDirectory,
+            name: "codex"
+        )
+
+        let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            prompt: "run",
+            model: "gpt-5",
+            profile: nil,
+            workingDirectoryPath: "/dev/null/openmac-invalid"
+        )
+
+        do {
+            _ = try KanbanBoardViewModelTestHooks.runDefaultCodexBridgeRunner(
+                request: request,
+                onProgress: { _ in },
+                environment: [
+                    "CODEX_CLI_PATH": script.path,
+                    "PATH": "",
+                    "OPENMAC_CODEX_SANDBOX": "none"
+                ]
+            )
+            #expect(Bool(false), "Expected workdir preparation failure")
+        } catch {
+            #expect(error.localizedDescription.contains("Unable to prepare projects folder"))
+        }
     }
 
     @Test("default codex bridge runner reports empty response when codex returns no output")
@@ -2904,6 +3165,133 @@ struct KanbanFlowTests {
         #expect(plan == nil)
         #expect(viewModel.lastBoardMessage == "Project brief is required")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm planner preview reports warning when planner yields no actionable tickets")
+    func pmPlannerPreviewRejectsEmptyGeneratedPlan() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            projectPlanner: EmptyPlanProjectPlanner()
+        )
+
+        let plan = viewModel.previewProjectPlan(
+            projectName: "Any",
+            projectBrief: "Build anything non-empty"
+        )
+
+        #expect(plan == nil)
+        #expect(viewModel.lastBoardMessage == "PM planner could not generate actionable tickets")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm blueprint preview reports warning when planner does not support blueprint generation")
+    func pmBlueprintPreviewRejectsNonBlueprintPlanner() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            projectPlanner: EmptyPlanProjectPlanner()
+        )
+
+        let blueprint = viewModel.previewProjectBlueprint(
+            projectName: "Any",
+            projectBrief: "Build anything non-empty"
+        )
+
+        #expect(blueprint == nil)
+        #expect(viewModel.lastBoardMessage == "PM planner could not generate actionable tickets")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("pm blueprint preview reports warning when blueprint planner returns empty tickets")
+    func pmBlueprintPreviewRejectsEmptyBlueprintTickets() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            projectPlanner: EmptyBlueprintProjectPlanner()
+        )
+
+        let blueprint = viewModel.previewProjectBlueprint(
+            projectName: "Any",
+            projectBrief: "Build anything non-empty"
+        )
+
+        #expect(blueprint == nil)
+        #expect(viewModel.lastBoardMessage == "PM planner could not generate actionable tickets")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("task creation infers delivery output type from prompt keywords")
+    func addTaskInfersDeliveryOutputTypes() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        #expect(
+            viewModel.addTask(
+                title: "Capture UI screenshot",
+                details: "Export .png image for review",
+                requiredSkillsText: "ui",
+                storyPoints: 1
+            )
+        )
+        #expect(
+            viewModel.addTask(
+                title: "Prepare analytics export",
+                details: "Generate csv dataset for analytics",
+                requiredSkillsText: "data",
+                storyPoints: 2
+            )
+        )
+        #expect(
+            viewModel.addTask(
+                title: "Build shared SDK",
+                details: "Ship a reusable package module",
+                requiredSkillsText: "swift",
+                storyPoints: 3
+            )
+        )
+        #expect(
+            viewModel.addTask(
+                title: "Write proposal",
+                details: "Document architecture and report outcomes",
+                requiredSkillsText: "planning",
+                storyPoints: 1
+            )
+        )
+
+        #expect(viewModel.tasks.count == 4)
+        #expect(viewModel.tasks[0].resolvedDeliveryContract.outputType == .image)
+        #expect(viewModel.tasks[0].resolvedDeliveryContract.gateMode == .flexible)
+        #expect(viewModel.tasks[1].resolvedDeliveryContract.outputType == .data)
+        #expect(viewModel.tasks[1].resolvedDeliveryContract.gateMode == .strict)
+        #expect(viewModel.tasks[2].resolvedDeliveryContract.outputType == .codeModule)
+        #expect(viewModel.tasks[2].resolvedDeliveryContract.gateMode == .strict)
+        #expect(viewModel.tasks[3].resolvedDeliveryContract.outputType == .document)
+        #expect(viewModel.tasks[3].resolvedDeliveryContract.gateMode == .flexible)
+    }
+
+    @Test("task update infers delivery contract when existing contract is nil")
+    func updateTaskInfersDeliveryContractWhenMissing() {
+        let task = WorkTask(
+            title: "Untyped task",
+            details: "placeholder",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil,
+            deliveryContract: nil
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let updated = viewModel.updateTask(
+            task.id,
+            title: "Generate data pipeline",
+            details: "Produce json dataset for analytics",
+            requiredSkillsText: "data",
+            storyPoints: 2
+        )
+
+        #expect(updated)
+        #expect(viewModel.tasks.first?.resolvedDeliveryContract.outputType == .data)
+        #expect(viewModel.tasks.first?.resolvedDeliveryContract.gateMode == .strict)
     }
 
     @Test("pm blueprint export returns json payload for valid brief")
@@ -10751,6 +11139,36 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.executionRecord?.status == .succeeded)
     }
 
+    @Test("single task approval and revoke update messages and approval state")
+    func approveAndRevokeSingleTaskExecution() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Needs Approval",
+            details: "Implement secure flow",
+            requiredSkills: ["swiftui"],
+            storyPoints: 5,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [agent])
+        viewModel.updateExecutionApprovalPolicy(isEnabled: true, minimumStoryPoints: 3)
+
+        let approved = viewModel.approveTaskExecution(task.id, approvedBy: "QA")
+        #expect(approved)
+        #expect(viewModel.isTaskApprovedForExecution(task.id))
+        #expect(viewModel.lastBoardMessage == "Approved run for Needs Approval")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+
+        let revoked = viewModel.revokeTaskExecutionApproval(task.id)
+        #expect(revoked)
+        #expect(!viewModel.isTaskApprovedForExecution(task.id))
+        #expect(viewModel.lastBoardMessage == "Revoked run approval for Needs Approval")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+
+        let secondRevoke = viewModel.revokeTaskExecutionApproval(task.id)
+        #expect(!secondRevoke)
+    }
+
     @Test("run task execution blocks when projected quota exceeds configured cap")
     func runTaskExecutionBlockedByQuotaPolicy() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -13619,6 +14037,57 @@ struct ExecutionSummaryBuilderTests {
         #expect(message.contains(L10n.format("%d blocked by quality/safety gate", 4)))
         #expect(message.contains(L10n.format("%d blocked by dependencies", 3)))
     }
+
+    @Test("batch summary snapshot remains stable")
+    func batchSummarySnapshot() {
+        var counters = BatchRunCounters()
+        counters.startedCount = 2
+        counters.succeededCount = 1
+        counters.failedCount = 1
+        counters.skippedCount = 3
+
+        let message = ExecutionSummaryBuilder.batchRunFinishedMessage(
+            counters: counters,
+            detailsMissingCount: 4,
+            dependencyBlockedCount: 6,
+            approvalBlockedCount: 2,
+            quotaBlockedCount: 1,
+            qualitySafetyBlockedCount: 5,
+            wasCancelled: true
+        )
+
+        #expect(
+            message ==
+                "Batch run finished · 2 started · 1 succeeded · 1 failed · Cancelled · 3 skipped · 4 missing details · 2 awaiting approval · 1 blocked by quota · 5 blocked by quality/safety gate · 6 blocked by dependencies"
+        )
+    }
+
+    @Test("pm autopilot summary snapshot remains stable")
+    func pmAutopilotSummarySnapshot() {
+        let message = ExecutionSummaryBuilder.pmAutopilotFinishedMessage(
+            createdAgents: 3,
+            createdTickets: 7,
+            startedExecutions: 5,
+            completedPasses: 4,
+            roadmapMilestoneCount: 4,
+            roadmapEpicCount: 5,
+            roadmapSections: [
+                "Milestone M1: 2/2",
+                "Milestone M2: 1/3"
+            ],
+            autoCycleCreatedDependencyTaskCount: 2,
+            remainingDetailsMissing: 1,
+            remainingDependencyBlocked: 3,
+            remainingApprovalBlocked: 0,
+            remainingQuotaBlocked: 2,
+            remainingQualitySafetyBlocked: 1
+        )
+
+        #expect(
+            message ==
+                "PM autopilot finished · 3 agent(s) · 7 ticket(s) · 5 execution(s) · 4 pass(es) · Total Milestones: 4 · Total Epics: 5 · Milestone M1: 2/2 · Milestone M2: 1/3 · Created 2 dependency placeholder task(s) · 1 missing details · 2 blocked by quota · 1 blocked by quality/safety gate · 3 blocked by dependencies"
+        )
+    }
 }
 
 @MainActor
@@ -14238,6 +14707,44 @@ struct LocalizationCatalogTests {
         }
 
         return tokens
+    }
+}
+
+private struct EmptyPlanProjectPlanner: ProjectPlanning {
+    func generatePlan(
+        projectName: String,
+        projectBrief: String,
+        availableAgents: [AgentProfile]
+    ) -> PMProjectPlan? {
+        PMProjectPlan(projectName: projectName, summary: "empty", tickets: [])
+    }
+}
+
+private struct EmptyBlueprintProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning {
+    func generatePlan(
+        projectName: String,
+        projectBrief: String,
+        availableAgents: [AgentProfile]
+    ) -> PMProjectPlan? {
+        PMProjectPlan(projectName: projectName, summary: "empty", tickets: [])
+    }
+
+    func generateBlueprint(
+        projectName: String,
+        projectBrief: String,
+        availableAgents: [AgentProfile]
+    ) -> PMProjectBlueprint? {
+        PMProjectBlueprint(
+            projectName: projectName,
+            summary: "empty",
+            productRequirements: [],
+            architectureModules: [],
+            epics: [],
+            milestones: [],
+            dependencyEdges: [],
+            qualitySafetyGates: [],
+            tickets: []
+        )
     }
 }
 
