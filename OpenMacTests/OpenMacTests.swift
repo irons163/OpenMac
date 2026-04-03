@@ -4593,6 +4593,68 @@ struct KanbanSupportTypeTests {
         #expect(plan?.summary.contains("Planning engine: Direct Plugin") == true)
     }
 
+    @Test("view model lists local PM plugins by manifest, filtering disabled or unsupported entries")
+    func pmPlanningLocalPluginNamesAreSortedAndFiltered() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let alpha = root.appendingPathComponent("alpha-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: alpha, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.alpha",
+          "name": "Alpha Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: alpha.appendingPathComponent("plugin.json"))
+
+        let zeta = root.appendingPathComponent("zeta-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: zeta, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.zeta",
+          "name": "Zeta Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: zeta.appendingPathComponent("manifest.json"))
+
+        let disabled = root.appendingPathComponent("disabled-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: disabled, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.disabled",
+          "name": "Disabled Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "enabled": false
+        }
+        """.data(using: .utf8)?.write(to: disabled.appendingPathComponent("plugin.json"))
+
+        let unsupported = root.appendingPathComponent("unsupported-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: unsupported, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.unsupported",
+          "name": "Unsupported Plugin",
+          "capabilities": ["pm.other.capability"],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: unsupported.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        #expect(viewModel.pmPlanningLocalPluginNames() == ["Alpha Plugin", "Zeta Plugin"])
+        #expect(viewModel.pmPlanningLocalPluginCount() == 2)
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

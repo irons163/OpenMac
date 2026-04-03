@@ -647,3 +647,4 @@
 "Plugin discovery: %@ · Local plugins: %d" = "Plugin discovery: %@ · Local plugins: %d";
 "Plugins folder: %@" = "Plugins folder: %@";
 "No local PM plugins detected. Planner will fallback to built-in logic." = "No local PM plugins detected. Planner will fallback to built-in logic.";
+"Detected plugins: %@" = "감지된 플러그인: %@";

@@ -800,6 +800,7 @@ struct ContentView: View {
                 pmPluginsAutoDiscover: viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
                 pmPluginsDirectoryPath: viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath,
                 pmLocalPluginCount: viewModel.pmPlanningLocalPluginCount(),
+                pmLocalPluginNames: viewModel.pmPlanningLocalPluginNames(),
                 ticketDeliveryProfile: $pmTicketDeliveryProfile,
                 realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
                 selectedTemplateID: $pmSelectedTemplateID,
@@ -4846,6 +4847,7 @@ private struct PMPlannerSheet: View {
     let pmPluginsAutoDiscover: Bool
     let pmPluginsDirectoryPath: String
     let pmLocalPluginCount: Int
+    let pmLocalPluginNames: [String]
     @Binding var ticketDeliveryProfile: PMTicketDeliveryProfile
     @Binding var realArtifactVerificationPreset: PMRealArtifactVerificationPreset
     @Binding var selectedTemplateID: String
@@ -4930,6 +4932,16 @@ private struct PMPlannerSheet: View {
             return detected
         }
         return plannerEngineMode.title
+    }
+
+    private var detectedPluginsText: String {
+        let names = pmLocalPluginNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if names.isEmpty {
+            return "-"
+        }
+        return names.joined(separator: ", ")
     }
 
     var body: some View {
@@ -5053,6 +5065,14 @@ private struct PMPlannerSheet: View {
                             )
                         )
                         .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        Text(
+                            L10n.format(
+                                "Detected plugins: %@",
+                                detectedPluginsText
+                            )
+                        )
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         if pmPluginsAutoDiscover && pmLocalPluginCount == 0 {
                             Text(L10n.string("No local PM plugins detected. Planner will fallback to built-in logic."))

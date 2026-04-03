@@ -4447,7 +4447,7 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func pmPlanningPluginStatusSummaryText() -> String {
-        let localPluginCount = detectedLocalPMPlanningPluginCount(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        let localPluginCount = detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath).count
         let modeTitle = pmPlannerEngineMode.title
         let discoveryText = pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? message("On") : message("Off")
         return message(
@@ -4459,7 +4459,11 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func pmPlanningLocalPluginCount() -> Int {
-        detectedLocalPMPlanningPluginCount(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath).count
+    }
+
+    func pmPlanningLocalPluginNames() -> [String] {
+        detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
     func updateMCPServerPolicy(
@@ -4961,36 +4965,58 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
-    private func detectedLocalPMPlanningPluginCount(in directoryPath: String) -> Int {
+    private func detectedLocalPMPlanningPlugins(in directoryPath: String) -> [String] {
         let trimmedPath = directoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else { return 0 }
+        guard !trimmedPath.isEmpty else { return [] }
 
         let expandedPath = (trimmedPath as NSString).expandingTildeInPath
         let directoryURL = URL(fileURLWithPath: expandedPath, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: directoryURL.path) else { return 0 }
+        guard FileManager.default.fileExists(atPath: directoryURL.path) else { return [] }
 
         guard let childEntries = try? FileManager.default.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return 0
+            return []
         }
 
         let candidateDirectories = [directoryURL] + childEntries
-        return candidateDirectories.reduce(0) { count, entryURL in
+        let plugins = candidateDirectories.compactMap { entryURL -> String? in
             guard let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey]),
                   values.isDirectory == true else {
-                return count
+                return nil
             }
 
-            let hasManifest = FileManager.default.fileExists(
-                atPath: entryURL.appendingPathComponent("plugin.json").path
-            ) || FileManager.default.fileExists(
-                atPath: entryURL.appendingPathComponent("manifest.json").path
-            )
-            return hasManifest ? count + 1 : count
+            let pluginManifestCandidates = [
+                entryURL.appendingPathComponent("plugin.json"),
+                entryURL.appendingPathComponent("manifest.json")
+            ]
+
+            guard let manifestURL = pluginManifestCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+                  let data = try? Data(contentsOf: manifestURL),
+                  let manifest = try? JSONDecoder().decode(LocalPMPlanningPluginManifestSummary.self, from: data) else {
+                return nil
+            }
+
+            guard manifest.enabled ?? true else { return nil }
+            let capabilities = Set(manifest.capabilities ?? [])
+            guard capabilities.contains(Self.pmPlanningPluginCapability) else { return nil }
+
+            let resolvedName = (manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return resolvedName.isEmpty ? entryURL.lastPathComponent : resolvedName
         }
+        return plugins.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private static let pmPlanningPluginCapability = "pm.plan.generate"
+
+    private struct LocalPMPlanningPluginManifestSummary: Decodable {
+        let name: String?
+        let capabilities: [String]?
+        let enabled: Bool?
     }
 
     private func shouldSyncMCPRegistry(lastSyncedAt: Date?) -> Bool {
