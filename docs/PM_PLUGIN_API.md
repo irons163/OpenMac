@@ -1,4 +1,4 @@
-# OpenMac PM Plugin API v1
+# OpenMac PM Plugin API v2
 
 OpenMac supports pluggable PM planning so new planning features can ship outside the core app.
 
@@ -23,7 +23,9 @@ Plugins/
 {
   "id": "com.example.brainstormer",
   "name": "Example Brainstormer",
+  "channel": "stable",
   "minOpenMacVersion": "1.0.0",
+  "dependencies": ["com.example.shared-prompts"],
   "capabilities": ["pm.plan.generate"],
   "permissions": ["command.execute"],
   "commands": [
@@ -78,7 +80,10 @@ Required:
 
 Optional:
 - `enabled` (boolean, default `true`)
+- `channel` (string, optional): `stable` (default), `beta`, `alpha`.
 - `minOpenMacVersion` / `maxOpenMacVersion` (string, optional): compatibility guard checked on install.
+- `dependencies` (string array, optional): plugin IDs OpenMac should auto-install from configured marketplace sources.
+- `conflictsWith` (string array, optional): plugin IDs that cannot be enabled together.
 - `permissions` (string array): extension-level permissions. If command-level permissions are absent, OpenMac uses this as fallback.
 - `commands` (array): command contributions rendered in OpenMac UI contribution points.
 - `eventHooks` (array): auto-run command hooks for planner/runtime lifecycle events.
@@ -119,6 +124,9 @@ If no local `brainstorm.v1` extension is found, OpenMac inserts a built-in brain
   - `app.toolbar`
   - `task.card`
   - `pm.planner.panel`
+  - `kanban.toolbar`
+  - `kanban.sidebar`
+  - `marketplace.panel`
 - `permissions` (string array, optional): include `command.execute` to allow execution when permissions are declared.
 - `timeoutSeconds` (number, optional): command timeout in seconds.
 - `entrypoint` (string, optional): override plugin-level entrypoint for this command.
@@ -173,6 +181,8 @@ If output is invalid or empty, OpenMac will fallback to built-in planning.
 
 - Entry scripts should write only JSON to stdout for best parsing reliability.
 - OpenMac enforces a command timeout (current default: 45 seconds).
+- Event hooks run through a queued orchestrator with dedupe, retry/backoff, and bounded parallelism.
+- Marketplace supports install-by-ID, preferred update channel policy, and version locking.
 - Use the PM Planner "Planning Engine" selector to switch between built-in and plugin-preferred mode.
 
 ## Real AI Example

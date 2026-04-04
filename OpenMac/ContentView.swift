@@ -561,6 +561,27 @@ struct ContentView: View {
                             .disabled(runningExtensionCommandIDs.contains(command.id))
                         }
                     }
+                    if !kanbanToolbarPMExtensionCommands.isEmpty || !kanbanSidebarPMExtensionCommands.isEmpty {
+                        Divider()
+                    }
+                    if !kanbanToolbarPMExtensionCommands.isEmpty {
+                        Text("Kanban Toolbar")
+                        ForEach(kanbanToolbarPMExtensionCommands) { command in
+                            Button(command.title) {
+                                runPMExtensionCommandFromToolbar(command)
+                            }
+                            .disabled(runningExtensionCommandIDs.contains(command.id))
+                        }
+                    }
+                    if !kanbanSidebarPMExtensionCommands.isEmpty {
+                        Text("Kanban Sidebar")
+                        ForEach(kanbanSidebarPMExtensionCommands) { command in
+                            Button(command.title) {
+                                runPMExtensionCommandFromToolbar(command)
+                            }
+                            .disabled(runningExtensionCommandIDs.contains(command.id))
+                        }
+                    }
                 }
                 Menu(L10n.string("Developer")) {
                     Toggle(L10n.string("Developer Mode"), isOn: $developerModeEnabled)
@@ -932,7 +953,10 @@ struct ContentView: View {
             PMExtensionsMarketplaceSheet(
                 installedExtensions: installedPMExtensions,
                 commands: installedPMExtensionCommands,
+                marketplacePanelCommands: marketplacePanelPMExtensionCommands,
                 marketplaceSources: pmExtensionMarketplaceSources,
+                observabilitySnapshots: pmExtensionObservabilitySnapshots,
+                preferredChannel: viewModel.pmPreferredExtensionChannel(),
                 runningCommandIDs: runningExtensionCommandIDs,
                 activityLog: pmExtensionActivityLog,
                 pluginsFolderPath: resolvedPMPluginsDirectoryPath,
@@ -947,11 +971,26 @@ struct ContentView: View {
                     _ = viewModel.updateAllPMExtensionsFromMarketplaceSources()
                     refreshPMPluginDiagnostics(announce: false)
                 },
+                onInstallByID: { pluginID in
+                    _ = viewModel.installPMExtensionByID(pluginID)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onSetPreferredChannel: { channel in
+                    viewModel.updatePMPreferredExtensionChannel(channel)
+                },
                 onRescan: { refreshPMPluginDiagnostics() },
                 onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
                 onUninstall: { pluginID in
                     _ = viewModel.uninstallPMExtension(pluginID: pluginID)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onLockToInstalledVersion: { pluginID in
+                    _ = viewModel.lockPMExtensionToInstalledVersion(pluginID: pluginID)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onUnlockVersion: { pluginID in
+                    _ = viewModel.unlockPMExtensionVersion(pluginID: pluginID)
                     refreshPMPluginDiagnostics(announce: false)
                 },
                 onSetExtensionEnabled: { pluginID, enabled in
@@ -972,6 +1011,7 @@ struct ContentView: View {
                 onDryRunCommand: { command, inputs in
                     runPMExtensionCommand(command, extensionInputs: inputs)
                 },
+                onCopyObservability: { copyToPasteboard(viewModel.pmExtensionObservabilityText()) },
                 onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
                 onClearActivityLog: viewModel.clearPMExtensionActivityLog,
                 onClose: closeExtensionsMarketplaceSheet
@@ -3302,8 +3342,24 @@ struct ContentView: View {
         viewModel.pmPlannerPanelExtensionCommands()
     }
 
+    private var kanbanToolbarPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmKanbanToolbarExtensionCommands()
+    }
+
+    private var kanbanSidebarPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmKanbanSidebarExtensionCommands()
+    }
+
+    private var marketplacePanelPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmMarketplacePanelExtensionCommands()
+    }
+
     private var pmExtensionActivityLog: [PMExtensionActivityLogEntry] {
         viewModel.pmExtensionActivityLog
+    }
+
+    private var pmExtensionObservabilitySnapshots: [PMExtensionObservabilitySnapshot] {
+        viewModel.pmExtensionObservability
     }
 
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
@@ -6120,7 +6176,10 @@ private struct PMPlannerUnsupportedExtensionCard: View {
 private struct PMExtensionsMarketplaceSheet: View {
     let installedExtensions: [PMInstalledExtensionDescriptor]
     let commands: [PMExtensionCommandDescriptor]
+    let marketplacePanelCommands: [PMExtensionCommandDescriptor]
     let marketplaceSources: [PMExtensionMarketplaceSource]
+    let observabilitySnapshots: [PMExtensionObservabilitySnapshot]
+    let preferredChannel: PMExtensionUpdateChannel
     let runningCommandIDs: Set<String>
     let activityLog: [PMExtensionActivityLogEntry]
     let pluginsFolderPath: String
@@ -6129,22 +6188,28 @@ private struct PMExtensionsMarketplaceSheet: View {
     let onInstallFromFolder: () -> Void
     let onInstallFromRemote: (String) -> Void
     let onUpdateAllSources: () -> Void
+    let onInstallByID: (String) -> Void
+    let onSetPreferredChannel: (PMExtensionUpdateChannel) -> Void
     let onRescan: () -> Void
     let onOpenPluginsFolder: () -> Void
     let onCopyPluginsFolderPath: () -> Void
     let onUninstall: (String) -> Void
+    let onLockToInstalledVersion: (String) -> Void
+    let onUnlockVersion: (String) -> Void
     let onSetExtensionEnabled: (String, Bool) -> Void
     let onAddSource: (String, String) -> Void
     let onRemoveSource: (UUID) -> Void
     let onInstallSource: (UUID) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
     let onDryRunCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
+    let onCopyObservability: () -> Void
     let onCopyActivityLog: () -> Void
     let onClearActivityLog: () -> Void
     let onClose: () -> Void
     @State private var remoteSource = ""
     @State private var sourceName = ""
     @State private var sourceURL = ""
+    @State private var installByID = ""
     @State private var dryRunCommandID = ""
     @State private var dryRunInputsJSON = "{\n  \"focus\": \"\"\n}"
     @State private var dryRunValidationMessage = ""
@@ -6182,6 +6247,31 @@ private struct PMExtensionsMarketplaceSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(remoteSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Install by Extension ID", text: $installByID)
+                    .textFieldStyle(.roundedBorder)
+                Button("Install by ID") {
+                    let pluginID = installByID.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !pluginID.isEmpty else { return }
+                    onInstallByID(pluginID)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(installByID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Spacer(minLength: 12)
+
+                Picker("Update Channel", selection: Binding(
+                    get: { preferredChannel },
+                    set: { onSetPreferredChannel($0) }
+                )) {
+                    ForEach(PMExtensionUpdateChannel.allCases) { channel in
+                        Text(channel.title).tag(channel)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 220)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -6295,6 +6385,37 @@ private struct PMExtensionsMarketplaceSheet: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Marketplace Panel Commands")
+                    .font(.headline)
+                if marketplacePanelCommands.isEmpty {
+                    Text("No marketplace.panel commands")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(marketplacePanelCommands) { command in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(command.title)
+                                    .font(.caption.weight(.semibold))
+                                if !command.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text(command.subtitle)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("Run") { onRunCommand(command) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(runningCommandIDs.contains(command.id))
+                        }
+                        .padding(8)
+                        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+
             Text(pluginsFolderPath)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
@@ -6328,7 +6449,25 @@ private struct PMExtensionsMarketplaceSheet: View {
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
                                         .background(.quaternary, in: Capsule())
+                                    Text(ext.channel.title)
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.quaternary, in: Capsule())
                                     Spacer()
+                                    if let lockedVersion = ext.lockedVersion, !lockedVersion.isEmpty {
+                                        Button("Unlock \(lockedVersion)") {
+                                            onUnlockVersion(ext.pluginID)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    } else {
+                                        Button("Lock Current") {
+                                            onLockToInstalledVersion(ext.pluginID)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
                                     Button("Remove") {
                                         onUninstall(ext.pluginID)
                                     }
@@ -6401,6 +6540,58 @@ private struct PMExtensionsMarketplaceSheet: View {
                             }
                             .padding(10)
                             .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Observability")
+                                .font(.headline)
+                            Spacer()
+                            Button("Copy Metrics", action: onCopyObservability)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(observabilitySnapshots.isEmpty)
+                        }
+                        if observabilitySnapshots.isEmpty {
+                            Text("No extension run metrics yet")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(observabilitySnapshots) { snapshot in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        Text(snapshot.pluginName)
+                                            .font(.caption.weight(.semibold))
+                                        Text(snapshot.pluginID)
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("Runs: \(snapshot.totalRuns) · Success: \(snapshot.successRatePercent)% · Avg: \(snapshot.avgDurationMS)ms · Running: \(snapshot.runningCount)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    if !snapshot.lastInputSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text("Input: \(snapshot.lastInputSummary)")
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    if !snapshot.lastOutputSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text("Output: \(snapshot.lastOutputSummary)")
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    if let lastError = snapshot.lastError, !lastError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text("Last Error: \(lastError)")
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.orange)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .padding(8)
+                                .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                            }
                         }
                     }
 

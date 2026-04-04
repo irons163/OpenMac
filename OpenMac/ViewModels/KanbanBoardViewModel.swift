@@ -1442,6 +1442,29 @@ final class KanbanBoardViewModel: ObservableObject {
         let epic: String
     }
 
+    private struct PMExtensionHookWorkItem {
+        let key: String
+        let event: PMExtensionHookEvent
+        let descriptor: PMExtensionCommandDescriptor
+        let task: WorkTask?
+        let extensionInputs: [String: String]
+        let retryCount: Int
+    }
+
+    private struct PMExtensionMutableStats {
+        var pluginID: String
+        var pluginName: String
+        var totalRuns = 0
+        var succeededRuns = 0
+        var failedRuns = 0
+        var runningCount = 0
+        var totalDurationMS = 0
+        var lastRunAt: Date?
+        var lastError: String?
+        var lastInputSummary = ""
+        var lastOutputSummary = ""
+    }
+
     private struct ExecutionReportTaskEntry: Codable {
         let id: UUID
         let title: String
@@ -1511,6 +1534,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var pmPlannerEngineMode: PMPlannerEngineMode
     @Published private(set) var pmPlanningPluginPolicy: PMPlanningPluginPolicy
     @Published private(set) var pmExtensionActivityLog: [PMExtensionActivityLogEntry] = []
+    @Published private(set) var pmExtensionObservability: [PMExtensionObservabilitySnapshot] = []
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1526,8 +1550,19 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let maxAgentExecutionEventsPerAgent = 120
     private static let maxTaskTimelineEventsPerTask = 240
     private static let maxExtensionActivityLogEntries = 200
+    private static let maxHookRetryCount = 2
+    private static let hookRetryBackoffBaseSeconds: Double = 1
+    private static let hookDedupWindowSeconds: Double = 6
+    private static let hookMaxConcurrentRuns = 2
     private static let mcpRegistrySyncTTL: TimeInterval = 60 * 30
     private var mcpReadinessCacheByServerName: [String: Bool] = [:]
+    private var pmExtensionStatsByPluginID: [String: PMExtensionMutableStats] = [:]
+    private var pmExtensionHookQueue: [PMExtensionHookWorkItem] = []
+    private var pmExtensionHookQueuedKeys: Set<String> = []
+    private var pmExtensionHookRunningKeys: Set<String> = []
+    private var pmExtensionHookDedupExpirations: [String: Date] = [:]
+    private var pmExtensionHookRunningCount = 0
+    private var pmExtensionInstallStack: Set<String> = []
 
     private func message(_ key: String) -> String {
         L10n.string(key)
@@ -4588,16 +4623,32 @@ final class KanbanBoardViewModel: ObservableObject {
         lastBoardMessageSeverity = .info
     }
 
+    private func updatePMPlanningPolicyState(
+        autoDiscoverLocalPlugins: Bool? = nil,
+        pluginsDirectoryPath: String? = nil,
+        disabledPluginIDs: Set<String>? = nil,
+        marketplaceSources: [PMExtensionMarketplaceSource]? = nil,
+        preferredMarketplaceChannel: PMExtensionUpdateChannel? = nil,
+        lockedPluginVersions: [String: String]? = nil
+    ) {
+        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: autoDiscoverLocalPlugins ?? pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pluginsDirectoryPath ?? pmPlanningPluginPolicy.pluginsDirectoryPath,
+            disabledPluginIDs: disabledPluginIDs ?? pmPlanningPluginPolicy.disabledPluginIDs,
+            marketplaceSources: marketplaceSources ?? pmPlanningPluginPolicy.marketplaceSources,
+            preferredMarketplaceChannel: preferredMarketplaceChannel ?? pmPlanningPluginPolicy.preferredMarketplaceChannel,
+            lockedPluginVersions: lockedPluginVersions ?? pmPlanningPluginPolicy.lockedPluginVersions
+        )
+    }
+
     func updatePMPlanningPluginPolicy(
         autoDiscoverLocalPlugins: Bool,
         pluginsDirectoryPath: String,
         announce: Bool = true
     ) {
-        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+        updatePMPlanningPolicyState(
             autoDiscoverLocalPlugins: autoDiscoverLocalPlugins,
-            pluginsDirectoryPath: pluginsDirectoryPath,
-            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
-            marketplaceSources: pmPlanningPluginPolicy.marketplaceSources
+            pluginsDirectoryPath: pluginsDirectoryPath
         )
         persistBoardState()
         guard announce else { return }
@@ -4650,12 +4701,7 @@ final class KanbanBoardViewModel: ObservableObject {
 
         var sources = pmPlanningPluginPolicy.marketplaceSources
         sources.append(PMExtensionMarketplaceSource(name: resolvedName, source: trimmedSource))
-        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
-            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
-            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
-            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
-            marketplaceSources: sources
-        )
+        updatePMPlanningPolicyState(marketplaceSources: sources)
         persistBoardState()
         lastBoardMessage = message("Added marketplace source: %@", resolvedName)
         lastBoardMessageSeverity = .info
@@ -4667,12 +4713,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let original = pmPlanningPluginPolicy.marketplaceSources
         let filtered = original.filter { $0.id != id }
         guard filtered.count != original.count else { return false }
-        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
-            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
-            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
-            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
-            marketplaceSources: filtered
-        )
+        updatePMPlanningPolicyState(marketplaceSources: filtered)
         persistBoardState()
         lastBoardMessage = message("Removed marketplace source")
         lastBoardMessageSeverity = .info
@@ -4683,6 +4724,24 @@ final class KanbanBoardViewModel: ObservableObject {
     func installPMExtensionFromMarketplaceSource(id: UUID) -> Bool {
         guard let source = pmPlanningPluginPolicy.marketplaceSources.first(where: { $0.id == id }) else { return false }
         return installPMExtensionFromRemote(source.source)
+    }
+
+    @discardableResult
+    func installPMExtensionByID(_ pluginID: String) -> Bool {
+        let normalizedTarget = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedTarget.isEmpty else {
+            lastBoardMessage = message("Extension id is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let candidates = pmExtensionSourceCandidates(for: normalizedTarget)
+        guard let candidate = candidates.first else {
+            lastBoardMessage = message("Extension not found in configured marketplace sources: %@", pluginID)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        return installPMExtensionFromDirectory(candidate.path)
     }
 
     @discardableResult
@@ -4725,16 +4784,56 @@ final class KanbanBoardViewModel: ObservableObject {
         }
         guard changed else { return false }
 
-        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
-            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
-            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
-            disabledPluginIDs: disabled,
-            marketplaceSources: pmPlanningPluginPolicy.marketplaceSources
-        )
+        updatePMPlanningPolicyState(disabledPluginIDs: disabled)
         persistBoardState()
         lastBoardMessage = enabled
             ? message("Enabled extension: %@", pluginID)
             : message("Disabled extension: %@", pluginID)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    func pmPreferredExtensionChannel() -> PMExtensionUpdateChannel {
+        pmPlanningPluginPolicy.preferredMarketplaceChannel
+    }
+
+    func updatePMPreferredExtensionChannel(_ channel: PMExtensionUpdateChannel) {
+        guard channel != pmPlanningPluginPolicy.preferredMarketplaceChannel else { return }
+        updatePMPlanningPolicyState(preferredMarketplaceChannel: channel)
+        persistBoardState()
+        lastBoardMessage = message("Updated extension update channel: %@", channel.title)
+        lastBoardMessageSeverity = .info
+    }
+
+    func pmLockedExtensionVersions() -> [String: String] {
+        pmPlanningPluginPolicy.lockedPluginVersions
+    }
+
+    @discardableResult
+    func lockPMExtensionToInstalledVersion(pluginID: String) -> Bool {
+        let normalizedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPluginID.isEmpty else { return false }
+        guard let installed = pmInstalledExtensions().first(where: { $0.pluginID.lowercased() == normalizedPluginID }) else {
+            return false
+        }
+        var locks = pmPlanningPluginPolicy.lockedPluginVersions
+        locks[normalizedPluginID] = installed.version
+        updatePMPlanningPolicyState(lockedPluginVersions: locks)
+        persistBoardState()
+        lastBoardMessage = message("Locked extension %@ to version %@", installed.name, installed.version)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func unlockPMExtensionVersion(pluginID: String) -> Bool {
+        let normalizedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPluginID.isEmpty else { return false }
+        var locks = pmPlanningPluginPolicy.lockedPluginVersions
+        guard locks.removeValue(forKey: normalizedPluginID) != nil else { return false }
+        updatePMPlanningPolicyState(lockedPluginVersions: locks)
+        persistBoardState()
+        lastBoardMessage = message("Unlocked extension version: %@", pluginID)
         lastBoardMessageSeverity = .info
         return true
     }
@@ -4758,6 +4857,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     minVersion: record.manifest.minOpenMacVersion,
                     maxVersion: record.manifest.maxOpenMacVersion
                 )
+                let channel = Self.normalizedPMExtensionUpdateChannel(record.manifest.channel)
+                let lockedVersion = pmPlanningPluginPolicy.lockedPluginVersions[normalizedPluginID]
                 return PMInstalledExtensionDescriptor(
                     id: pluginID.isEmpty ? name.lowercased() : pluginID,
                     pluginID: pluginID.isEmpty ? name.lowercased() : pluginID,
@@ -4769,7 +4870,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     uiExtensionCount: uiExtensions.count,
                     commandCount: commands.count,
                     isEnabled: isEnabled,
-                    compatibilitySummary: compatibilitySummary
+                    compatibilitySummary: compatibilitySummary,
+                    channel: channel,
+                    lockedVersion: lockedVersion
                 )
             }
             .sorted { lhs, rhs in
@@ -4835,6 +4938,18 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func pmPlannerPanelExtensionCommands() -> [PMExtensionCommandDescriptor] {
         pmExtensionCommands(slot: Self.extensionCommandPlannerPanelSlot)
+    }
+
+    func pmKanbanToolbarExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandKanbanToolbarSlot)
+    }
+
+    func pmKanbanSidebarExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandKanbanSidebarSlot)
+    }
+
+    func pmMarketplacePanelExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandMarketplacePanelSlot)
     }
 
     @discardableResult
@@ -4966,6 +5081,13 @@ final class KanbanBoardViewModel: ObservableObject {
 
         lastBoardMessage = message("Running extension command: %@", descriptor.title)
         lastBoardMessageSeverity = .info
+        let startedAt = Date()
+        let inputSummary = Self.summarizedExtensionInputs(extensionInputs)
+        markPMExtensionRunStarted(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            inputSummary: inputSummary
+        )
         appendPMExtensionActivity(
             pluginID: descriptor.pluginID,
             pluginName: descriptor.pluginName,
@@ -4996,6 +5118,14 @@ final class KanbanBoardViewModel: ObservableObject {
                     outcome: .failed,
                     detail: "Timed out in \(timeout)s"
                 )
+                markPMExtensionRunFinished(
+                    pluginID: descriptor.pluginID,
+                    pluginName: descriptor.pluginName,
+                    startedAt: startedAt,
+                    succeeded: false,
+                    outputSummary: "Timed out in \(timeout)s",
+                    error: "Timed out in \(timeout)s"
+                )
                 return false
             }
             if result.code != 0 {
@@ -5010,6 +5140,14 @@ final class KanbanBoardViewModel: ObservableObject {
                     commandTitle: descriptor.title,
                     outcome: .failed,
                     detail: details.isEmpty ? "exit \(result.code)" : details
+                )
+                markPMExtensionRunFinished(
+                    pluginID: descriptor.pluginID,
+                    pluginName: descriptor.pluginName,
+                    startedAt: startedAt,
+                    succeeded: false,
+                    outputSummary: Self.summarizedExtensionOutput(details),
+                    error: details.isEmpty ? "exit \(result.code)" : details
                 )
                 return false
             }
@@ -5030,6 +5168,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .succeeded,
                 detail: responseMessage ?? "Completed"
             )
+            markPMExtensionRunFinished(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                startedAt: startedAt,
+                succeeded: true,
+                outputSummary: Self.summarizedExtensionOutput(responseMessage ?? stdout),
+                error: nil
+            )
             return true
         } catch {
             lastBoardMessage = message("Extension command failed: %@", error.localizedDescription)
@@ -5042,6 +5188,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .failed,
                 detail: error.localizedDescription
             )
+            markPMExtensionRunFinished(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                startedAt: startedAt,
+                succeeded: false,
+                outputSummary: Self.summarizedExtensionOutput(error.localizedDescription),
+                error: error.localizedDescription
+            )
             return false
         }
     }
@@ -5052,6 +5206,7 @@ final class KanbanBoardViewModel: ObservableObject {
         additionalInputs: [String: String] = [:]
     ) {
         let eventKey = event.rawValue
+        expireStalePMExtensionHookDedupKeys()
         let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
         for record in records {
             let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5099,9 +5254,21 @@ final class KanbanBoardViewModel: ObservableObject {
                     mergedInputs["taskTitle"] = task.title
                     mergedInputs["taskStatus"] = task.status.rawValue
                 }
-                _ = runPMExtensionCommand(descriptor, task: task, extensionInputs: mergedInputs)
+                let dedupTaskID = task?.id.uuidString ?? "none"
+                let key = "\(eventKey)|\(pluginID.lowercased())|\(commandID.lowercased())|\(dedupTaskID)"
+                enqueuePMExtensionHookWorkItem(
+                    PMExtensionHookWorkItem(
+                        key: key,
+                        event: event,
+                        descriptor: descriptor,
+                        task: task,
+                        extensionInputs: mergedInputs,
+                        retryCount: 0
+                    )
+                )
             }
         }
+        drainPMExtensionHookQueueIfNeeded()
     }
 
     @discardableResult
@@ -5170,6 +5337,22 @@ final class KanbanBoardViewModel: ObservableObject {
             let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? sourceURL.lastPathComponent : trimmed
         }()
+        let normalizedPluginID = pluginID.lowercased()
+        if pmExtensionInstallStack.contains(normalizedPluginID) {
+            lastBoardMessage = message("Extension install blocked: cyclic dependency detected for %@", pluginID)
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install blocked: cyclic dependency detected"
+            )
+            return false
+        }
+        pmExtensionInstallStack.insert(normalizedPluginID)
+        defer { pmExtensionInstallStack.remove(normalizedPluginID) }
         if let violation = Self.pmExtensionCompatibilityViolation(
             minVersion: record.manifest.minOpenMacVersion,
             maxVersion: record.manifest.maxOpenMacVersion
@@ -5187,6 +5370,74 @@ final class KanbanBoardViewModel: ObservableObject {
             return false
         }
         let pluginVersion = (record.manifest.version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let pluginChannel = Self.normalizedPMExtensionUpdateChannel(record.manifest.channel)
+        if !Self.isAllowedPMExtensionUpdateChannel(
+            pluginChannel,
+            preferred: pmPlanningPluginPolicy.preferredMarketplaceChannel
+        ) {
+            lastBoardMessage = message(
+                "Extension install blocked: %@ channel is not allowed by %@ policy",
+                pluginChannel.title,
+                pmPlanningPluginPolicy.preferredMarketplaceChannel.title
+            )
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install blocked: channel \(pluginChannel.rawValue) not allowed"
+            )
+            return false
+        }
+        if let lockedVersion = pmPlanningPluginPolicy.lockedPluginVersions[normalizedPluginID],
+           !pluginVersion.isEmpty,
+           pluginVersion != lockedVersion {
+            lastBoardMessage = message(
+                "Extension install blocked: %@ is version-locked to %@",
+                pluginID,
+                lockedVersion
+            )
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install blocked: locked to \(lockedVersion), incoming \(pluginVersion)"
+            )
+            return false
+        }
+
+        let installedPluginIDs = Set(pmInstalledExtensions().map { $0.pluginID.lowercased() })
+        let dependencyIDs = Set((record.manifest.dependencies ?? []).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }).subtracting(["", normalizedPluginID])
+        for dependencyID in dependencyIDs.sorted() where !installedPluginIDs.contains(dependencyID) {
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .info,
+                detail: "Auto-installing dependency: \(dependencyID)"
+            )
+            guard installPMExtensionByID(dependencyID) else {
+                lastBoardMessage = message("Extension install blocked: missing dependency %@", dependencyID)
+                lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: pluginID,
+                    pluginName: pluginName,
+                    commandID: nil,
+                    commandTitle: nil,
+                    outcome: .failed,
+                    detail: "Install blocked: missing dependency \(dependencyID)"
+                )
+                return false
+            }
+        }
         appendPMExtensionActivity(
             pluginID: pluginID,
             pluginName: pluginName,
@@ -5218,7 +5469,6 @@ final class KanbanBoardViewModel: ObservableObject {
         let baseFolderName = Self.sanitizedExtensionDirectoryName(pluginID, fallback: sourceURL.lastPathComponent)
         let sourceCanonicalPath = sourceURL.standardizedFileURL.path
         let existingPluginRecords = detectedLocalPMPlannerPluginRecords(in: destinationRootURL.path)
-        let normalizedPluginID = pluginID.lowercased()
         let activePluginIDs = Set(
             existingPluginRecords.compactMap { item -> String? in
                 let installedID = (item.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -5399,12 +5649,9 @@ final class KanbanBoardViewModel: ObservableObject {
             let pluginName = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             var disabled = pmPlanningPluginPolicy.disabledPluginIDs
             disabled.remove(trimmedPluginID.lowercased())
-            pmPlanningPluginPolicy = PMPlanningPluginPolicy(
-                autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
-                pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
-                disabledPluginIDs: disabled,
-                marketplaceSources: pmPlanningPluginPolicy.marketplaceSources
-            )
+            var locks = pmPlanningPluginPolicy.lockedPluginVersions
+            locks.removeValue(forKey: trimmedPluginID.lowercased())
+            updatePMPlanningPolicyState(disabledPluginIDs: disabled, lockedPluginVersions: locks)
             persistBoardState()
             lastBoardMessage = message(
                 "Removed PM extension: %@",
@@ -5592,6 +5839,14 @@ final class KanbanBoardViewModel: ObservableObject {
             let timestamp = Self.iso8601Formatter.string(from: entry.timestamp)
             let commandText = (entry.commandID ?? "").isEmpty ? "-" : (entry.commandID ?? "-")
             return "[\(timestamp)] \(entry.outcome.rawValue.uppercased()) \(entry.pluginID) \(commandText) \(entry.detail)"
+        }.joined(separator: "\n")
+    }
+
+    func pmExtensionObservabilityText() -> String {
+        pmExtensionObservability.map { snapshot in
+            let timestamp = snapshot.lastRunAt.map { Self.iso8601Formatter.string(from: $0) } ?? "-"
+            let errorText = snapshot.lastError ?? "-"
+            return "\(snapshot.pluginID) runs=\(snapshot.totalRuns) ok=\(snapshot.succeededRuns) fail=\(snapshot.failedRuns) success=\(snapshot.successRatePercent)% avg=\(snapshot.avgDurationMS)ms running=\(snapshot.runningCount) last=\(timestamp) input=\(snapshot.lastInputSummary) output=\(snapshot.lastOutputSummary) error=\(errorText)"
         }.joined(separator: "\n")
     }
 
@@ -6284,6 +6539,9 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let extensionCommandDefaultSlot = "app.toolbar"
     private static let extensionCommandTaskCardSlot = "task.card"
     private static let extensionCommandPlannerPanelSlot = "pm.planner.panel"
+    private static let extensionCommandKanbanToolbarSlot = "kanban.toolbar"
+    private static let extensionCommandKanbanSidebarSlot = "kanban.sidebar"
+    private static let extensionCommandMarketplacePanelSlot = "marketplace.panel"
     private static let extensionCommandRequiredPermission = "command.execute"
     private static let extensionCommandDefaultTimeoutSeconds = 45
     private static let extensionCommandMaxTimeoutSeconds = 300
@@ -6311,6 +6569,12 @@ final class KanbanBoardViewModel: ObservableObject {
             return extensionCommandTaskCardSlot
         case "planner", "pm.planner.panel", "pm.panel", "planner.panel":
             return extensionCommandPlannerPanelSlot
+        case "kanban.toolbar", "board.toolbar", "kanban.topbar":
+            return extensionCommandKanbanToolbarSlot
+        case "kanban.sidebar", "board.sidebar":
+            return extensionCommandKanbanSidebarSlot
+        case "marketplace.panel", "extensions.marketplace.panel":
+            return extensionCommandMarketplacePanelSlot
         default:
             return normalized
         }
@@ -6450,6 +6714,104 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    private static func normalizedPMExtensionUpdateChannel(_ rawValue: String?) -> PMExtensionUpdateChannel {
+        let normalized = (rawValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "stable", "":
+            return .stable
+        case "beta", "preview":
+            return .beta
+        case "alpha", "nightly", "dev":
+            return .alpha
+        default:
+            return .stable
+        }
+    }
+
+    private static func isAllowedPMExtensionUpdateChannel(
+        _ candidate: PMExtensionUpdateChannel,
+        preferred: PMExtensionUpdateChannel
+    ) -> Bool {
+        let rank: [PMExtensionUpdateChannel: Int] = [.stable: 0, .beta: 1, .alpha: 2]
+        return (rank[candidate] ?? 0) <= (rank[preferred] ?? 0)
+    }
+
+    private func pmExtensionSourceCandidates(for normalizedPluginID: String) -> [URL] {
+        guard !normalizedPluginID.isEmpty else { return [] }
+        var resolved: [URL] = []
+        var seen = Set<String>()
+        for source in pmPlanningPluginPolicy.marketplaceSources {
+            let trimmed = source.source.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let expanded = (trimmed as NSString).expandingTildeInPath
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+            let rootURL = URL(fileURLWithPath: expanded, isDirectory: true)
+            guard let match = findPMExtensionDirectory(in: rootURL, matchingPluginID: normalizedPluginID) else { continue }
+            let key = match.standardizedFileURL.path
+            guard seen.insert(key).inserted else { continue }
+            resolved.append(match)
+        }
+        return resolved
+    }
+
+    private func findPMExtensionDirectory(in rootURL: URL, matchingPluginID normalizedPluginID: String) -> URL? {
+        if let rootRecord = localPMPlanningPluginRecord(at: rootURL),
+           (rootRecord.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedPluginID {
+            return rootURL
+        }
+        let fileManager = FileManager.default
+        var queue: [(url: URL, depth: Int)] = [(rootURL, 0)]
+        var visited = Set<String>()
+        let maxDepth = 3
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            guard current.depth <= maxDepth else { continue }
+            let key = current.url.standardizedFileURL.path
+            guard visited.insert(key).inserted else { continue }
+            guard let children = try? fileManager.contentsOfDirectory(
+                at: current.url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+            for childURL in children {
+                guard let values = try? childURL.resourceValues(forKeys: [.isDirectoryKey]),
+                      values.isDirectory == true else {
+                    continue
+                }
+                if let record = localPMPlanningPluginRecord(at: childURL),
+                   (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedPluginID {
+                    return childURL
+                }
+                queue.append((childURL, current.depth + 1))
+            }
+        }
+        return nil
+    }
+
+    private static func summarizedExtensionInputs(_ inputs: [String: String]) -> String {
+        guard !inputs.isEmpty else { return "-" }
+        let pairs = inputs
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { key, value in
+                "\(key)=\(value)"
+            }
+            .joined(separator: ", ")
+        return summarizedExtensionOutput(pairs)
+    }
+
+    private static func summarizedExtensionOutput(_ output: String) -> String {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "-" }
+        let normalized = trimmed.replacingOccurrences(of: "\n", with: " ")
+        if normalized.count <= 180 { return normalized }
+        return String(normalized.prefix(177)) + "..."
+    }
+
     private static func isLikelyHTTPRemoteSource(_ source: String) -> Bool {
         let lowercased = source.lowercased()
         return lowercased.hasPrefix("https://") || lowercased.hasPrefix("http://")
@@ -6503,6 +6865,176 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         }
         return nil
+    }
+
+    private func enqueuePMExtensionHookWorkItem(_ item: PMExtensionHookWorkItem) {
+        if pmExtensionHookQueuedKeys.contains(item.key) || pmExtensionHookRunningKeys.contains(item.key) {
+            appendPMExtensionActivity(
+                pluginID: item.descriptor.pluginID,
+                pluginName: item.descriptor.pluginName,
+                commandID: item.descriptor.commandID,
+                commandTitle: item.descriptor.title,
+                outcome: .info,
+                detail: "Hook deduped while pending/running: \(item.event.rawValue)"
+            )
+            return
+        }
+        if let expiry = pmExtensionHookDedupExpirations[item.key], expiry > Date() {
+            appendPMExtensionActivity(
+                pluginID: item.descriptor.pluginID,
+                pluginName: item.descriptor.pluginName,
+                commandID: item.descriptor.commandID,
+                commandTitle: item.descriptor.title,
+                outcome: .info,
+                detail: "Hook deduped in window: \(item.event.rawValue)"
+            )
+            return
+        }
+        pmExtensionHookQueuedKeys.insert(item.key)
+        pmExtensionHookQueue.append(item)
+    }
+
+    private func expireStalePMExtensionHookDedupKeys() {
+        let now = Date()
+        pmExtensionHookDedupExpirations = pmExtensionHookDedupExpirations.filter { _, expiry in
+            expiry > now
+        }
+    }
+
+    private func drainPMExtensionHookQueueIfNeeded() {
+        expireStalePMExtensionHookDedupKeys()
+        while pmExtensionHookRunningCount < Self.hookMaxConcurrentRuns,
+              !pmExtensionHookQueue.isEmpty {
+            let workItem = pmExtensionHookQueue.removeFirst()
+            pmExtensionHookQueuedKeys.remove(workItem.key)
+            pmExtensionHookRunningKeys.insert(workItem.key)
+            pmExtensionHookRunningCount += 1
+            let descriptor = workItem.descriptor
+            let task = workItem.task
+            let extensionInputs = workItem.extensionInputs
+            let event = workItem.event
+            let retryCount = workItem.retryCount
+            runOnMain { [weak self] in
+                guard let self else { return }
+                let succeeded = self.runPMExtensionCommand(
+                    descriptor,
+                    task: task,
+                    extensionInputs: extensionInputs
+                )
+                self.pmExtensionHookRunningCount = max(0, self.pmExtensionHookRunningCount - 1)
+                self.pmExtensionHookRunningKeys.remove(workItem.key)
+                if succeeded {
+                    self.pmExtensionHookDedupExpirations[workItem.key] = Date().addingTimeInterval(Self.hookDedupWindowSeconds)
+                } else if retryCount < Self.maxHookRetryCount {
+                    let backoff = Double(retryCount + 1) * Self.hookRetryBackoffBaseSeconds
+                    let retryItem = PMExtensionHookWorkItem(
+                        key: workItem.key,
+                        event: event,
+                        descriptor: descriptor,
+                        task: task,
+                        extensionInputs: extensionInputs,
+                        retryCount: retryCount + 1
+                    )
+                    self.appendPMExtensionActivity(
+                        pluginID: descriptor.pluginID,
+                        pluginName: descriptor.pluginName,
+                        commandID: descriptor.commandID,
+                        commandTitle: descriptor.title,
+                        outcome: .info,
+                        detail: "Hook retry scheduled in \(Int(backoff))s (\(retryCount + 1)/\(Self.maxHookRetryCount))"
+                    )
+                    self.runOnBackground { [weak self] in
+                        Thread.sleep(forTimeInterval: backoff)
+                        self?.runOnMain {
+                            guard let self else { return }
+                            self.enqueuePMExtensionHookWorkItem(retryItem)
+                            self.drainPMExtensionHookQueueIfNeeded()
+                        }
+                    }
+                } else {
+                    self.pmExtensionHookDedupExpirations[workItem.key] = Date().addingTimeInterval(Self.hookDedupWindowSeconds)
+                }
+                self.drainPMExtensionHookQueueIfNeeded()
+            }
+        }
+    }
+
+    private func markPMExtensionRunStarted(
+        pluginID: String,
+        pluginName: String,
+        inputSummary: String
+    ) {
+        let key = pluginID.lowercased()
+        var stats = pmExtensionStatsByPluginID[key] ?? PMExtensionMutableStats(
+            pluginID: pluginID,
+            pluginName: pluginName
+        )
+        stats.pluginName = pluginName
+        stats.totalRuns += 1
+        stats.runningCount += 1
+        stats.lastInputSummary = inputSummary
+        pmExtensionStatsByPluginID[key] = stats
+        refreshPMExtensionObservabilitySnapshots()
+    }
+
+    private func markPMExtensionRunFinished(
+        pluginID: String,
+        pluginName: String,
+        startedAt: Date,
+        succeeded: Bool,
+        outputSummary: String,
+        error: String?
+    ) {
+        let key = pluginID.lowercased()
+        var stats = pmExtensionStatsByPluginID[key] ?? PMExtensionMutableStats(
+            pluginID: pluginID,
+            pluginName: pluginName
+        )
+        stats.pluginName = pluginName
+        stats.runningCount = max(0, stats.runningCount - 1)
+        if succeeded {
+            stats.succeededRuns += 1
+            stats.lastError = nil
+        } else {
+            stats.failedRuns += 1
+            stats.lastError = error
+        }
+        let durationMS = max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
+        stats.totalDurationMS += durationMS
+        stats.lastRunAt = Date()
+        stats.lastOutputSummary = outputSummary
+        pmExtensionStatsByPluginID[key] = stats
+        refreshPMExtensionObservabilitySnapshots()
+    }
+
+    private func refreshPMExtensionObservabilitySnapshots() {
+        pmExtensionObservability = pmExtensionStatsByPluginID.values
+            .map { stats in
+                let completed = max(1, stats.succeededRuns + stats.failedRuns)
+                let avg = completed == 0 ? 0 : stats.totalDurationMS / completed
+                let successRate = stats.totalRuns == 0 ? 0 : Int((Double(stats.succeededRuns) / Double(stats.totalRuns)) * 100)
+                return PMExtensionObservabilitySnapshot(
+                    id: stats.pluginID.lowercased(),
+                    pluginID: stats.pluginID,
+                    pluginName: stats.pluginName,
+                    totalRuns: stats.totalRuns,
+                    succeededRuns: stats.succeededRuns,
+                    failedRuns: stats.failedRuns,
+                    avgDurationMS: avg,
+                    successRatePercent: successRate,
+                    runningCount: stats.runningCount,
+                    lastRunAt: stats.lastRunAt,
+                    lastError: stats.lastError,
+                    lastInputSummary: stats.lastInputSummary,
+                    lastOutputSummary: stats.lastOutputSummary
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedSame {
+                    return lhs.pluginID.localizedCaseInsensitiveCompare(rhs.pluginID) == .orderedAscending
+                }
+                return lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedAscending
+            }
     }
 
     private func appendPMExtensionActivity(
@@ -6739,10 +7271,12 @@ final class KanbanBoardViewModel: ObservableObject {
         let id: String?
         let name: String?
         let version: String?
+        let channel: String?
         let summary: String?
         let minOpenMacVersion: String?
         let maxOpenMacVersion: String?
         let conflictsWith: [String]?
+        let dependencies: [String]?
         let capabilities: [String]?
         let permissions: [String]?
         let entrypoint: String?

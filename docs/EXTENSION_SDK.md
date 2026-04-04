@@ -1,4 +1,4 @@
-# OpenMac Extension SDK v1
+# OpenMac Extension SDK v2
 
 OpenMac extensions are local folders with `plugin.json` + executable entrypoint.
 
@@ -23,7 +23,9 @@ Default extension folder:
   "id": "com.example.my-plugin",
   "name": "My Plugin",
   "version": "0.1.0",
+  "channel": "stable",
   "minOpenMacVersion": "1.0.0",
+  "dependencies": ["com.example.shared-utils"],
   "summary": "Optional description",
   "capabilities": ["pm.plan.generate"],
   "permissions": ["command.execute"],
@@ -61,6 +63,9 @@ Default extension folder:
 - `app.toolbar`: shown under top toolbar `Extensions` menu
 - `task.card`: shown on each Kanban task card
 - `pm.planner.panel`: shown inside PM Planner sheet
+- `kanban.toolbar`: shown in Kanban extension menu section
+- `kanban.sidebar`: shown in Kanban extension menu section
+- `marketplace.panel`: shown in Extension Marketplace panel
 
 Alias values are normalized by OpenMac (for compatibility), but use the canonical values above.
 
@@ -71,7 +76,9 @@ Alias values are normalized by OpenMac (for compatibility), but use the canonica
 - If permissions are not declared, OpenMac runs in compatibility mode and logs a warning.
 - Marketplace includes an activity log for install/run success/failure debugging.
 - Marketplace supports saved install sources and extension enable/disable toggles.
+- Marketplace supports install by plugin ID, preferred update channel (`stable`/`beta`/`alpha`), and per-plugin version locks.
 - Event hooks can auto-run extension commands on lifecycle events (`ticket.created`, `run.finished`, `review.entered`).
+- Hook execution is queued with dedupe + retry/backoff so rapid repeated events do not flood extensions.
 
 ## Runtime Contract
 

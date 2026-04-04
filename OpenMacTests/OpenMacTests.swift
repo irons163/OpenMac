@@ -2434,7 +2434,12 @@ struct KanbanFlowTests {
 
     @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
     func startupWarningForCommandLineToolsOnly() {
-        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
         viewModel.clearLocalizedTransientBoardMessage()
         viewModel.showXcodeDeveloperDirectoryWarningIfNeeded(
             activeDeveloperDirectoryPath: "/Library/Developer/CommandLineTools",
@@ -3164,7 +3169,12 @@ struct KanbanFlowTests {
 
     @Test("pm planner preview requires non-empty project brief")
     func pmPlannerPreviewRequiresBrief() {
-        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
         let plan = viewModel.previewProjectPlan(projectName: "Any", projectBrief: "   ")
 
         #expect(plan == nil)
@@ -3219,7 +3229,12 @@ struct KanbanFlowTests {
 
     @Test("pm brainstorm round requires non-empty brief")
     func pmBrainstormRoundRequiresBrief() {
-        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
         var brainstormOutput: String?
         var brainstormError: String?
 
@@ -4756,7 +4771,12 @@ struct KanbanSupportTypeTests {
         }
         """.data(using: .utf8)?.write(to: unsupported.appendingPathComponent("plugin.json"))
 
-        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
         viewModel.updatePMPlanningPluginPolicy(
             autoDiscoverLocalPlugins: true,
             pluginsDirectoryPath: root.path,
@@ -5260,7 +5280,12 @@ struct KanbanSupportTypeTests {
         """.data(using: .utf8)?.write(to: scriptURL)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
-        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
         viewModel.updatePMPlanningPluginPolicy(
             autoDiscoverLocalPlugins: true,
             pluginsDirectoryPath: root.path,
@@ -5274,9 +5299,7 @@ struct KanbanSupportTypeTests {
             autoAssign: false
         )
         #expect(added)
-        #expect(waitForMainQueue(timeout: 2.0) {
-            viewModel.pmExtensionActivityLog.contains(where: { $0.commandID == "on-create" && $0.outcome == .succeeded })
-        })
+        #expect(viewModel.pmExtensionActivityLog.contains(where: { $0.commandID == "on-create" && $0.outcome == .succeeded }))
     }
 
     @Test("Update all marketplace sources installs each source")
@@ -5329,6 +5352,178 @@ struct KanbanSupportTypeTests {
         let installedIDs = Set(viewModel.pmInstalledExtensions().map(\.pluginID))
         #expect(installedIDs.contains("com.example.source.one"))
         #expect(installedIDs.contains("com.example.source.two"))
+    }
+
+    @Test("Install extension by id auto-installs dependencies from marketplace sources")
+    func pmExtensionInstallByIDAutoInstallsDependencies() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let sourceRoot = root.appendingPathComponent("source", isDirectory: true)
+        let appPlugin = sourceRoot.appendingPathComponent("app-plugin", isDirectory: true)
+        let depPlugin = sourceRoot.appendingPathComponent("dep-plugin", isDirectory: true)
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: appPlugin, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: depPlugin, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        try """
+        {
+          "id": "com.example.dep",
+          "name": "Dependency Plugin",
+          "version": "1.0.0",
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: depPlugin.appendingPathComponent("plugin.json"))
+        try """
+        #!/bin/zsh
+        echo '{"message":"dep"}'
+        """.data(using: .utf8)?.write(to: depPlugin.appendingPathComponent("run.sh"))
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: depPlugin.appendingPathComponent("run.sh").path)
+
+        try """
+        {
+          "id": "com.example.app",
+          "name": "App Plugin",
+          "version": "1.0.0",
+          "entrypoint": "./run.sh",
+          "dependencies": ["com.example.dep"],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: appPlugin.appendingPathComponent("plugin.json"))
+        try """
+        #!/bin/zsh
+        echo '{"message":"app"}'
+        """.data(using: .utf8)?.write(to: appPlugin.appendingPathComponent("run.sh"))
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: appPlugin.appendingPathComponent("run.sh").path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+        #expect(viewModel.addPMExtensionMarketplaceSource(name: "local", source: sourceRoot.path))
+
+        let installed = viewModel.installPMExtensionByID("com.example.app")
+        #expect(installed)
+        let installedIDs = Set(viewModel.pmInstalledExtensions().map { $0.pluginID.lowercased() })
+        #expect(installedIDs.contains("com.example.dep"))
+        #expect(installedIDs.contains("com.example.app"))
+    }
+
+    @Test("Extension install respects channel policy and version locks")
+    func pmExtensionInstallRespectsChannelAndLocks() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let stableV1 = root.appendingPathComponent("stable-v1", isDirectory: true)
+        let betaV2 = root.appendingPathComponent("beta-v2", isDirectory: true)
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: stableV1, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: betaV2, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        try """
+        {
+          "id": "com.example.locked",
+          "name": "Locked Plugin",
+          "version": "1.0.0",
+          "channel": "stable",
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: stableV1.appendingPathComponent("plugin.json"))
+        try """
+        #!/bin/zsh
+        echo '{"message":"v1"}'
+        """.data(using: .utf8)?.write(to: stableV1.appendingPathComponent("run.sh"))
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stableV1.appendingPathComponent("run.sh").path)
+
+        try """
+        {
+          "id": "com.example.locked",
+          "name": "Locked Plugin",
+          "version": "2.0.0",
+          "channel": "beta",
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: betaV2.appendingPathComponent("plugin.json"))
+        try """
+        #!/bin/zsh
+        echo '{"message":"v2"}'
+        """.data(using: .utf8)?.write(to: betaV2.appendingPathComponent("run.sh"))
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: betaV2.appendingPathComponent("run.sh").path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+
+        #expect(viewModel.installPMExtensionFromDirectory(stableV1.path))
+        #expect(viewModel.lockPMExtensionToInstalledVersion(pluginID: "com.example.locked"))
+
+        let blockedByChannel = viewModel.installPMExtensionFromDirectory(betaV2.path)
+        #expect(!blockedByChannel)
+        #expect(viewModel.lastBoardMessage?.contains("channel") == true)
+
+        viewModel.updatePMPreferredExtensionChannel(.beta)
+        let blockedByLock = viewModel.installPMExtensionFromDirectory(betaV2.path)
+        #expect(!blockedByLock)
+        #expect(viewModel.lastBoardMessage?.contains("version-locked") == true)
+
+        #expect(viewModel.unlockPMExtensionVersion(pluginID: "com.example.locked"))
+        #expect(viewModel.installPMExtensionFromDirectory(betaV2.path))
+        let installed = viewModel.pmInstalledExtensions().first(where: { $0.pluginID == "com.example.locked" })
+        #expect(installed?.version == "2.0.0")
+    }
+
+    @Test("Slot API v2 normalizes aliases and resolves new kanban/marketplace slots")
+    func pmExtensionSlotAPIV2NormalizationCoverage() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("slot-v2-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.slotsv2",
+          "name": "Slots V2",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "kanban-a", "title": "Kanban A", "slot": "board.toolbar", "permissions": ["command.execute"], "enabled": true },
+            { "id": "kanban-b", "title": "Kanban B", "slot": "kanban.sidebar", "permissions": ["command.execute"], "enabled": true },
+            { "id": "market", "title": "Market", "slot": "extensions.marketplace.panel", "permissions": ["command.execute"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+        try """
+        #!/bin/zsh
+        echo '{"message":"ok"}'
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("run.sh"))
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: plugin.appendingPathComponent("run.sh").path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        #expect(viewModel.pmKanbanToolbarExtensionCommands().contains(where: { $0.commandID == "kanban-a" }))
+        #expect(viewModel.pmKanbanSidebarExtensionCommands().contains(where: { $0.commandID == "kanban-b" }))
+        #expect(viewModel.pmMarketplacePanelExtensionCommands().contains(where: { $0.commandID == "market" }))
     }
 
     @Test("install PM extension from remote supports local ZIP source")

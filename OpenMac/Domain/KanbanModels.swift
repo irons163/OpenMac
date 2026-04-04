@@ -924,12 +924,16 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
     var pluginsDirectoryPath: String
     var disabledPluginIDs: Set<String>
     var marketplaceSources: [PMExtensionMarketplaceSource]
+    var preferredMarketplaceChannel: PMExtensionUpdateChannel
+    var lockedPluginVersions: [String: String]
 
     init(
         autoDiscoverLocalPlugins: Bool = true,
         pluginsDirectoryPath: String = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path,
         disabledPluginIDs: Set<String> = [],
-        marketplaceSources: [PMExtensionMarketplaceSource] = PMExtensionMarketplaceSource.defaultSources
+        marketplaceSources: [PMExtensionMarketplaceSource] = PMExtensionMarketplaceSource.defaultSources,
+        preferredMarketplaceChannel: PMExtensionUpdateChannel = .stable,
+        lockedPluginVersions: [String: String] = [:]
     ) {
         self.autoDiscoverLocalPlugins = autoDiscoverLocalPlugins
         let trimmedPath = pluginsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -940,6 +944,8 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
         }
         self.disabledPluginIDs = Self.normalizedDisabledPluginIDs(disabledPluginIDs)
         self.marketplaceSources = Self.normalizedMarketplaceSources(marketplaceSources)
+        self.preferredMarketplaceChannel = preferredMarketplaceChannel
+        self.lockedPluginVersions = Self.normalizedLockedPluginVersions(lockedPluginVersions)
     }
 
     nonisolated static func defaultPluginsDirectoryURL(
@@ -970,11 +976,24 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
         return normalized
     }
 
+    private static func normalizedLockedPluginVersions(_ versions: [String: String]) -> [String: String] {
+        var normalized: [String: String] = [:]
+        for (key, value) in versions {
+            let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedKey.isEmpty, !normalizedValue.isEmpty else { continue }
+            normalized[normalizedKey] = normalizedValue
+        }
+        return normalized
+    }
+
     private enum CodingKeys: String, CodingKey {
         case autoDiscoverLocalPlugins
         case pluginsDirectoryPath
         case disabledPluginIDs
         case marketplaceSources
+        case preferredMarketplaceChannel
+        case lockedPluginVersions
     }
 
     init(from decoder: Decoder) throws {
@@ -985,11 +1004,16 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
         let disabledPluginIDs = try container.decodeIfPresent(Set<String>.self, forKey: .disabledPluginIDs) ?? []
         let marketplaceSources = try container.decodeIfPresent([PMExtensionMarketplaceSource].self, forKey: .marketplaceSources)
             ?? PMExtensionMarketplaceSource.defaultSources
+        let preferredMarketplaceChannel = try container.decodeIfPresent(PMExtensionUpdateChannel.self, forKey: .preferredMarketplaceChannel)
+            ?? .stable
+        let lockedPluginVersions = try container.decodeIfPresent([String: String].self, forKey: .lockedPluginVersions) ?? [:]
         self.init(
             autoDiscoverLocalPlugins: autoDiscoverLocalPlugins,
             pluginsDirectoryPath: pluginsDirectoryPath,
             disabledPluginIDs: disabledPluginIDs,
-            marketplaceSources: marketplaceSources
+            marketplaceSources: marketplaceSources,
+            preferredMarketplaceChannel: preferredMarketplaceChannel,
+            lockedPluginVersions: lockedPluginVersions
         )
     }
 
@@ -999,6 +1023,27 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
         try container.encode(pluginsDirectoryPath, forKey: .pluginsDirectoryPath)
         try container.encode(Array(disabledPluginIDs).sorted(), forKey: .disabledPluginIDs)
         try container.encode(marketplaceSources, forKey: .marketplaceSources)
+        try container.encode(preferredMarketplaceChannel, forKey: .preferredMarketplaceChannel)
+        try container.encode(lockedPluginVersions, forKey: .lockedPluginVersions)
+    }
+}
+
+enum PMExtensionUpdateChannel: String, CaseIterable, Codable, Identifiable, Hashable {
+    case stable
+    case beta
+    case alpha
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .stable:
+            return "Stable"
+        case .beta:
+            return "Beta"
+        case .alpha:
+            return "Alpha"
+        }
     }
 }
 
@@ -1064,6 +1109,8 @@ struct PMInstalledExtensionDescriptor: Equatable, Identifiable {
     var commandCount: Int
     var isEnabled: Bool
     var compatibilitySummary: String
+    var channel: PMExtensionUpdateChannel
+    var lockedVersion: String?
 }
 
 struct PMExtensionCommandDescriptor: Equatable, Identifiable {
@@ -1095,6 +1142,22 @@ struct PMExtensionActivityLogEntry: Equatable, Identifiable {
     var commandTitle: String?
     var outcome: Outcome
     var detail: String
+}
+
+struct PMExtensionObservabilitySnapshot: Equatable, Identifiable {
+    var id: String
+    var pluginID: String
+    var pluginName: String
+    var totalRuns: Int
+    var succeededRuns: Int
+    var failedRuns: Int
+    var avgDurationMS: Int
+    var successRatePercent: Int
+    var runningCount: Int
+    var lastRunAt: Date?
+    var lastError: String?
+    var lastInputSummary: String
+    var lastOutputSummary: String
 }
 
 enum PMExtensionHookEvent: String, CaseIterable, Codable, Identifiable {
