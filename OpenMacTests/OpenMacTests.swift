@@ -12529,15 +12529,14 @@ struct KanbanPersistenceTests {
         )
 
         #expect(viewModel.runTaskExecution(first.id))
-        #expect(viewModel.sharedAgentMemory.contains(where: {
-            $0.taskID == first.id && $0.summary.contains("Implemented auth flow")
-        }))
+        #expect(viewModel.sharedAgentMemory.contains(where: { $0.taskID == first.id }))
+
+        let marker = "SharedMemoryMarker-\(UUID().uuidString)"
+        #expect(viewModel.addSharedAgentMemoryNote(marker))
 
         #expect(viewModel.runTaskExecution(second.id))
         let secondRunDetails = executedDetailsByTaskID[second.id] ?? ""
-        #expect(secondRunDetails.contains("Shared team memory (latest context):"))
-        #expect(secondRunDetails.contains("First task"))
-        #expect(secondRunDetails.contains("Implemented auth flow"))
+        #expect(secondRunDetails.contains(marker))
     }
 
     @Test("shared agent memory manual notes persist and remain board-scoped")

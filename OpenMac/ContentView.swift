@@ -6351,6 +6351,18 @@ private struct PMPlannerUnsupportedExtensionCard: View {
 }
 
 private struct PMExtensionsMarketplaceSheet: View {
+    private struct HookEventOption: Identifiable {
+        let id: String
+        let title: String
+    }
+
+    private static let hookEventOptions: [HookEventOption] = [
+        HookEventOption(id: PMExtensionHookEvent.boardRunFinished.rawValue, title: "Board Run Finished"),
+        HookEventOption(id: PMExtensionHookEvent.runFinished.rawValue, title: "Run Finished"),
+        HookEventOption(id: PMExtensionHookEvent.reviewEntered.rawValue, title: "Review Entered"),
+        HookEventOption(id: PMExtensionHookEvent.ticketCreated.rawValue, title: "Ticket Created")
+    ]
+
     let installedExtensions: [PMInstalledExtensionDescriptor]
     let commands: [PMExtensionCommandDescriptor]
     let marketplacePanelCommands: [PMExtensionCommandDescriptor]
@@ -6393,6 +6405,9 @@ private struct PMExtensionsMarketplaceSheet: View {
     @State private var dryRunCommandID = ""
     @State private var dryRunInputsJSON = "{\n  \"focus\": \"\"\n}"
     @State private var dryRunValidationMessage = ""
+    @State private var hookEvent = PMExtensionHookEvent.boardRunFinished.rawValue
+    @State private var hookCommandDescriptorID = ""
+    @State private var hookBuilderMessage = ""
 
     var body: some View {
         ScrollView {
@@ -6523,6 +6538,9 @@ private struct PMExtensionsMarketplaceSheet: View {
                             if dryRunCommandID.isEmpty {
                                 dryRunCommandID = commands.first?.id ?? ""
                             }
+                            if hookCommandDescriptorID.isEmpty {
+                                hookCommandDescriptorID = commands.first?.id ?? ""
+                            }
                         }
 
                         TextEditor(text: $dryRunInputsJSON)
@@ -6560,6 +6578,61 @@ private struct PMExtensionsMarketplaceSheet: View {
 
                         if !dryRunValidationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(dryRunValidationMessage)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hook Builder")
+                        .font(.headline)
+                    if commands.isEmpty {
+                        Text("Install an extension command first to generate hook JSON")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Event", selection: $hookEvent) {
+                            ForEach(Self.hookEventOptions) { option in
+                                Text("\(option.title) · \(option.id)")
+                                    .tag(option.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Picker("Command", selection: $hookCommandDescriptorID) {
+                            ForEach(commands) { command in
+                                Text("\(command.pluginName) · \(command.commandID)")
+                                    .tag(command.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Text(hookTemplatePreview)
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+
+                        HStack(spacing: 8) {
+                            Button("Copy Hook Object") {
+                                Self.copyToPasteboard(hookObjectTemplate)
+                                hookBuilderMessage = "Hook object copied"
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(selectedHookCommand == nil)
+
+                            Button("Copy eventHooks Block") {
+                                Self.copyToPasteboard(eventHooksTemplate)
+                                hookBuilderMessage = "eventHooks block copied"
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedHookCommand == nil)
+                        }
+
+                        if !hookBuilderMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(hookBuilderMessage)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -6914,6 +6987,47 @@ private struct PMExtensionsMarketplaceSheet: View {
             }
         }
         return parsed
+    }
+
+    private var selectedHookCommand: PMExtensionCommandDescriptor? {
+        commands.first(where: { $0.id == hookCommandDescriptorID }) ?? commands.first
+    }
+
+    private var hookTemplatePreview: String {
+        eventHooksTemplate
+    }
+
+    private var hookObjectTemplate: String {
+        let event = hookEvent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let selectedHookCommand else {
+            return "{\n  \"id\": \"hook-id\",\n  \"event\": \"\(event)\",\n  \"commandID\": \"<command-id>\",\n  \"enabled\": true\n}"
+        }
+        let commandID = selectedHookCommand.commandID
+        let normalizedEventID = event.replacingOccurrences(of: ".", with: "-")
+        let normalizedCommandID = commandID.replacingOccurrences(of: ".", with: "-")
+        let hookID = "\(normalizedEventID)-\(normalizedCommandID)"
+        return """
+        {
+          "id": "\(hookID)",
+          "event": "\(event)",
+          "commandID": "\(commandID)",
+          "enabled": true
+        }
+        """
+    }
+
+    private var eventHooksTemplate: String {
+        """
+        "eventHooks": [
+          \(hookObjectTemplate.replacingOccurrences(of: "\n", with: "\n  "))
+        ]
+        """
+    }
+
+    private static func copyToPasteboard(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
     }
 }
 
