@@ -87,6 +87,7 @@ Optional:
 - `permissions` (string array): extension-level permissions. If command-level permissions are absent, OpenMac uses this as fallback.
 - `commands` (array): command contributions rendered in OpenMac UI contribution points.
 - `eventHooks` (array): auto-run command hooks for planner/runtime lifecycle events.
+- `eventHooks` is for plugin defaults. Users can add/remove board-specific hooks in OpenMac UI without modifying `plugin.json`.
 - `uiExtensions` (array): declares PM extension UI cards that OpenMac can render.
 
 ## `uiExtensions` fields
@@ -182,6 +183,7 @@ If output is invalid or empty, OpenMac will fallback to built-in planning.
 - Entry scripts should write only JSON to stdout for best parsing reliability.
 - OpenMac enforces a command timeout (current default: 45 seconds).
 - Event hooks run through a queued orchestrator with dedupe, retry/backoff, and bounded parallelism.
+- OpenMac supports board-level hook bindings (configured in Extension Marketplace -> Hook Builder). These are stored in board data, not written back to plugin manifests.
 - Marketplace supports install-by-ID, preferred update channel policy, and version locking.
 - Marketplace includes one-click extension E2E acceptance and a copyable acceptance report.
 - Use the PM Planner "Planning Engine" selector to switch between built-in and plugin-preferred mode.

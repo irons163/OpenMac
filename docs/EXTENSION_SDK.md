@@ -79,6 +79,7 @@ Alias values are normalized by OpenMac (for compatibility), but use the canonica
 - Marketplace supports install by plugin ID, preferred update channel (`stable`/`beta`/`alpha`), and per-plugin version locks.
 - Marketplace includes a one-click E2E acceptance run with copyable report output.
 - Event hooks can auto-run extension commands on lifecycle events (`ticket.created`, `run.finished`, `review.entered`).
+- Hook Builder can save board-level hook bindings directly in OpenMac (no manual `plugin.json` edit required).
 - Hook execution is queued with dedupe + retry/backoff so rapid repeated events do not flood extensions.
 
 ## Runtime Contract

@@ -1188,6 +1188,54 @@ enum PMExtensionHookEvent: String, CaseIterable, Codable, Identifiable {
     case boardRunFinished = "board.run.finished"
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ticketCreated:
+            return "Ticket Created"
+        case .runFinished:
+            return "Run Finished"
+        case .reviewEntered:
+            return "Review Entered"
+        case .boardRunFinished:
+            return "Board Run Finished"
+        }
+    }
+}
+
+struct PMBoardExtensionHookBinding: Equatable, Identifiable, Codable {
+    var id: UUID
+    var event: PMExtensionHookEvent
+    var pluginID: String
+    var commandID: String
+    var isEnabled: Bool
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        event: PMExtensionHookEvent,
+        pluginID: String,
+        commandID: String,
+        isEnabled: Bool = true,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.event = event
+        self.pluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.commandID = commandID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+    }
+}
+
+struct PMBoardExtensionHookDescriptor: Equatable, Identifiable {
+    var id: UUID
+    var event: PMExtensionHookEvent
+    var pluginID: String
+    var pluginName: String
+    var commandID: String
+    var commandTitle: String
+    var isEnabled: Bool
 }
 
 struct PMPlannerUIExtensionSchema: Equatable {
@@ -1493,6 +1541,7 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
     var wipLimits: [KanbanStatus: Int]
     var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy?
     var sharedAgentMemory: [SharedAgentMemoryEntry]?
+    var pmExtensionHookBindings: [PMBoardExtensionHookBinding]?
 
     init(
         id: UUID = UUID(),
@@ -1501,7 +1550,8 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
         agents: [AgentProfile] = [],
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
         executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil,
-        sharedAgentMemory: [SharedAgentMemoryEntry]? = nil
+        sharedAgentMemory: [SharedAgentMemoryEntry]? = nil,
+        pmExtensionHookBindings: [PMBoardExtensionHookBinding]? = nil
     ) {
         self.id = id
         self.name = name
@@ -1512,5 +1562,6 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
         }
         self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
         self.sharedAgentMemory = sharedAgentMemory
+        self.pmExtensionHookBindings = pmExtensionHookBindings
     }
 }

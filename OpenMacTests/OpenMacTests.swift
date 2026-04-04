@@ -5302,6 +5302,90 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.pmExtensionActivityLog.contains(where: { $0.commandID == "on-create" && $0.outcome == .succeeded }))
     }
 
+    @Test("Board hook configuration runs without manifest eventHooks and can be toggled")
+    func pmBoardHookConfigurationRunsAndCanBeDisabled() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("board-hook-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.board-hook",
+          "name": "Board Hook Plugin",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "on-create", "title": "On Create", "slots": ["app.toolbar"], "permissions": ["command.execute"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"board-hook-ok"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        guard let command = viewModel.pmExtensionCommands().first(where: { $0.pluginID == "com.example.board-hook" && $0.commandID == "on-create" }) else {
+            #expect(Bool(false), "Missing extension command")
+            return
+        }
+        let addedHook = viewModel.addPMBoardExtensionHook(
+            eventRawValue: PMExtensionHookEvent.ticketCreated.rawValue,
+            commandDescriptorID: command.id
+        )
+        #expect(addedHook)
+        #expect(viewModel.pmBoardExtensionHookDescriptors().count == 1)
+
+        let addedTask = viewModel.addTask(
+            title: "Board Hook Task 1",
+            details: "First task",
+            requiredSkillsText: "",
+            autoAssign: false
+        )
+        #expect(addedTask)
+        let firstSuccessCount = viewModel.pmExtensionActivityLog.filter {
+            $0.commandID == "on-create" && $0.outcome == .succeeded
+        }.count
+        #expect(firstSuccessCount >= 1)
+
+        guard let savedHook = viewModel.pmBoardExtensionHookDescriptors().first else {
+            #expect(Bool(false), "Missing saved board hook")
+            return
+        }
+        let disabled = viewModel.setPMBoardExtensionHookEnabled(hookID: savedHook.id, isEnabled: false)
+        #expect(disabled)
+
+        let addedSecondTask = viewModel.addTask(
+            title: "Board Hook Task 2",
+            details: "Second task",
+            requiredSkillsText: "",
+            autoAssign: false
+        )
+        #expect(addedSecondTask)
+
+        let secondSuccessCount = viewModel.pmExtensionActivityLog.filter {
+            $0.commandID == "on-create" && $0.outcome == .succeeded
+        }.count
+        #expect(secondSuccessCount == firstSuccessCount)
+    }
+
     @Test("Update all marketplace sources installs each source")
     func pmExtensionUpdateAllMarketplaceSources() throws {
         let fileManager = FileManager.default

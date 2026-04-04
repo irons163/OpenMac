@@ -1537,6 +1537,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var pmExtensionObservability: [PMExtensionObservabilitySnapshot] = []
     @Published private(set) var pmExtensionLastAcceptanceReport: PMExtensionE2EAcceptanceReport?
     @Published private(set) var sharedAgentMemory: [SharedAgentMemoryEntry] = []
+    @Published private(set) var pmBoardExtensionHookBindings: [PMBoardExtensionHookBinding] = []
     @Published private(set) var sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode
     @Published private(set) var sharedAgentMemoryPreferredProviderID: String?
     @Published private(set) var sharedAgentMemoryMutedProviderIDs: Set<String>
@@ -1761,6 +1762,7 @@ final class KanbanBoardViewModel: ObservableObject {
         pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
         pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
         sharedAgentMemory: [SharedAgentMemoryEntry] = [],
+        pmBoardExtensionHookBindings: [PMBoardExtensionHookBinding] = [],
         sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode = .coreOnly,
         sharedAgentMemoryPreferredProviderID: String? = nil,
         sharedAgentMemoryMutedProviderIDs: Set<String> = [],
@@ -1789,7 +1791,8 @@ final class KanbanBoardViewModel: ObservableObject {
             agents: agents,
             wipLimits: normalizedLimits,
             executionRealArtifactVerificationPolicy: nil,
-            sharedAgentMemory: sharedAgentMemory
+            sharedAgentMemory: sharedAgentMemory,
+            pmExtensionHookBindings: Self.normalizedBoardExtensionHookBindings(pmBoardExtensionHookBindings)
         )
         self.boards = [initialBoard]
         self.selectedBoardID = initialBoard.id
@@ -1814,6 +1817,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.sharedAgentMemory = sharedAgentMemory
+        self.pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(pmBoardExtensionHookBindings)
         self.sharedAgentMemoryProviderMode = sharedAgentMemoryProviderMode
         self.sharedAgentMemoryPreferredProviderID = Self.normalizedProviderDescriptorID(sharedAgentMemoryPreferredProviderID)
         self.sharedAgentMemoryMutedProviderIDs = Set(sharedAgentMemoryMutedProviderIDs.compactMap(Self.normalizedProviderDescriptorID))
@@ -1905,6 +1909,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.sharedAgentMemory = resolvedBoard.sharedAgentMemory ?? []
+        self.pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(
+            resolvedBoard.pmExtensionHookBindings ?? []
+        )
         self.sharedAgentMemoryProviderMode = sharedAgentMemoryProviderMode
         self.sharedAgentMemoryPreferredProviderID = Self.normalizedProviderDescriptorID(sharedAgentMemoryPreferredProviderID)
         self.sharedAgentMemoryMutedProviderIDs = Set(sharedAgentMemoryMutedProviderIDs.compactMap(Self.normalizedProviderDescriptorID))
@@ -5142,6 +5149,109 @@ final class KanbanBoardViewModel: ObservableObject {
         pmExtensionCommands(slot: Self.extensionCommandMarketplacePanelSlot)
     }
 
+    func pmBoardExtensionHookDescriptors() -> [PMBoardExtensionHookDescriptor] {
+        let commands = pmExtensionCommands()
+        let installedByPluginID = Dictionary(
+            uniqueKeysWithValues: pmInstalledExtensions().map { ($0.pluginID.lowercased(), $0.name) }
+        )
+        return pmBoardExtensionHookBindings.map { binding in
+            let matchingCommand = commands.first(where: {
+                $0.pluginID.caseInsensitiveCompare(binding.pluginID) == .orderedSame &&
+                    $0.commandID.caseInsensitiveCompare(binding.commandID) == .orderedSame
+            })
+            let pluginName = matchingCommand?.pluginName
+                ?? installedByPluginID[binding.pluginID.lowercased()]
+                ?? binding.pluginID
+            let commandTitle = matchingCommand?.title ?? binding.commandID
+            return PMBoardExtensionHookDescriptor(
+                id: binding.id,
+                event: binding.event,
+                pluginID: binding.pluginID,
+                pluginName: pluginName,
+                commandID: binding.commandID,
+                commandTitle: commandTitle,
+                isEnabled: binding.isEnabled
+            )
+        }
+    }
+
+    @discardableResult
+    func addPMBoardExtensionHook(
+        eventRawValue: String,
+        commandDescriptorID: String
+    ) -> Bool {
+        let normalizedEvent = Self.normalizedPMExtensionHookEvent(eventRawValue)
+        guard let event = PMExtensionHookEvent(rawValue: normalizedEvent) else {
+            lastBoardMessage = message("Hook save failed: unsupported event")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let descriptorID = commandDescriptorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !descriptorID.isEmpty,
+              let descriptor = pmExtensionCommands().first(where: { $0.id == descriptorID }) else {
+            lastBoardMessage = message("Hook save failed: extension command not found")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let isDuplicate = pmBoardExtensionHookBindings.contains(where: { binding in
+            binding.event == event &&
+                binding.pluginID.caseInsensitiveCompare(descriptor.pluginID) == .orderedSame &&
+                binding.commandID.caseInsensitiveCompare(descriptor.commandID) == .orderedSame
+        })
+        guard !isDuplicate else {
+            lastBoardMessage = message("Hook already configured for this event and command")
+            lastBoardMessageSeverity = .info
+            return false
+        }
+
+        pmBoardExtensionHookBindings.append(
+            PMBoardExtensionHookBinding(
+                event: event,
+                pluginID: descriptor.pluginID,
+                commandID: descriptor.commandID
+            )
+        )
+        pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(pmBoardExtensionHookBindings)
+        persistBoardState()
+        lastBoardMessage = message("Saved board hook: %@ -> %@", event.rawValue, descriptor.title)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func setPMBoardExtensionHookEnabled(
+        hookID: UUID,
+        isEnabled: Bool
+    ) -> Bool {
+        guard let index = pmBoardExtensionHookBindings.firstIndex(where: { $0.id == hookID }) else {
+            return false
+        }
+        guard pmBoardExtensionHookBindings[index].isEnabled != isEnabled else {
+            return false
+        }
+        pmBoardExtensionHookBindings[index].isEnabled = isEnabled
+        persistBoardState()
+        lastBoardMessage = isEnabled
+            ? message("Enabled board hook")
+            : message("Disabled board hook")
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func removePMBoardExtensionHook(hookID: UUID) -> Bool {
+        guard let index = pmBoardExtensionHookBindings.firstIndex(where: { $0.id == hookID }) else {
+            return false
+        }
+        pmBoardExtensionHookBindings.remove(at: index)
+        persistBoardState()
+        lastBoardMessage = message("Removed board hook")
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
     private struct PreparedPMExtensionCommandExecution {
         let descriptor: PMExtensionCommandDescriptor
         let workingDirectoryPath: String
@@ -5491,26 +5601,40 @@ final class KanbanBoardViewModel: ObservableObject {
             let commands = (record.manifest.commands ?? []).filter { $0.enabled ?? true }
             let hooks = (record.manifest.eventHooks ?? []).filter { $0.enabled ?? true }
 
-            for hook in hooks {
-                let hookEvent = Self.normalizedPMExtensionHookEvent(hook.event ?? "")
-                guard hookEvent == eventKey else { continue }
-                let commandID = (hook.commandID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !commandID.isEmpty else { continue }
+            func enqueueHookCommand(
+                commandID: String,
+                hookSource: String,
+                hookBindingID: UUID? = nil
+            ) {
                 guard let commandManifest = commands.first(where: {
-                    (($0.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == commandID
-                }) else { continue }
+                    (($0.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+                        .caseInsensitiveCompare(commandID) == .orderedSame
+                }) else {
+                    appendPMExtensionActivity(
+                        pluginID: pluginID,
+                        pluginName: pluginName,
+                        commandID: commandID,
+                        commandTitle: commandID,
+                        outcome: .info,
+                        detail: "Hook skipped: command not found (\(hookSource))"
+                    )
+                    return
+                }
+
+                let resolvedCommandID = (commandManifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !resolvedCommandID.isEmpty else { return }
 
                 let title = {
                     let trimmed = (commandManifest.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    return trimmed.isEmpty ? commandID : trimmed
+                    return trimmed.isEmpty ? resolvedCommandID : trimmed
                 }()
                 let subtitle = (commandManifest.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let permissions = Self.normalizedExtensionPermissions(commandManifest.permissions ?? record.manifest.permissions ?? [])
                 let descriptor = PMExtensionCommandDescriptor(
-                    id: "\(pluginID).\(commandID)",
+                    id: "\(pluginID).\(resolvedCommandID)",
                     pluginID: pluginID,
                     pluginName: pluginName,
-                    commandID: commandID,
+                    commandID: resolvedCommandID,
                     title: title,
                     subtitle: subtitle,
                     slots: Self.normalizedExtensionCommandSlots(commandManifest.slots, singleSlot: commandManifest.slot),
@@ -5518,15 +5642,20 @@ final class KanbanBoardViewModel: ObservableObject {
                     timeoutSeconds: Self.resolvedExtensionCommandTimeout(commandManifest.timeoutSeconds),
                     entrypoint: (commandManifest.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 )
+
                 var mergedInputs = additionalInputs
                 mergedInputs["hookEvent"] = eventKey
+                mergedInputs["hookSource"] = hookSource
+                if let hookBindingID {
+                    mergedInputs["hookBindingID"] = hookBindingID.uuidString
+                }
                 if let task {
                     mergedInputs["taskID"] = task.id.uuidString
                     mergedInputs["taskTitle"] = task.title
                     mergedInputs["taskStatus"] = task.status.rawValue
                 }
                 let dedupTaskID = task?.id.uuidString ?? "none"
-                let key = "\(eventKey)|\(pluginID.lowercased())|\(commandID.lowercased())|\(dedupTaskID)"
+                let key = "\(eventKey)|\(pluginID.lowercased())|\(resolvedCommandID.lowercased())|\(dedupTaskID)"
                 enqueuePMExtensionHookWorkItem(
                     PMExtensionHookWorkItem(
                         key: key,
@@ -5536,6 +5665,27 @@ final class KanbanBoardViewModel: ObservableObject {
                         extensionInputs: mergedInputs,
                         retryCount: 0
                     )
+                )
+            }
+
+            for hook in hooks {
+                let hookEvent = Self.normalizedPMExtensionHookEvent(hook.event ?? "")
+                guard hookEvent == eventKey else { continue }
+                let commandID = (hook.commandID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !commandID.isEmpty else { continue }
+                enqueueHookCommand(commandID: commandID, hookSource: "manifest")
+            }
+
+            let boardHooks = pmBoardExtensionHookBindings.filter { binding in
+                binding.isEnabled &&
+                    binding.event.rawValue == eventKey &&
+                    binding.pluginID.caseInsensitiveCompare(pluginID) == .orderedSame
+            }
+            for binding in boardHooks {
+                enqueueHookCommand(
+                    commandID: binding.commandID,
+                    hookSource: "board",
+                    hookBindingID: binding.id
                 )
             }
         }
@@ -11468,6 +11618,7 @@ final class KanbanBoardViewModel: ObservableObject {
         boards[selectedBoardIndex].agents = agents
         boards[selectedBoardIndex].wipLimits = wipLimits
         boards[selectedBoardIndex].sharedAgentMemory = sharedAgentMemory
+        boards[selectedBoardIndex].pmExtensionHookBindings = pmBoardExtensionHookBindings
         boards[selectedBoardIndex].executionRealArtifactVerificationPolicy =
             selectedBoardUsesDefaultRealArtifactVerificationPolicy
             ? nil
@@ -11492,6 +11643,7 @@ final class KanbanBoardViewModel: ObservableObject {
         executionRealArtifactVerificationPolicy =
             board.executionRealArtifactVerificationPolicy ?? executionRealArtifactVerificationDefaultPolicy
         sharedAgentMemory = board.sharedAgentMemory ?? []
+        pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(board.pmExtensionHookBindings ?? [])
         lastUnassignedTaskIDs = Set(tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.map(\.id))
         lastAssignmentReasons = [:]
         lastBoardMessage = nil
@@ -11552,8 +11704,49 @@ final class KanbanBoardViewModel: ObservableObject {
             executionRealArtifactVerificationPolicy: board.executionRealArtifactVerificationPolicy,
             sharedAgentMemory: (board.sharedAgentMemory ?? []).filter {
                 !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
+            },
+            pmExtensionHookBindings: Self.normalizedBoardExtensionHookBindings(board.pmExtensionHookBindings ?? [])
         )
+    }
+
+    private static func normalizedBoardExtensionHookBindings(
+        _ bindings: [PMBoardExtensionHookBinding]
+    ) -> [PMBoardExtensionHookBinding] {
+        var seen = Set<String>()
+        var normalized: [PMBoardExtensionHookBinding] = []
+
+        for binding in bindings {
+            let pluginID = binding.pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let commandID = binding.commandID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !pluginID.isEmpty, !commandID.isEmpty else { continue }
+
+            let key = "\(binding.event.rawValue)|\(pluginID.lowercased())|\(commandID.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+
+            normalized.append(
+                PMBoardExtensionHookBinding(
+                    id: binding.id,
+                    event: binding.event,
+                    pluginID: pluginID,
+                    commandID: commandID,
+                    isEnabled: binding.isEnabled,
+                    createdAt: binding.createdAt
+                )
+            )
+        }
+
+        return normalized.sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                if lhs.event.rawValue == rhs.event.rawValue {
+                    if lhs.pluginID.caseInsensitiveCompare(rhs.pluginID) == .orderedSame {
+                        return lhs.commandID.localizedCaseInsensitiveCompare(rhs.commandID) == .orderedAscending
+                    }
+                    return lhs.pluginID.localizedCaseInsensitiveCompare(rhs.pluginID) == .orderedAscending
+                }
+                return lhs.event.rawValue < rhs.event.rawValue
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
     }
 
     private func normalizedImportedBoardRecords(_ importedBoards: [KanbanBoardRecord]) -> [KanbanBoardRecord] {

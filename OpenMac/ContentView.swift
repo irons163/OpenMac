@@ -956,6 +956,7 @@ struct ContentView: View {
             PMExtensionsMarketplaceSheet(
                 installedExtensions: installedPMExtensions,
                 commands: installedPMExtensionCommands,
+                configuredHooks: configuredPMExtensionHooks,
                 marketplacePanelCommands: marketplacePanelPMExtensionCommands,
                 marketplaceSources: pmExtensionMarketplaceSources,
                 observabilitySnapshots: pmExtensionObservabilitySnapshots,
@@ -1014,6 +1015,21 @@ struct ContentView: View {
                 onRunCommand: runPMExtensionCommandFromToolbar,
                 onDryRunCommand: { command, inputs in
                     runPMExtensionCommand(command, extensionInputs: inputs)
+                },
+                onAddBoardHook: { event, commandDescriptorID in
+                    _ = viewModel.addPMBoardExtensionHook(
+                        eventRawValue: event,
+                        commandDescriptorID: commandDescriptorID
+                    )
+                },
+                onSetBoardHookEnabled: { hookID, isEnabled in
+                    _ = viewModel.setPMBoardExtensionHookEnabled(
+                        hookID: hookID,
+                        isEnabled: isEnabled
+                    )
+                },
+                onRemoveBoardHook: { hookID in
+                    _ = viewModel.removePMBoardExtensionHook(hookID: hookID)
                 },
                 onRunE2EAcceptance: {
                     _ = viewModel.runPMExtensionE2EAcceptance()
@@ -3338,6 +3354,10 @@ struct ContentView: View {
 
     private var installedPMExtensionCommands: [PMExtensionCommandDescriptor] {
         viewModel.pmExtensionCommands()
+    }
+
+    private var configuredPMExtensionHooks: [PMBoardExtensionHookDescriptor] {
+        viewModel.pmBoardExtensionHookDescriptors()
     }
 
     private var pmExtensionMarketplaceSources: [PMExtensionMarketplaceSource] {
@@ -6365,6 +6385,7 @@ private struct PMExtensionsMarketplaceSheet: View {
 
     let installedExtensions: [PMInstalledExtensionDescriptor]
     let commands: [PMExtensionCommandDescriptor]
+    let configuredHooks: [PMBoardExtensionHookDescriptor]
     let marketplacePanelCommands: [PMExtensionCommandDescriptor]
     let marketplaceSources: [PMExtensionMarketplaceSource]
     let observabilitySnapshots: [PMExtensionObservabilitySnapshot]
@@ -6392,6 +6413,9 @@ private struct PMExtensionsMarketplaceSheet: View {
     let onInstallSource: (UUID) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
     let onDryRunCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
+    let onAddBoardHook: (String, String) -> Void
+    let onSetBoardHookEnabled: (UUID, Bool) -> Void
+    let onRemoveBoardHook: (UUID) -> Void
     let onRunE2EAcceptance: () -> Void
     let onCopyE2EReport: () -> Void
     let onCopyObservability: () -> Void
@@ -6616,18 +6640,19 @@ private struct PMExtensionsMarketplaceSheet: View {
                             .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
 
                         HStack(spacing: 8) {
-                            Button("Copy Hook Object") {
+                            Button("Add Hook to Board") {
+                                guard let selectedHookCommand else { return }
+                                onAddBoardHook(hookEvent, selectedHookCommand.id)
+                                hookBuilderMessage = "Board hook saved"
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedHookCommand == nil)
+
+                            Button("Copy Hook JSON") {
                                 Self.copyToPasteboard(hookObjectTemplate)
                                 hookBuilderMessage = "Hook object copied"
                             }
                             .buttonStyle(.bordered)
-                            .disabled(selectedHookCommand == nil)
-
-                            Button("Copy eventHooks Block") {
-                                Self.copyToPasteboard(eventHooksTemplate)
-                                hookBuilderMessage = "eventHooks block copied"
-                            }
-                            .buttonStyle(.borderedProminent)
                             .disabled(selectedHookCommand == nil)
                         }
 
@@ -6635,6 +6660,44 @@ private struct PMExtensionsMarketplaceSheet: View {
                             Text(hookBuilderMessage)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if configuredHooks.isEmpty {
+                        Text("No board hooks configured")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(configuredHooks) { hook in
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(hook.event.title) -> \(hook.commandTitle)")
+                                        .font(.caption.weight(.semibold))
+                                    Text("\(hook.pluginName) · \(hook.commandID)")
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Toggle(
+                                    isOn: Binding(
+                                        get: { hook.isEnabled },
+                                        set: { onSetBoardHookEnabled(hook.id, $0) }
+                                    )
+                                ) {
+                                    Text(hook.isEnabled ? "On" : "Off")
+                                        .font(.caption2)
+                                }
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+
+                                Button("Remove") {
+                                    onRemoveBoardHook(hook.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(8)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
