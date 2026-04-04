@@ -1097,6 +1097,14 @@ struct PMExtensionActivityLogEntry: Equatable, Identifiable {
     var detail: String
 }
 
+enum PMExtensionHookEvent: String, CaseIterable, Codable, Identifiable {
+    case ticketCreated = "ticket.created"
+    case runFinished = "run.finished"
+    case reviewEntered = "review.entered"
+
+    var id: String { rawValue }
+}
+
 struct PMPlannerUIExtensionSchema: Equatable {
     var fields: [PMPlannerUIExtensionField]
     var actions: [PMPlannerUIExtensionAction]

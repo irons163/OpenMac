@@ -38,6 +38,8 @@ OpenMac is a macOS-first AI agent Kanban app for planning, dispatching, and runn
   - `app.toolbar`
   - `task.card`
   - `pm.planner.panel`
+- Extension event hooks: `ticket.created`, `run.finished`, `review.entered`
+- Built-in extension test harness (dry-run payload + JSON validation)
 - Board health recommendations, WIP limits, and manual triage
 - Workspace import/export JSON
 - Multi-language UI:

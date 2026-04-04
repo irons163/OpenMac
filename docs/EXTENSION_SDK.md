@@ -39,6 +39,9 @@ Default extension folder:
       "enabled": true
     }
   ],
+  "eventHooks": [
+    { "event": "ticket.created", "commandID": "health-check", "enabled": true }
+  ],
   "uiExtensions": [
     {
       "id": "brainstorm",
@@ -68,6 +71,7 @@ Alias values are normalized by OpenMac (for compatibility), but use the canonica
 - If permissions are not declared, OpenMac runs in compatibility mode and logs a warning.
 - Marketplace includes an activity log for install/run success/failure debugging.
 - Marketplace supports saved install sources and extension enable/disable toggles.
+- Event hooks can auto-run extension commands on lifecycle events (`ticket.created`, `run.finished`, `review.entered`).
 
 ## Runtime Contract
 

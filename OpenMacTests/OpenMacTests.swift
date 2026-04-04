@@ -5229,6 +5229,108 @@ struct KanbanSupportTypeTests {
         #expect(!viewModel.pmToolbarExtensionCommands().contains(where: { $0.commandID == "hello" }))
     }
 
+    @Test("PM extension event hook runs command when ticket is created")
+    func pmExtensionEventHookRunsOnTicketCreated() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("hook-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.hook",
+          "name": "Hook Plugin",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "on-create", "title": "On Create", "slots": ["app.toolbar"], "permissions": ["command.execute"], "enabled": true }
+          ],
+          "eventHooks": [
+            { "id": "hook-ticket-created", "event": "ticket.created", "commandID": "on-create", "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"hook-ok"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let added = viewModel.addTask(
+            title: "Hooked Task",
+            details: "Task created from test",
+            requiredSkillsText: "",
+            autoAssign: false
+        )
+        #expect(added)
+        #expect(waitForMainQueue(timeout: 2.0) {
+            viewModel.pmExtensionActivityLog.contains(where: { $0.commandID == "on-create" && $0.outcome == .succeeded })
+        })
+    }
+
+    @Test("Update all marketplace sources installs each source")
+    func pmExtensionUpdateAllMarketplaceSources() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let sourceOne = root.appendingPathComponent("source-one", isDirectory: true)
+        let sourceTwo = root.appendingPathComponent("source-two", isDirectory: true)
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: sourceOne, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: sourceTwo, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        func writePlugin(at url: URL, id: String, name: String) throws {
+            try """
+            {
+              "id": "\(id)",
+              "name": "\(name)",
+              "entrypoint": "./run.sh",
+              "enabled": true
+            }
+            """.data(using: .utf8)?.write(to: url.appendingPathComponent("plugin.json"))
+            let scriptURL = url.appendingPathComponent("run.sh")
+            try """
+            #!/bin/zsh
+            echo '{"message":"ok"}'
+            """.data(using: .utf8)?.write(to: scriptURL)
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        }
+
+        try writePlugin(at: sourceOne, id: "com.example.source.one", name: "Source One")
+        try writePlugin(at: sourceTwo, id: "com.example.source.two", name: "Source Two")
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+        #expect(viewModel.addPMExtensionMarketplaceSource(name: "one", source: sourceOne.path))
+        #expect(viewModel.addPMExtensionMarketplaceSource(name: "two", source: sourceTwo.path))
+
+        let result = viewModel.updateAllPMExtensionsFromMarketplaceSources()
+        #expect(result.succeeded == 2)
+        #expect(result.failed == 0)
+
+        let installedIDs = Set(viewModel.pmInstalledExtensions().map(\.pluginID))
+        #expect(installedIDs.contains("com.example.source.one"))
+        #expect(installedIDs.contains("com.example.source.two"))
+    }
+
     @Test("install PM extension from remote supports local ZIP source")
     func installPMExtensionFromRemoteZIP() throws {
         let fileManager = FileManager.default

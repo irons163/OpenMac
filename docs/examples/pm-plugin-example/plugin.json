@@ -15,6 +15,14 @@
       "enabled": true
     }
   ],
+  "eventHooks": [
+    {
+      "id": "on-run-finished",
+      "event": "run.finished",
+      "commandID": "quick-brief-audit",
+      "enabled": true
+    }
+  ],
   "uiExtensions": [
     {
       "id": "brainstorm",

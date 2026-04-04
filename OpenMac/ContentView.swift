@@ -943,6 +943,10 @@ struct ContentView: View {
                     _ = viewModel.installPMExtensionFromRemote(source)
                     refreshPMPluginDiagnostics(announce: false)
                 },
+                onUpdateAllSources: {
+                    _ = viewModel.updateAllPMExtensionsFromMarketplaceSources()
+                    refreshPMPluginDiagnostics(announce: false)
+                },
                 onRescan: { refreshPMPluginDiagnostics() },
                 onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
@@ -965,6 +969,9 @@ struct ContentView: View {
                     refreshPMPluginDiagnostics(announce: false)
                 },
                 onRunCommand: runPMExtensionCommandFromToolbar,
+                onDryRunCommand: { command, inputs in
+                    runPMExtensionCommand(command, extensionInputs: inputs)
+                },
                 onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
                 onClearActivityLog: viewModel.clearPMExtensionActivityLog,
                 onClose: closeExtensionsMarketplaceSheet
@@ -6121,6 +6128,7 @@ private struct PMExtensionsMarketplaceSheet: View {
     let boardMessageSeverity: BoardMessageSeverity?
     let onInstallFromFolder: () -> Void
     let onInstallFromRemote: (String) -> Void
+    let onUpdateAllSources: () -> Void
     let onRescan: () -> Void
     let onOpenPluginsFolder: () -> Void
     let onCopyPluginsFolderPath: () -> Void
@@ -6130,12 +6138,16 @@ private struct PMExtensionsMarketplaceSheet: View {
     let onRemoveSource: (UUID) -> Void
     let onInstallSource: (UUID) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
+    let onDryRunCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
     let onCopyActivityLog: () -> Void
     let onClearActivityLog: () -> Void
     let onClose: () -> Void
     @State private var remoteSource = ""
     @State private var sourceName = ""
     @State private var sourceURL = ""
+    @State private var dryRunCommandID = ""
+    @State private var dryRunInputsJSON = "{\n  \"focus\": \"\"\n}"
+    @State private var dryRunValidationMessage = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -6153,6 +6165,7 @@ private struct PMExtensionsMarketplaceSheet: View {
 
             HStack(spacing: 8) {
                 Button("Install / Update from Folder...", action: onInstallFromFolder)
+                Button("Update All Sources", action: onUpdateAllSources)
                 Button("Rescan", action: onRescan)
                 Button("Open Plugins Folder", action: onOpenPluginsFolder)
                 Button("Copy Plugins Path", action: onCopyPluginsFolderPath)
@@ -6216,6 +6229,68 @@ private struct PMExtensionsMarketplaceSheet: View {
                         }
                         .padding(8)
                         .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Extension Test Harness")
+                    .font(.headline)
+                if commands.isEmpty {
+                    Text("No extension commands available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Command", selection: $dryRunCommandID) {
+                        ForEach(commands) { command in
+                            Text("\(command.pluginName) · \(command.title)")
+                                .tag(command.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onAppear {
+                        if dryRunCommandID.isEmpty {
+                            dryRunCommandID = commands.first?.id ?? ""
+                        }
+                    }
+
+                    TextEditor(text: $dryRunInputsJSON)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .frame(minHeight: 90, maxHeight: 140)
+                        .padding(4)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+
+                    HStack(spacing: 8) {
+                        Button("Validate JSON") {
+                            if Self.parseDryRunInputs(dryRunInputsJSON) != nil {
+                                dryRunValidationMessage = "Dry-run payload is valid"
+                            } else {
+                                dryRunValidationMessage = "Dry-run payload must be a JSON object"
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Run Dry-Run") {
+                            guard let command = commands.first(where: { $0.id == dryRunCommandID }),
+                                  let payload = Self.parseDryRunInputs(dryRunInputsJSON) else {
+                                dryRunValidationMessage = "Select a command and provide valid JSON payload"
+                                return
+                            }
+                            onDryRunCommand(command, payload)
+                            dryRunValidationMessage = "Dry-run started"
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(commands.first(where: { $0.id == dryRunCommandID }) == nil)
+                    }
+
+                    if !dryRunValidationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(dryRunValidationMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -6387,6 +6462,27 @@ private struct PMExtensionsMarketplaceSheet: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
         return formatter.string(from: date)
+    }
+
+    private static func parseDryRunInputs(_ rawJSON: String) -> [String: String]? {
+        let trimmed = rawJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [:] }
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return nil
+        }
+        var parsed: [String: String] = [:]
+        for (key, value) in dictionary {
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedKey.isEmpty else { continue }
+            if let stringValue = value as? String {
+                parsed[trimmedKey] = stringValue
+            } else {
+                parsed[trimmedKey] = String(describing: value)
+            }
+        }
+        return parsed
     }
 }
 

@@ -36,6 +36,10 @@ Plugins/
       "enabled": true
     }
   ],
+  "eventHooks": [
+    { "id": "on-ticket-created", "event": "ticket.created", "commandID": "health-check", "enabled": true },
+    { "id": "on-run-finished", "event": "run.finished", "commandID": "health-check", "enabled": true }
+  ],
   "uiExtensions": [
     {
       "id": "brainstorm",
@@ -77,6 +81,7 @@ Optional:
 - `minOpenMacVersion` / `maxOpenMacVersion` (string, optional): compatibility guard checked on install.
 - `permissions` (string array): extension-level permissions. If command-level permissions are absent, OpenMac uses this as fallback.
 - `commands` (array): command contributions rendered in OpenMac UI contribution points.
+- `eventHooks` (array): auto-run command hooks for planner/runtime lifecycle events.
 - `uiExtensions` (array): declares PM extension UI cards that OpenMac can render.
 
 ## `uiExtensions` fields
@@ -117,6 +122,13 @@ If no local `brainstorm.v1` extension is found, OpenMac inserts a built-in brain
 - `permissions` (string array, optional): include `command.execute` to allow execution when permissions are declared.
 - `timeoutSeconds` (number, optional): command timeout in seconds.
 - `entrypoint` (string, optional): override plugin-level entrypoint for this command.
+- `enabled` (boolean, optional, default `true`)
+
+## `eventHooks` fields
+
+- `id` (string, optional)
+- `event` (string, required): `ticket.created`, `run.finished`, `review.entered`
+- `commandID` (string, required): command contribution id to execute
 - `enabled` (boolean, optional, default `true`)
 
 ## Runtime contract
