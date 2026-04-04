@@ -6390,177 +6390,178 @@ private struct PMExtensionsMarketplaceSheet: View {
     @State private var dryRunValidationMessage = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Extension Marketplace")
-                    .font(.title3.weight(.semibold))
-                Spacer()
-                Button("Close", action: onClose)
-                    .keyboardShortcut(.cancelAction)
-            }
-
-            if let boardMessage, !boardMessage.isEmpty {
-                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
-            }
-
-            HStack(spacing: 8) {
-                Button("Install / Update from Folder...", action: onInstallFromFolder)
-                Button("Update All Sources", action: onUpdateAllSources)
-                Button("Rescan", action: onRescan)
-                Button("Open Plugins Folder", action: onOpenPluginsFolder)
-                Button("Copy Plugins Path", action: onCopyPluginsFolderPath)
-            }
-            .buttonStyle(.bordered)
-
-            HStack(spacing: 8) {
-                TextField("Git URL / ZIP URL / local ZIP path", text: $remoteSource)
-                    .textFieldStyle(.roundedBorder)
-                Button("Install from Remote") {
-                    let source = remoteSource.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !source.isEmpty else { return }
-                    onInstallFromRemote(source)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Extension Marketplace")
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    Button("Close", action: onClose)
+                        .keyboardShortcut(.cancelAction)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(remoteSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
 
-            HStack(spacing: 8) {
-                TextField("Install by Extension ID", text: $installByID)
-                    .textFieldStyle(.roundedBorder)
-                Button("Install by ID") {
-                    let pluginID = installByID.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !pluginID.isEmpty else { return }
-                    onInstallByID(pluginID)
+                if let boardMessage, !boardMessage.isEmpty {
+                    BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(installByID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                Spacer(minLength: 12)
-
-                Picker("Update Channel", selection: Binding(
-                    get: { preferredChannel },
-                    set: { onSetPreferredChannel($0) }
-                )) {
-                    ForEach(PMExtensionUpdateChannel.allCases) { channel in
-                        Text(channel.title).tag(channel)
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 220)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Saved Sources")
-                    .font(.headline)
                 HStack(spacing: 8) {
-                    TextField("Source name", text: $sourceName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 220)
-                    TextField("Git URL / ZIP URL / local path", text: $sourceURL)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Add") {
-                        let name = sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let source = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !source.isEmpty else { return }
-                        onAddSource(name, source)
-                        sourceName = ""
-                        sourceURL = ""
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Install / Update from Folder...", action: onInstallFromFolder)
+                    Button("Update All Sources", action: onUpdateAllSources)
+                    Button("Rescan", action: onRescan)
+                    Button("Open Plugins Folder", action: onOpenPluginsFolder)
+                    Button("Copy Plugins Path", action: onCopyPluginsFolderPath)
                 }
-                if marketplaceSources.isEmpty {
-                    Text("No saved sources")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(marketplaceSources) { source in
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(source.name)
-                                    .font(.caption.weight(.semibold))
-                                Text(source.source)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Button("Install") { onInstallSource(source.id) }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                            Button("Remove") { onRemoveSource(source.id) }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
-                        .padding(8)
-                        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                }
-            }
+                .buttonStyle(.bordered)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Extension Test Harness")
-                    .font(.headline)
-                if commands.isEmpty {
-                    Text("No extension commands available")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker("Command", selection: $dryRunCommandID) {
-                        ForEach(commands) { command in
-                            Text("\(command.pluginName) · \(command.title)")
-                                .tag(command.id)
+                HStack(spacing: 8) {
+                    TextField("Git URL / ZIP URL / local ZIP path", text: $remoteSource)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Install from Remote") {
+                        let source = remoteSource.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !source.isEmpty else { return }
+                        onInstallFromRemote(source)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(remoteSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Install by Extension ID", text: $installByID)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Install by ID") {
+                        let pluginID = installByID.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !pluginID.isEmpty else { return }
+                        onInstallByID(pluginID)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(installByID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Spacer(minLength: 12)
+
+                    Picker("Update Channel", selection: Binding(
+                        get: { preferredChannel },
+                        set: { onSetPreferredChannel($0) }
+                    )) {
+                        ForEach(PMExtensionUpdateChannel.allCases) { channel in
+                            Text(channel.title).tag(channel)
                         }
                     }
                     .pickerStyle(.menu)
-                    .onAppear {
-                        if dryRunCommandID.isEmpty {
-                            dryRunCommandID = commands.first?.id ?? ""
-                        }
-                    }
+                    .frame(maxWidth: 220)
+                }
 
-                    TextEditor(text: $dryRunInputsJSON)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .frame(minHeight: 90, maxHeight: 140)
-                        .padding(4)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                        )
-
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Saved Sources")
+                        .font(.headline)
                     HStack(spacing: 8) {
-                        Button("Validate JSON") {
-                            if Self.parseDryRunInputs(dryRunInputsJSON) != nil {
-                                dryRunValidationMessage = "Dry-run payload is valid"
-                            } else {
-                                dryRunValidationMessage = "Dry-run payload must be a JSON object"
-                            }
+                        TextField("Source name", text: $sourceName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 220)
+                        TextField("Git URL / ZIP URL / local path", text: $sourceURL)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Add") {
+                            let name = sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let source = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !source.isEmpty else { return }
+                            onAddSource(name, source)
+                            sourceName = ""
+                            sourceURL = ""
                         }
                         .buttonStyle(.bordered)
-
-                        Button("Run Dry-Run") {
-                            guard let command = commands.first(where: { $0.id == dryRunCommandID }),
-                                  let payload = Self.parseDryRunInputs(dryRunInputsJSON) else {
-                                dryRunValidationMessage = "Select a command and provide valid JSON payload"
-                                return
-                            }
-                            onDryRunCommand(command, payload)
-                            dryRunValidationMessage = "Dry-run started"
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(commands.first(where: { $0.id == dryRunCommandID }) == nil)
+                        .disabled(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-
-                    if !dryRunValidationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(dryRunValidationMessage)
-                            .font(.caption2)
+                    if marketplaceSources.isEmpty {
+                        Text("No saved sources")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(marketplaceSources) { source in
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(source.name)
+                                        .font(.caption.weight(.semibold))
+                                    Text(source.source)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Button("Install") { onInstallSource(source.id) }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                Button("Remove") { onRemoveSource(source.id) }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            }
+                            .padding(8)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Extension Test Harness")
+                        .font(.headline)
+                    if commands.isEmpty {
+                        Text("No extension commands available")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Command", selection: $dryRunCommandID) {
+                            ForEach(commands) { command in
+                                Text("\(command.pluginName) · \(command.title)")
+                                    .tag(command.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onAppear {
+                            if dryRunCommandID.isEmpty {
+                                dryRunCommandID = commands.first?.id ?? ""
+                            }
+                        }
+
+                        TextEditor(text: $dryRunInputsJSON)
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .frame(minHeight: 90, maxHeight: 140)
+                            .padding(4)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                            )
+
+                        HStack(spacing: 8) {
+                            Button("Validate JSON") {
+                                if Self.parseDryRunInputs(dryRunInputsJSON) != nil {
+                                    dryRunValidationMessage = "Dry-run payload is valid"
+                                } else {
+                                    dryRunValidationMessage = "Dry-run payload must be a JSON object"
+                                }
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Run Dry-Run") {
+                                guard let command = commands.first(where: { $0.id == dryRunCommandID }),
+                                      let payload = Self.parseDryRunInputs(dryRunInputsJSON) else {
+                                    dryRunValidationMessage = "Select a command and provide valid JSON payload"
+                                    return
+                                }
+                                onDryRunCommand(command, payload)
+                                dryRunValidationMessage = "Dry-run started"
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(commands.first(where: { $0.id == dryRunCommandID }) == nil)
+                        }
+
+                        if !dryRunValidationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(dryRunValidationMessage)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Extension E2E Acceptance")
                         .font(.headline)
@@ -6629,13 +6630,6 @@ private struct PMExtensionsMarketplaceSheet: View {
                     }
                 }
             }
-
-            Text(pluginsFolderPath)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-
-            ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if installedExtensions.isEmpty {
                         Text("No extensions installed")
@@ -6856,9 +6850,14 @@ private struct PMExtensionsMarketplaceSheet: View {
                         }
                     }
                 }
+
+                Text(pluginsFolderPath)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
+            .padding(18)
         }
-        .padding(18)
         .frame(minWidth: 760, minHeight: 560)
     }
 
