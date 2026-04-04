@@ -913,6 +913,7 @@ struct ContentView: View {
                 onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
                 onRefreshPMPlugins: { refreshPMPluginDiagnostics() },
                 onInstallPMExtension: installPMExtensionFromFolder,
+                onOpenPMExtensionsMarketplace: openExtensionsMarketplaceSheet,
                 onCopyPMPluginDiagnostics: {
                     let names = viewModel.pmPlanningLocalPluginNames()
                     let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
@@ -7157,6 +7158,7 @@ private struct PMPlannerSheet: View {
     let onCopyPMPluginsPath: () -> Void
     let onRefreshPMPlugins: () -> Void
     let onInstallPMExtension: () -> Void
+    let onOpenPMExtensionsMarketplace: () -> Void
     let onCopyPMPluginDiagnostics: () -> Void
 
     private var totalStoryPoints: Int {
@@ -7435,6 +7437,9 @@ private struct PMPlannerSheet: View {
                                 .controlSize(.small)
                                 .disabled(!pmPluginsAutoDiscover)
                             Button("Install PM Extension", action: onInstallPMExtension)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            Button("Open Extension Marketplace...", action: onOpenPMExtensionsMarketplace)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                             Button(L10n.string("Open PM Plugins Folder in Finder"), action: onOpenPMPluginsFolder)
