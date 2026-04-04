@@ -3375,6 +3375,10 @@ struct ContentView: View {
         viewModel.sharedAgentMemory
     }
 
+    private var sharedMemoryProviders: [SharedAgentMemoryProviderDescriptor] {
+        viewModel.sharedMemoryProviders()
+    }
+
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
         viewModel.selectedBoardDependencyInsights
     }
@@ -3788,6 +3792,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private func sharedAgentMemorySection() -> some View {
+        let providers = sharedMemoryProviders
+        let modeBinding = Binding<SharedAgentMemoryProviderMode>(
+            get: { viewModel.sharedAgentMemoryProviderMode },
+            set: { viewModel.updateSharedAgentMemoryProviderMode($0) }
+        )
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Shared Agent Memory")
@@ -3812,6 +3821,32 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(sharedAgentMemoryEntries.isEmpty)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Mode")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    Picker("Shared Memory Mode", selection: modeBinding) {
+                        ForEach(SharedAgentMemoryProviderMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if viewModel.sharedAgentMemoryProviderMode == .extensionPreferred {
+                    if providers.isEmpty {
+                        Text("No extension memory providers detected. OpenMac will fallback to core memory context.")
+                            .font(.caption)
+                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    } else {
+                        Text("Detected providers: \(providers.map(\.title).joined(separator: ", "))")
+                            .font(.caption)
+                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                            .textSelection(.enabled)
+                    }
+                }
             }
 
             HStack(spacing: 8) {

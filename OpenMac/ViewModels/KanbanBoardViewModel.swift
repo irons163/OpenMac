@@ -1537,6 +1537,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var pmExtensionObservability: [PMExtensionObservabilitySnapshot] = []
     @Published private(set) var pmExtensionLastAcceptanceReport: PMExtensionE2EAcceptanceReport?
     @Published private(set) var sharedAgentMemory: [SharedAgentMemoryEntry] = []
+    @Published private(set) var sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1758,6 +1759,7 @@ final class KanbanBoardViewModel: ObservableObject {
         pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
         pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
         sharedAgentMemory: [SharedAgentMemoryEntry] = [],
+        sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode = .coreOnly,
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         },
@@ -1808,6 +1810,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.sharedAgentMemory = sharedAgentMemory
+        self.sharedAgentMemoryProviderMode = sharedAgentMemoryProviderMode
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -1837,6 +1840,7 @@ final class KanbanBoardViewModel: ObservableObject {
         mcpServerPolicy: MCPServerPolicy = .init(),
         pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
         pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
+        sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode = .coreOnly,
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         },
@@ -1893,6 +1897,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.sharedAgentMemory = resolvedBoard.sharedAgentMemory ?? []
+        self.sharedAgentMemoryProviderMode = sharedAgentMemoryProviderMode
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -2518,6 +2523,7 @@ final class KanbanBoardViewModel: ObservableObject {
             mcpServerPolicy = snapshot.mcpServerPolicy ?? .init()
             pmPlannerEngineMode = snapshot.pmPlannerEngineMode ?? .builtIn
             pmPlanningPluginPolicy = snapshot.pmPlanningPluginPolicy ?? .init()
+            sharedAgentMemoryProviderMode = snapshot.sharedAgentMemoryProviderMode ?? .coreOnly
             mcpReadinessCacheByServerName = [:]
             taskExecutionApprovalsByTaskID = (snapshot.taskExecutionApprovalsByTaskID ?? [:]).filter { approvalEntry in
                 importedBoards.contains { board in
@@ -2574,6 +2580,9 @@ final class KanbanBoardViewModel: ObservableObject {
             }
             if let importedPluginPolicy = snapshot.pmPlanningPluginPolicy {
                 pmPlanningPluginPolicy = importedPluginPolicy
+            }
+            if let importedSharedMemoryProviderMode = snapshot.sharedAgentMemoryProviderMode {
+                sharedAgentMemoryProviderMode = importedSharedMemoryProviderMode
             }
             if let importedApprovals = snapshot.taskExecutionApprovalsByTaskID {
                 taskExecutionApprovalsByTaskID.merge(importedApprovals) { _, new in new }
@@ -4361,6 +4370,66 @@ final class KanbanBoardViewModel: ObservableObject {
         persistBoardState()
         lastBoardMessage = message("Cleared shared memory")
         lastBoardMessageSeverity = .warning
+    }
+
+    func updateSharedAgentMemoryProviderMode(_ mode: SharedAgentMemoryProviderMode) {
+        guard sharedAgentMemoryProviderMode != mode else { return }
+        sharedAgentMemoryProviderMode = mode
+        persistBoardState()
+        lastBoardMessage = message("Updated shared memory mode: %@", mode.title)
+        lastBoardMessageSeverity = .info
+    }
+
+    func sharedMemoryProviders() -> [SharedAgentMemoryProviderDescriptor] {
+        detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+            .flatMap { record -> [SharedAgentMemoryProviderDescriptor] in
+                let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !pluginID.isEmpty else { return [] }
+                guard !pmPlanningPluginPolicy.disabledPluginIDs.contains(pluginID.lowercased()) else { return [] }
+                let pluginName = {
+                    let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
+                }()
+                let commandIDs = Set(
+                    (record.manifest.commands ?? [])
+                        .filter { $0.enabled ?? true }
+                        .compactMap { ($0.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                )
+                return (record.manifest.memoryProviders ?? []).compactMap { provider in
+                    guard provider.enabled ?? true else { return nil }
+                    let providerID = (provider.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let commandID = (provider.commandID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !providerID.isEmpty, !commandID.isEmpty else { return nil }
+                    guard commandIDs.contains(commandID) else { return nil }
+                    let title = {
+                        let trimmed = (provider.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? providerID : trimmed
+                    }()
+                    let strategy = {
+                        let trimmed = (provider.strategy ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        return trimmed.isEmpty ? "context.injector" : trimmed
+                    }()
+                    return SharedAgentMemoryProviderDescriptor(
+                        id: "\(pluginID).\(providerID)",
+                        pluginID: pluginID,
+                        pluginName: pluginName,
+                        providerID: providerID,
+                        title: title,
+                        commandID: commandID,
+                        strategy: strategy,
+                        priority: provider.priority ?? 0
+                    )
+                }
+            }
+            .sorted { lhs, rhs in
+                if lhs.priority == rhs.priority {
+                    if lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedSame {
+                        return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                    }
+                    return lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedAscending
+                }
+                return lhs.priority > rhs.priority
+            }
     }
 
     func sharedAgentMemoryText(limit: Int = 80) -> String {
@@ -7622,6 +7691,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let entrypoint: String?
         let commands: [LocalPMPlanningCommandManifestSummary]?
         let eventHooks: [LocalPMPlanningEventHookManifestSummary]?
+        let memoryProviders: [LocalPMPlanningMemoryProviderManifestSummary]?
         let enabled: Bool?
         let uiExtensions: [LocalPMPlanningUIExtensionManifestSummary]?
     }
@@ -7645,6 +7715,15 @@ final class KanbanBoardViewModel: ObservableObject {
         let subtitle: String?
         let component: String?
         let ui: LocalPMPlanningUIExtensionUISummary?
+        let priority: Int?
+        let enabled: Bool?
+    }
+
+    private struct LocalPMPlanningMemoryProviderManifestSummary: Decodable {
+        let id: String?
+        let title: String?
+        let commandID: String?
+        let strategy: String?
         let priority: Int?
         let enabled: Bool?
     }
@@ -10422,14 +10501,27 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func taskSnapshotWithSharedMemoryContext(_ task: WorkTask, agent: AgentProfile) -> WorkTask {
-        let context = sharedAgentMemoryPromptContext(excludingTaskID: task.id)
+        let coreContext = sharedAgentMemoryPromptContext(excludingTaskID: task.id)
+        let extensionContext = extensionMemoryProviderContext(for: task, agent: agent, coreContext: coreContext)
+        let context: String
+        switch sharedAgentMemoryProviderMode {
+        case .coreOnly:
+            context = coreContext
+        case .extensionPreferred:
+            if let extensionContext, !extensionContext.isEmpty {
+                if coreContext.isEmpty {
+                    context = "Extension memory context:\n\(extensionContext)"
+                } else {
+                    context = "Extension memory context:\n\(extensionContext)\n\nShared team memory (latest context):\n\(coreContext)"
+                }
+            } else {
+                context = coreContext
+            }
+        }
         guard !context.isEmpty else { return task }
 
         let baseDetails = task.details.trimmingCharacters(in: .whitespacesAndNewlines)
-        let memoryHeader = """
-        Shared team memory (latest context):
-        \(context)
-        """
+        let memoryHeader = context
         var enrichedTask = task
         if baseDetails.isEmpty {
             enrichedTask.details = memoryHeader
@@ -10448,6 +10540,48 @@ final class KanbanBoardViewModel: ObservableObject {
             )
         )
         return enrichedTask
+    }
+
+    private func extensionMemoryProviderContext(for task: WorkTask, agent: AgentProfile, coreContext: String) -> String? {
+        guard sharedAgentMemoryProviderMode == .extensionPreferred else { return nil }
+        let providers = sharedMemoryProviders()
+        guard !providers.isEmpty else { return nil }
+        let commands = pmExtensionCommands()
+
+        for provider in providers {
+            guard let command = commands.first(where: {
+                $0.pluginID == provider.pluginID && $0.commandID == provider.commandID
+            }) else {
+                continue
+            }
+            let extensionInputs: [String: String] = [
+                "memoryProvider": provider.providerID,
+                "memoryStrategy": provider.strategy,
+                "memoryPhase": "context.inject",
+                "memoryCoreContext": coreContext,
+                "currentTaskTitle": task.title,
+                "currentTaskID": task.id.uuidString,
+                "currentAgent": agent.name
+            ]
+            let succeeded = runPMExtensionCommand(command, task: task, extensionInputs: extensionInputs)
+            guard succeeded else { continue }
+            let providerOutput = pmExtensionObservability.first(where: {
+                $0.pluginID == provider.pluginID
+            })?.lastOutputSummary
+            if let providerOutput = normalizeExecutionText(providerOutput),
+               providerOutput != "-" {
+                appendAgentExecutionEvent(
+                    agentID: agent.id,
+                    taskID: task.id,
+                    taskTitle: task.title,
+                    status: .running,
+                    phase: .system,
+                    message: message("Loaded extension memory provider: %@", provider.title)
+                )
+                return providerOutput
+            }
+        }
+        return nil
     }
 
     private func appendSharedAgentMemoryEntry(_ entry: SharedAgentMemoryEntry) {
@@ -11240,7 +11374,8 @@ final class KanbanBoardViewModel: ObservableObject {
             mcpServerPolicy: mcpServerPolicy,
             pmPlannerEngineMode: pmPlannerEngineMode,
             pmPlanningPluginPolicy: pmPlanningPluginPolicy,
-            sharedAgentMemory: sharedAgentMemory
+            sharedAgentMemory: sharedAgentMemory,
+            sharedAgentMemoryProviderMode: sharedAgentMemoryProviderMode
         )
         try? boardStore.save(snapshot)
     }
@@ -11284,6 +11419,7 @@ extension KanbanBoardViewModel {
                     mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
                     pmPlannerEngineMode: snapshot.pmPlannerEngineMode ?? .builtIn,
                     pmPlanningPluginPolicy: snapshot.pmPlanningPluginPolicy ?? .init(),
+                    sharedAgentMemoryProviderMode: snapshot.sharedAgentMemoryProviderMode ?? .coreOnly,
                     projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                     assignmentEngine: assignmentEngine,
                     projectPlanner: projectPlanner,
@@ -11314,6 +11450,7 @@ extension KanbanBoardViewModel {
                 pmPlannerEngineMode: snapshot.pmPlannerEngineMode ?? .builtIn,
                 pmPlanningPluginPolicy: snapshot.pmPlanningPluginPolicy ?? .init(),
                 sharedAgentMemory: snapshot.sharedAgentMemory ?? [],
+                sharedAgentMemoryProviderMode: snapshot.sharedAgentMemoryProviderMode ?? .coreOnly,
                 projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,

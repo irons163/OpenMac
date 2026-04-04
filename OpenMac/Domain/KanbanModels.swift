@@ -1448,6 +1448,42 @@ struct SharedAgentMemoryEntry: Identifiable, Equatable, Codable {
     }
 }
 
+enum SharedAgentMemoryProviderMode: String, CaseIterable, Codable, Identifiable {
+    case coreOnly
+    case extensionPreferred
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .coreOnly:
+            return "Core Only"
+        case .extensionPreferred:
+            return "Extension Preferred"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .coreOnly:
+            return "Use OpenMac built-in shared memory context only."
+        case .extensionPreferred:
+            return "Try extension memory providers first, then fallback to built-in shared memory."
+        }
+    }
+}
+
+struct SharedAgentMemoryProviderDescriptor: Equatable, Identifiable {
+    var id: String
+    var pluginID: String
+    var pluginName: String
+    var providerID: String
+    var title: String
+    var commandID: String
+    var strategy: String
+    var priority: Int
+}
+
 struct KanbanBoardRecord: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String

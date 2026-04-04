@@ -12563,6 +12563,83 @@ struct KanbanPersistenceTests {
         #expect(!viewModel.sharedAgentMemoryText().contains("Board two note"))
     }
 
+    @Test("shared memory provider mode is imported from workspace snapshot")
+    func sharedMemoryProviderModeImportsFromSnapshot() throws {
+        let snapshot = KanbanBoardSnapshot(
+            tasks: [],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 2],
+            sharedAgentMemoryProviderMode: .extensionPreferred
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try #require(try? encoder.encode(snapshot))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        #expect(viewModel.sharedAgentMemoryProviderMode == .coreOnly)
+        #expect(viewModel.importWorkspaceData(data, strategy: .replace))
+        #expect(viewModel.sharedAgentMemoryProviderMode == .extensionPreferred)
+    }
+
+    @Test("shared memory provider mode keeps existing value when merge import omits mode")
+    func sharedMemoryProviderModeMergeKeepsExistingWhenMissing() throws {
+        let snapshot = KanbanBoardSnapshot(
+            tasks: [],
+            agents: [],
+            wipLimits: [.inProgress: 3, .review: 2]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try #require(try? encoder.encode(snapshot))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updateSharedAgentMemoryProviderMode(.extensionPreferred)
+
+        #expect(viewModel.importWorkspaceData(data, strategy: .merge))
+        #expect(viewModel.sharedAgentMemoryProviderMode == .extensionPreferred)
+    }
+
+    @Test("shared memory providers parse manifest entries and sort by priority")
+    func sharedMemoryProvidersParseAndSort() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("memory-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.memory",
+          "name": "Memory Plugin",
+          "enabled": true,
+          "commands": [
+            { "id": "inject-high", "title": "Inject High", "enabled": true },
+            { "id": "inject-low", "title": "Inject Low", "enabled": true }
+          ],
+          "memoryProviders": [
+            { "id": "high", "title": "High Priority", "commandID": "inject-high", "priority": 20, "enabled": true },
+            { "id": "low", "title": "Low Priority", "commandID": "inject-low", "priority": 5, "enabled": true },
+            { "id": "disabled", "title": "Disabled", "commandID": "inject-low", "priority": 99, "enabled": false },
+            { "id": "missing-command", "title": "Missing Command", "commandID": "unknown", "priority": 50, "enabled": true }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let providers = viewModel.sharedMemoryProviders()
+        #expect(providers.count == 2)
+        #expect(providers.map(\.title) == ["High Priority", "Low Priority"])
+        #expect(providers.map(\.priority) == [20, 5])
+        #expect(providers.allSatisfy { $0.pluginID == "com.example.memory" })
+    }
+
     @Test("run task execution blocks when unresolved dependencies remain")
     func runTaskExecutionBlocksOnUnresolvedDependencies() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)

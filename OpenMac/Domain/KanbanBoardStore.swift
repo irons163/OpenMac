@@ -22,6 +22,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
     var pmPlannerEngineMode: PMPlannerEngineMode?
     var pmPlanningPluginPolicy: PMPlanningPluginPolicy?
     var sharedAgentMemory: [SharedAgentMemoryEntry]?
+    var sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode?
 
     init(
         tasks: [WorkTask],
@@ -44,7 +45,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         mcpServerPolicy: MCPServerPolicy? = nil,
         pmPlannerEngineMode: PMPlannerEngineMode? = nil,
         pmPlanningPluginPolicy: PMPlanningPluginPolicy? = nil,
-        sharedAgentMemory: [SharedAgentMemoryEntry]? = nil
+        sharedAgentMemory: [SharedAgentMemoryEntry]? = nil,
+        sharedAgentMemoryProviderMode: SharedAgentMemoryProviderMode? = nil
     ) {
         self.tasks = tasks
         self.agents = agents
@@ -67,6 +69,7 @@ struct KanbanBoardSnapshot: Codable, Equatable {
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
         self.sharedAgentMemory = sharedAgentMemory
+        self.sharedAgentMemoryProviderMode = sharedAgentMemoryProviderMode
     }
 
     init(
@@ -95,7 +98,8 @@ struct KanbanBoardSnapshot: Codable, Equatable {
             mcpServerPolicy: nil,
             pmPlannerEngineMode: nil,
             pmPlanningPluginPolicy: nil,
-            sharedAgentMemory: nil
+            sharedAgentMemory: nil,
+            sharedAgentMemoryProviderMode: nil
         )
     }
 }
