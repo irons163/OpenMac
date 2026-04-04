@@ -956,6 +956,7 @@ struct ContentView: View {
                 marketplacePanelCommands: marketplacePanelPMExtensionCommands,
                 marketplaceSources: pmExtensionMarketplaceSources,
                 observabilitySnapshots: pmExtensionObservabilitySnapshots,
+                acceptanceReport: viewModel.pmExtensionLastAcceptanceReport,
                 preferredChannel: viewModel.pmPreferredExtensionChannel(),
                 runningCommandIDs: runningExtensionCommandIDs,
                 activityLog: pmExtensionActivityLog,
@@ -1011,6 +1012,11 @@ struct ContentView: View {
                 onDryRunCommand: { command, inputs in
                     runPMExtensionCommand(command, extensionInputs: inputs)
                 },
+                onRunE2EAcceptance: {
+                    _ = viewModel.runPMExtensionE2EAcceptance()
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onCopyE2EReport: { copyToPasteboard(viewModel.pmExtensionAcceptanceReportText()) },
                 onCopyObservability: { copyToPasteboard(viewModel.pmExtensionObservabilityText()) },
                 onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
                 onClearActivityLog: viewModel.clearPMExtensionActivityLog,
@@ -6179,6 +6185,7 @@ private struct PMExtensionsMarketplaceSheet: View {
     let marketplacePanelCommands: [PMExtensionCommandDescriptor]
     let marketplaceSources: [PMExtensionMarketplaceSource]
     let observabilitySnapshots: [PMExtensionObservabilitySnapshot]
+    let acceptanceReport: PMExtensionE2EAcceptanceReport?
     let preferredChannel: PMExtensionUpdateChannel
     let runningCommandIDs: Set<String>
     let activityLog: [PMExtensionActivityLogEntry]
@@ -6202,6 +6209,8 @@ private struct PMExtensionsMarketplaceSheet: View {
     let onInstallSource: (UUID) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
     let onDryRunCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
+    let onRunE2EAcceptance: () -> Void
+    let onCopyE2EReport: () -> Void
     let onCopyObservability: () -> Void
     let onCopyActivityLog: () -> Void
     let onClearActivityLog: () -> Void
@@ -6382,6 +6391,45 @@ private struct PMExtensionsMarketplaceSheet: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Extension E2E Acceptance")
+                        .font(.headline)
+                    Spacer()
+                    Button("Run E2E Acceptance", action: onRunE2EAcceptance)
+                        .buttonStyle(.borderedProminent)
+                    Button("Copy E2E Report", action: onCopyE2EReport)
+                        .buttonStyle(.bordered)
+                        .disabled(acceptanceReport == nil)
+                }
+
+                if let acceptanceReport {
+                    Text(
+                        "\(acceptanceReport.succeeded ? "PASS" : "FAIL") · \(shortDateTime(acceptanceReport.generatedAt)) · \(acceptanceReport.pluginID)"
+                    )
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(acceptanceReport.succeeded ? .green : .orange)
+
+                    ForEach(acceptanceReport.steps) { step in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(stepStatusLabel(step.status)) · \(step.title)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(stepStatusColor(step.status))
+                            Text(step.detail)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(8)
+                        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                } else {
+                    Text("No E2E acceptance run yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -6653,6 +6701,28 @@ private struct PMExtensionsMarketplaceSheet: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
         return formatter.string(from: date)
+    }
+
+    private func stepStatusLabel(_ status: PMExtensionE2EAcceptanceStep.Status) -> String {
+        switch status {
+        case .passed:
+            return "PASS"
+        case .failed:
+            return "FAIL"
+        case .skipped:
+            return "SKIP"
+        }
+    }
+
+    private func stepStatusColor(_ status: PMExtensionE2EAcceptanceStep.Status) -> Color {
+        switch status {
+        case .passed:
+            return .green
+        case .failed:
+            return .orange
+        case .skipped:
+            return .secondary
+        }
     }
 
     private static func parseDryRunInputs(_ rawJSON: String) -> [String: String]? {

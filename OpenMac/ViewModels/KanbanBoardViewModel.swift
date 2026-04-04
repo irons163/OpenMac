@@ -1535,6 +1535,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var pmPlanningPluginPolicy: PMPlanningPluginPolicy
     @Published private(set) var pmExtensionActivityLog: [PMExtensionActivityLogEntry] = []
     @Published private(set) var pmExtensionObservability: [PMExtensionObservabilitySnapshot] = []
+    @Published private(set) var pmExtensionLastAcceptanceReport: PMExtensionE2EAcceptanceReport?
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -5850,6 +5851,223 @@ final class KanbanBoardViewModel: ObservableObject {
         }.joined(separator: "\n")
     }
 
+    @discardableResult
+    func runPMExtensionE2EAcceptance() -> PMExtensionE2EAcceptanceReport {
+        let runToken = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let shortToken = String(runToken.prefix(8))
+        let pluginID = "com.openmac.e2e.acceptance.\(shortToken)"
+        let pluginName = "OpenMac E2E Acceptance Probe \(shortToken.uppercased())"
+        var steps: [PMExtensionE2EAcceptanceStep] = []
+
+        func addStep(_ title: String, _ status: PMExtensionE2EAcceptanceStep.Status, _ detail: String) {
+            let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            steps.append(
+                PMExtensionE2EAcceptanceStep(
+                    id: normalizedTitle.isEmpty ? UUID().uuidString : normalizedTitle,
+                    title: normalizedTitle.isEmpty ? "Step \(steps.count + 1)" : normalizedTitle,
+                    status: status,
+                    detail: normalizedDetail.isEmpty ? "-" : normalizedDetail
+                )
+            )
+        }
+
+        let fileManager = FileManager.default
+        let tempRootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("openmac-extension-e2e-\(UUID().uuidString)", isDirectory: true)
+        let pluginRootURL = tempRootURL.appendingPathComponent("probe", isDirectory: true)
+        defer { try? fileManager.removeItem(at: tempRootURL) }
+
+        do {
+            guard let manifestData = Self.pmExtensionE2EProbeManifest(pluginID: pluginID, pluginName: pluginName).data(using: .utf8),
+                  let scriptData = Self.pmExtensionE2EProbeScript.data(using: .utf8) else {
+                throw NSError(
+                    domain: "OpenMac.PMExtensionE2EAcceptance",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to encode probe plugin files"]
+                )
+            }
+            try fileManager.createDirectory(at: pluginRootURL, withIntermediateDirectories: true)
+            try manifestData.write(to: pluginRootURL.appendingPathComponent("plugin.json"))
+            try scriptData.write(to: pluginRootURL.appendingPathComponent("run.sh"))
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: pluginRootURL.appendingPathComponent("run.sh").path
+            )
+            addStep("Create Probe Plugin", .passed, pluginRootURL.path)
+        } catch {
+            addStep("Create Probe Plugin", .failed, error.localizedDescription)
+            let report = PMExtensionE2EAcceptanceReport(
+                generatedAt: Date(),
+                pluginID: pluginID,
+                pluginName: pluginName,
+                succeeded: false,
+                steps: steps
+            )
+            pmExtensionLastAcceptanceReport = report
+            lastBoardMessage = message("Extension E2E acceptance failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return report
+        }
+
+        let installed = installPMExtensionFromDirectory(pluginRootURL.path)
+        addStep(
+            "Install Extension",
+            installed ? .passed : .failed,
+            installed ? "Installed \(pluginID)" : (lastBoardMessage ?? "Install failed")
+        )
+
+        if installed {
+            let disableApplied = setPMExtensionEnabled(pluginID: pluginID, enabled: false)
+            let hiddenWhileDisabled = !pmExtensionCommands().contains(where: { $0.pluginID == pluginID })
+            let enableApplied = setPMExtensionEnabled(pluginID: pluginID, enabled: true)
+            let visibleWhenEnabled = pmExtensionCommands().contains(where: { $0.pluginID == pluginID })
+            let enablePassed = disableApplied && hiddenWhileDisabled && enableApplied && visibleWhenEnabled
+            addStep(
+                "Enable Toggle",
+                enablePassed ? .passed : .failed,
+                enablePassed
+                    ? "Disable/enable flow validated"
+                    : "disableApplied=\(disableApplied) hidden=\(hiddenWhileDisabled) enableApplied=\(enableApplied) visible=\(visibleWhenEnabled)"
+            )
+        } else {
+            addStep("Enable Toggle", .skipped, "Skipped because install failed")
+        }
+
+        let slotChecks: [(String, String, Bool)] = [
+            ("app.toolbar", Self.extensionE2EToolbarCommandID, pmToolbarExtensionCommands().contains(where: { $0.pluginID == pluginID && $0.commandID == Self.extensionE2EToolbarCommandID })),
+            ("kanban.toolbar", Self.extensionE2EKanbanToolbarCommandID, pmKanbanToolbarExtensionCommands().contains(where: { $0.pluginID == pluginID && $0.commandID == Self.extensionE2EKanbanToolbarCommandID })),
+            ("kanban.sidebar", Self.extensionE2EKanbanSidebarCommandID, pmKanbanSidebarExtensionCommands().contains(where: { $0.pluginID == pluginID && $0.commandID == Self.extensionE2EKanbanSidebarCommandID })),
+            ("marketplace.panel", Self.extensionE2EMarketplacePanelCommandID, pmMarketplacePanelExtensionCommands().contains(where: { $0.pluginID == pluginID && $0.commandID == Self.extensionE2EMarketplacePanelCommandID })),
+            ("task.card", Self.extensionE2EHookCommandID, pmTaskCardExtensionCommands().contains(where: { $0.pluginID == pluginID && $0.commandID == Self.extensionE2EHookCommandID }))
+        ]
+        let missingSlots = slotChecks
+            .filter { !$0.2 }
+            .map { "\($0.0)=\($0.1)" }
+        addStep(
+            "Slot Contributions",
+            missingSlots.isEmpty ? .passed : .failed,
+            missingSlots.isEmpty ? "All expected slots are discoverable" : "Missing: \(missingSlots.joined(separator: ", "))"
+        )
+
+        var toolbarMessage = ""
+        if let toolbarCommand = pmToolbarExtensionCommands().first(where: {
+            $0.pluginID == pluginID && $0.commandID == Self.extensionE2EToolbarCommandID
+        }) {
+            let commandSucceeded = runPMExtensionCommand(
+                toolbarCommand,
+                extensionInputs: ["e2e": "acceptance", "source": "marketplace"]
+            )
+            toolbarMessage = lastBoardMessage ?? ""
+            addStep(
+                "Run Command",
+                commandSucceeded ? .passed : .failed,
+                commandSucceeded ? "\(Self.extensionE2EToolbarCommandID) executed" : (lastBoardMessage ?? "Run command failed")
+            )
+        } else {
+            addStep("Run Command", .failed, "\(Self.extensionE2EToolbarCommandID) command not found")
+        }
+
+        let hookProbeTask = WorkTask(
+            title: "E2E Hook Probe",
+            details: "Generated by extension acceptance harness",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        triggerPMExtensionHooks(
+            event: .ticketCreated,
+            task: hookProbeTask,
+            additionalInputs: ["e2e": "hook"]
+        )
+        let hookSucceeded = Self.waitForPMExtensionCondition(timeoutSeconds: 6) { [weak self] in
+            guard let self else { return false }
+            return self.pmExtensionActivityLog.contains(where: {
+                $0.pluginID == pluginID &&
+                    $0.commandID == Self.extensionE2EHookCommandID &&
+                    $0.outcome == .succeeded
+            })
+        }
+        addStep(
+            "Hook Execution",
+            hookSucceeded ? .passed : .failed,
+            hookSucceeded
+                ? "ticket.created hook triggered \(Self.extensionE2EHookCommandID)"
+                : "No succeeded \(Self.extensionE2EHookCommandID) entry within timeout"
+        )
+
+        let expectedWritebackMessage = "e2e-ok:\(Self.extensionE2EToolbarCommandID)"
+        let writebackFromMessage = toolbarMessage.contains(expectedWritebackMessage)
+        let writebackFromActivity = pmExtensionActivityLog.contains(where: {
+            $0.pluginID == pluginID &&
+                $0.commandID == Self.extensionE2EToolbarCommandID &&
+                $0.outcome == .succeeded &&
+                $0.detail.contains(expectedWritebackMessage)
+        })
+        let writebackFromObservability = pmExtensionObservability.contains(where: {
+            $0.pluginID == pluginID &&
+                $0.lastInputSummary.contains("e2e=acceptance") &&
+                $0.lastOutputSummary.contains("e2e-ok")
+        })
+        let writebackPassed = writebackFromMessage || writebackFromActivity || writebackFromObservability
+        addStep(
+            "Output Writeback",
+            writebackPassed ? .passed : .failed,
+            writebackPassed
+                ? "Response message propagated to OpenMac state"
+                : "No writeback signal found in board message/activity/observability"
+        )
+
+        if installed {
+            let removed = uninstallPMExtension(pluginID: pluginID)
+            addStep(
+                "Cleanup",
+                removed ? .passed : .failed,
+                removed ? "Removed probe extension" : (lastBoardMessage ?? "Cleanup failed")
+            )
+        } else {
+            addStep("Cleanup", .skipped, "Skipped because install failed")
+        }
+
+        let failedCount = steps.filter { $0.status == .failed }.count
+        let succeeded = failedCount == 0
+        let report = PMExtensionE2EAcceptanceReport(
+            generatedAt: Date(),
+            pluginID: pluginID,
+            pluginName: pluginName,
+            succeeded: succeeded,
+            steps: steps
+        )
+        pmExtensionLastAcceptanceReport = report
+        if succeeded {
+            lastBoardMessage = message("Extension E2E acceptance passed (%d steps)", steps.count)
+            lastBoardMessageSeverity = .info
+        } else {
+            lastBoardMessage = message("Extension E2E acceptance failed (%d steps failed)", failedCount)
+            lastBoardMessageSeverity = .warning
+        }
+        return report
+    }
+
+    func pmExtensionAcceptanceReportText() -> String {
+        guard let report = pmExtensionLastAcceptanceReport else {
+            return "No extension E2E acceptance report yet."
+        }
+        var lines: [String] = []
+        lines.append("# Extension E2E Acceptance Report")
+        lines.append("Generated at: \(Self.iso8601Formatter.string(from: report.generatedAt))")
+        lines.append("Plugin: \(report.pluginName) (\(report.pluginID))")
+        lines.append("Result: \(report.succeeded ? "PASS" : "FAIL")")
+        lines.append("")
+        lines.append("## Steps")
+        for step in report.steps {
+            let status = step.status.rawValue.uppercased()
+            lines.append("- [\(status)] \(step.title): \(step.detail)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func pmPlannerExtensions(slot: String = KanbanBoardViewModel.pmPlannerExtensionSlot) -> [PMPlannerUIExtensionDescriptor] {
         let localExtensions = pmPlanningPluginPolicy.autoDiscoverLocalPlugins
             ? detectedLocalPMPlannerExtensions(
@@ -6542,6 +6760,11 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let extensionCommandKanbanToolbarSlot = "kanban.toolbar"
     private static let extensionCommandKanbanSidebarSlot = "kanban.sidebar"
     private static let extensionCommandMarketplacePanelSlot = "marketplace.panel"
+    private static let extensionE2EToolbarCommandID = "toolbar-probe"
+    private static let extensionE2EHookCommandID = "hook-probe"
+    private static let extensionE2EKanbanToolbarCommandID = "kanban-toolbar-probe"
+    private static let extensionE2EKanbanSidebarCommandID = "kanban-sidebar-probe"
+    private static let extensionE2EMarketplacePanelCommandID = "marketplace-panel-probe"
     private static let extensionCommandRequiredPermission = "command.execute"
     private static let extensionCommandDefaultTimeoutSeconds = 45
     private static let extensionCommandMaxTimeoutSeconds = 300
@@ -6810,6 +7033,67 @@ final class KanbanBoardViewModel: ObservableObject {
         let normalized = trimmed.replacingOccurrences(of: "\n", with: " ")
         if normalized.count <= 180 { return normalized }
         return String(normalized.prefix(177)) + "..."
+    }
+
+    private static func pmExtensionE2EProbeManifest(pluginID: String, pluginName: String) -> String {
+        """
+        {
+          "id": "\(pluginID)",
+          "name": "\(pluginName)",
+          "version": "0.0.1",
+          "summary": "OpenMac generated extension acceptance probe",
+          "entrypoint": "./run.sh",
+          "permissions": ["\(extensionCommandRequiredPermission)"],
+          "commands": [
+            { "id": "\(extensionE2EToolbarCommandID)", "title": "Toolbar Probe", "slots": ["\(extensionCommandDefaultSlot)"], "permissions": ["\(extensionCommandRequiredPermission)"], "enabled": true },
+            { "id": "\(extensionE2EKanbanToolbarCommandID)", "title": "Kanban Toolbar Probe", "slots": ["\(extensionCommandKanbanToolbarSlot)"], "permissions": ["\(extensionCommandRequiredPermission)"], "enabled": true },
+            { "id": "\(extensionE2EKanbanSidebarCommandID)", "title": "Kanban Sidebar Probe", "slots": ["\(extensionCommandKanbanSidebarSlot)"], "permissions": ["\(extensionCommandRequiredPermission)"], "enabled": true },
+            { "id": "\(extensionE2EMarketplacePanelCommandID)", "title": "Marketplace Panel Probe", "slots": ["\(extensionCommandMarketplacePanelSlot)"], "permissions": ["\(extensionCommandRequiredPermission)"], "enabled": true },
+            { "id": "\(extensionE2EHookCommandID)", "title": "Hook Probe", "slots": ["\(extensionCommandTaskCardSlot)"], "permissions": ["\(extensionCommandRequiredPermission)"], "enabled": true }
+          ],
+          "eventHooks": [
+            { "id": "ticket-created-hook", "event": "\(PMExtensionHookEvent.ticketCreated.rawValue)", "commandID": "\(extensionE2EHookCommandID)", "enabled": true }
+          ],
+          "enabled": true
+        }
+        """
+    }
+
+    private static let pmExtensionE2EProbeScript = """
+    #!/bin/zsh
+    set -euo pipefail
+
+    payload="$(cat)"
+    command_id="unknown"
+    for candidate in "\(extensionE2EToolbarCommandID)" "\(extensionE2EHookCommandID)" "\(extensionE2EKanbanToolbarCommandID)" "\(extensionE2EKanbanSidebarCommandID)" "\(extensionE2EMarketplacePanelCommandID)"; do
+      if [[ "$payload" == *"\\"commandID\\":\\"${candidate}\\""* ]]; then
+        command_id="$candidate"
+        break
+      fi
+    done
+
+    echo "{\\"message\\":\\"e2e-ok:${command_id}\\"}"
+    """
+
+    private static func waitForPMExtensionCondition(
+        timeoutSeconds: TimeInterval,
+        pollIntervalSeconds: TimeInterval = 0.05,
+        condition: @escaping () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(max(0.1, timeoutSeconds))
+        while Date() < deadline {
+            if condition() {
+                return true
+            }
+            let spinUntil = Date().addingTimeInterval(max(0.01, pollIntervalSeconds))
+            if Thread.isMainThread {
+                _ = RunLoop.main.run(mode: .default, before: spinUntil)
+                _ = RunLoop.main.run(mode: .common, before: spinUntil)
+            } else {
+                Thread.sleep(forTimeInterval: max(0.01, pollIntervalSeconds))
+            }
+        }
+        return condition()
     }
 
     private static func isLikelyHTTPRemoteSource(_ source: String) -> Bool {

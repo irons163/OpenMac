@@ -1160,6 +1160,27 @@ struct PMExtensionObservabilitySnapshot: Equatable, Identifiable {
     var lastOutputSummary: String
 }
 
+struct PMExtensionE2EAcceptanceStep: Equatable, Identifiable {
+    enum Status: String, Codable {
+        case passed
+        case failed
+        case skipped
+    }
+
+    var id: String
+    var title: String
+    var status: Status
+    var detail: String
+}
+
+struct PMExtensionE2EAcceptanceReport: Equatable {
+    var generatedAt: Date
+    var pluginID: String
+    var pluginName: String
+    var succeeded: Bool
+    var steps: [PMExtensionE2EAcceptanceStep]
+}
+
 enum PMExtensionHookEvent: String, CaseIterable, Codable, Identifiable {
     case ticketCreated = "ticket.created"
     case runFinished = "run.finished"

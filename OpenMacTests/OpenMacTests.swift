@@ -5579,6 +5579,50 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.remote.zip" }))
     }
 
+    @Test("PM extension E2E acceptance verifies install enable hook slots and writeback")
+    func pmExtensionE2EAcceptanceHarnessPasses() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+
+        let report = viewModel.runPMExtensionE2EAcceptance()
+
+        #expect(report.succeeded)
+        #expect(report.steps.contains(where: { $0.title == "Install Extension" && $0.status == .passed }))
+        #expect(report.steps.contains(where: { $0.title == "Enable Toggle" && $0.status == .passed }))
+        #expect(report.steps.contains(where: { $0.title == "Slot Contributions" && $0.status == .passed }))
+        #expect(report.steps.contains(where: { $0.title == "Hook Execution" && $0.status == .passed }))
+        #expect(report.steps.contains(where: { $0.title == "Output Writeback" && $0.status == .passed }))
+        #expect(report.steps.contains(where: { $0.title == "Cleanup" && $0.status == .passed }))
+
+        #expect(viewModel.pmExtensionLastAcceptanceReport?.succeeded == true)
+        #expect(!viewModel.pmExtensionAcceptanceReportText().contains("No extension E2E acceptance report yet."))
+        #expect(viewModel.pmExtensionAcceptanceReportText().contains("Result: PASS"))
+        #expect(viewModel.pmInstalledExtensions().allSatisfy { $0.pluginID != report.pluginID })
+    }
+
+    @Test("PM extension E2E acceptance text has empty-state placeholder")
+    func pmExtensionE2EAcceptanceReportTextEmptyState() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        #expect(viewModel.pmExtensionAcceptanceReportText() == "No extension E2E acceptance report yet.")
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

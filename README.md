@@ -44,6 +44,7 @@ OpenMac is a macOS-first AI agent Kanban app for planning, dispatching, and runn
 - Extension event hooks: `ticket.created`, `run.finished`, `review.entered`
 - Hook orchestrator: queue + dedupe + retry/backoff + bounded concurrency
 - Built-in extension test harness (dry-run payload + JSON validation)
+- Built-in extension E2E acceptance runner (install + enable + slots + hook + output writeback + cleanup)
 - Extension observability panel (success rate, avg runtime, latest input/output/error)
 - Board health recommendations, WIP limits, and manual triage
 - Workspace import/export JSON

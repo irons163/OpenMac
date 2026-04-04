@@ -183,6 +183,7 @@ If output is invalid or empty, OpenMac will fallback to built-in planning.
 - OpenMac enforces a command timeout (current default: 45 seconds).
 - Event hooks run through a queued orchestrator with dedupe, retry/backoff, and bounded parallelism.
 - Marketplace supports install-by-ID, preferred update channel policy, and version locking.
+- Marketplace includes one-click extension E2E acceptance and a copyable acceptance report.
 - Use the PM Planner "Planning Engine" selector to switch between built-in and plugin-preferred mode.
 
 ## Real AI Example
