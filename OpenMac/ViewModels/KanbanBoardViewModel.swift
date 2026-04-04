@@ -1829,6 +1829,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitCommandRunner = gitCommandRunner
         self.runOnBackground = runOnBackground
         self.runOnMain = runOnMain
+        if syncSystemRealArtifactVerificationBoardHookBinding() {
+            syncCurrentBoardRecord()
+        }
         markRunningExecutionsAsInterruptedIfNeeded()
     }
 
@@ -1923,6 +1926,9 @@ final class KanbanBoardViewModel: ObservableObject {
         self.gitCommandRunner = gitCommandRunner
         self.runOnBackground = runOnBackground
         self.runOnMain = runOnMain
+        if syncSystemRealArtifactVerificationBoardHookBinding() {
+            syncCurrentBoardRecord()
+        }
         markRunningExecutionsAsInterruptedIfNeeded()
     }
 
@@ -4735,6 +4741,7 @@ final class KanbanBoardViewModel: ObservableObject {
         if selectedBoardUsesDefaultRealArtifactVerificationPolicy {
             executionRealArtifactVerificationPolicy = updatedPolicy
         }
+        _ = syncSystemRealArtifactVerificationBoardHookBinding()
         syncCurrentBoardRecord()
         persistBoardState()
         lastBoardMessage = message("Updated real artifact verification defaults")
@@ -4763,6 +4770,7 @@ final class KanbanBoardViewModel: ObservableObject {
     ) {
         selectedBoardUsesDefaultRealArtifactVerificationPolicy = false
         executionRealArtifactVerificationPolicy = policy
+        _ = syncSystemRealArtifactVerificationBoardHookBinding()
         syncCurrentBoardRecord()
         persistBoardState()
         guard announce else { return }
@@ -4775,6 +4783,7 @@ final class KanbanBoardViewModel: ObservableObject {
     ) {
         selectedBoardUsesDefaultRealArtifactVerificationPolicy = true
         executionRealArtifactVerificationPolicy = executionRealArtifactVerificationDefaultPolicy
+        _ = syncSystemRealArtifactVerificationBoardHookBinding()
         syncCurrentBoardRecord()
         persistBoardState()
         guard announce else { return }
@@ -5078,9 +5087,9 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     func pmExtensionCommands(slot: String? = nil) -> [PMExtensionCommandDescriptor] {
-        let normalizedFilter = Self.normalizedExtensionCommandSlot(slot ?? "")
+        let normalizedFilter = slot.map { Self.normalizedExtensionCommandSlot($0) } ?? ""
 
-        return detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        let pluginCommands = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
             .flatMap { record -> [PMExtensionCommandDescriptor] in
                 let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !pluginID.isEmpty else { return [] }
@@ -5117,12 +5126,33 @@ final class KanbanBoardViewModel: ObservableObject {
                     )
                 }
             }
+        let allCommands = pluginCommands + systemPMExtensionCommands(slot: normalizedFilter)
+        return allCommands
             .sorted { lhs, rhs in
                 if lhs.pluginName.caseInsensitiveCompare(rhs.pluginName) == .orderedSame {
                     return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
                 }
                 return lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedAscending
             }
+    }
+
+    private func systemPMExtensionCommands(slot normalizedFilter: String) -> [PMExtensionCommandDescriptor] {
+        let command = PMExtensionCommandDescriptor(
+            id: "\(Self.systemExtensionPluginID).\(Self.systemRealArtifactVerifyCommandID)",
+            pluginID: Self.systemExtensionPluginID,
+            pluginName: Self.systemExtensionPluginName,
+            commandID: Self.systemRealArtifactVerifyCommandID,
+            title: "Real Artifact Verify (System)",
+            subtitle: "Run built-in install verification checks",
+            slots: [Self.extensionCommandMarketplacePanelSlot],
+            permissions: [],
+            timeoutSeconds: nil,
+            entrypoint: nil
+        )
+        if !normalizedFilter.isEmpty, !command.slots.contains(normalizedFilter) {
+            return []
+        }
+        return [command]
     }
 
     func pmToolbarExtensionCommands() -> [PMExtensionCommandDescriptor] {
@@ -5275,6 +5305,13 @@ final class KanbanBoardViewModel: ObservableObject {
         task: WorkTask? = nil,
         extensionInputs: [String: String] = [:]
     ) -> Bool {
+        if isSystemPMExtensionCommand(descriptor) {
+            return runSystemPMExtensionCommand(
+                descriptor,
+                task: task,
+                extensionInputs: extensionInputs
+            )
+        }
         guard let prepared = preparePMExtensionCommandExecution(
             descriptor,
             task: task,
@@ -5292,6 +5329,15 @@ final class KanbanBoardViewModel: ObservableObject {
         extensionInputs: [String: String] = [:],
         completion: @escaping (Bool) -> Void
     ) {
+        if isSystemPMExtensionCommand(descriptor) {
+            runSystemPMExtensionCommandInBackground(
+                descriptor,
+                task: task,
+                extensionInputs: extensionInputs,
+                completion: completion
+            )
+            return
+        }
         guard let prepared = preparePMExtensionCommandExecution(
             descriptor,
             task: task,
@@ -5310,6 +5356,151 @@ final class KanbanBoardViewModel: ObservableObject {
                 let succeeded = self.finishPMExtensionCommandExecution(prepared, outcome: outcome)
                 completion(succeeded)
             }
+        }
+    }
+
+    private func isSystemPMExtensionCommand(_ descriptor: PMExtensionCommandDescriptor) -> Bool {
+        descriptor.pluginID.caseInsensitiveCompare(Self.systemExtensionPluginID) == .orderedSame
+    }
+
+    @discardableResult
+    private func runSystemPMExtensionCommand(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask?,
+        extensionInputs: [String: String]
+    ) -> Bool {
+        let startedAt = Date()
+        lastBoardMessage = message("Running extension command: %@", descriptor.title)
+        lastBoardMessageSeverity = .info
+        markPMExtensionRunStarted(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            inputSummary: Self.summarizedExtensionInputs(extensionInputs)
+        )
+        appendPMExtensionActivity(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            commandID: descriptor.commandID,
+            commandTitle: descriptor.title,
+            outcome: .running,
+            detail: "Started"
+        )
+        let outcome = executeSystemPMExtensionCommand(
+            descriptor,
+            task: task,
+            extensionInputs: extensionInputs
+        )
+        return finishPMExtensionCommandExecution(
+            descriptor: descriptor,
+            startedAt: startedAt,
+            timeoutSeconds: nil,
+            outcome: outcome
+        )
+    }
+
+    private func runSystemPMExtensionCommandInBackground(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask?,
+        extensionInputs: [String: String],
+        completion: @escaping (Bool) -> Void
+    ) {
+        let startedAt = Date()
+        lastBoardMessage = message("Running extension command: %@", descriptor.title)
+        lastBoardMessageSeverity = .info
+        markPMExtensionRunStarted(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            inputSummary: Self.summarizedExtensionInputs(extensionInputs)
+        )
+        appendPMExtensionActivity(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            commandID: descriptor.commandID,
+            commandTitle: descriptor.title,
+            outcome: .running,
+            detail: "Started"
+        )
+        runOnBackground { [weak self] in
+            guard let self else {
+                completion(false)
+                return
+            }
+            let outcome = self.executeSystemPMExtensionCommand(
+                descriptor,
+                task: task,
+                extensionInputs: extensionInputs
+            )
+            self.runOnMain { [weak self] in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                let succeeded = self.finishPMExtensionCommandExecution(
+                    descriptor: descriptor,
+                    startedAt: startedAt,
+                    timeoutSeconds: nil,
+                    outcome: outcome
+                )
+                completion(succeeded)
+            }
+        }
+    }
+
+    private func executeSystemPMExtensionCommand(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask?,
+        extensionInputs _: [String: String]
+    ) -> PMExtensionCommandExecutionOutcome {
+        switch descriptor.commandID.lowercased() {
+        case Self.systemRealArtifactVerifyCommandID:
+            if let deferredVerification = runDeferredRealArtifactVerificationIfNeeded() {
+                if deferredVerification.status == "failed" {
+                    let detail = deferredVerification.detail
+                    return PMExtensionCommandExecutionOutcome(
+                        succeeded: false,
+                        responseMessage: nil,
+                        detail: detail,
+                        outputSummary: Self.summarizedExtensionOutput(detail),
+                        error: detail
+                    )
+                }
+                let detail = deferredVerification.detail
+                return PMExtensionCommandExecutionOutcome(
+                    succeeded: true,
+                    responseMessage: detail,
+                    detail: detail,
+                    outputSummary: Self.summarizedExtensionOutput(detail),
+                    error: nil
+                )
+            }
+
+            let contract = task?.resolvedDeliveryContract
+            let policy = executionRealArtifactVerificationPolicy
+            let detail: String
+            if !policy.isEnabled || (!policy.requireInfoPlistExecutableKey && !policy.requireXcodeBuild) {
+                detail = "Skipped: real install verification policy is disabled"
+            } else if let contract,
+                      contract.gateMode != .strict || contract.outputType != .app {
+                detail = "Skipped: selected task is not strict app delivery"
+            } else {
+                detail = "Skipped: no succeeded strict app task eligible for deferred verification"
+            }
+            return PMExtensionCommandExecutionOutcome(
+                succeeded: true,
+                responseMessage: detail,
+                detail: detail,
+                outputSummary: Self.summarizedExtensionOutput(detail),
+                error: nil
+            )
+        default:
+            let detail = "Unsupported system command: \(descriptor.commandID)"
+            return PMExtensionCommandExecutionOutcome(
+                succeeded: false,
+                responseMessage: nil,
+                detail: detail,
+                outputSummary: Self.summarizedExtensionOutput(detail),
+                error: detail
+            )
         }
     }
 
@@ -5537,7 +5728,21 @@ final class KanbanBoardViewModel: ObservableObject {
         _ prepared: PreparedPMExtensionCommandExecution,
         outcome: PMExtensionCommandExecutionOutcome
     ) -> Bool {
-        let descriptor = prepared.descriptor
+        finishPMExtensionCommandExecution(
+            descriptor: prepared.descriptor,
+            startedAt: prepared.startedAt,
+            timeoutSeconds: prepared.timeoutSeconds,
+            outcome: outcome
+        )
+    }
+
+    @discardableResult
+    private func finishPMExtensionCommandExecution(
+        descriptor: PMExtensionCommandDescriptor,
+        startedAt: Date,
+        timeoutSeconds: Int?,
+        outcome: PMExtensionCommandExecutionOutcome
+    ) -> Bool {
         if outcome.succeeded {
             if let responseMessage = outcome.responseMessage, !responseMessage.isEmpty {
                 lastBoardMessage = message("Extension command completed: %@", responseMessage)
@@ -5554,8 +5759,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 detail: outcome.detail
             )
         } else {
-            if outcome.detail == "Timed out in \(prepared.timeoutSeconds)s" {
-                lastBoardMessage = message("Extension command failed: timed out in %d seconds", prepared.timeoutSeconds)
+            if let timeoutSeconds, outcome.detail == "Timed out in \(timeoutSeconds)s" {
+                lastBoardMessage = message("Extension command failed: timed out in %d seconds", timeoutSeconds)
             } else {
                 lastBoardMessage = message("Extension command failed: %@", outcome.detail)
             }
@@ -5573,7 +5778,7 @@ final class KanbanBoardViewModel: ObservableObject {
         markPMExtensionRunFinished(
             pluginID: descriptor.pluginID,
             pluginName: descriptor.pluginName,
-            startedAt: prepared.startedAt,
+            startedAt: startedAt,
             succeeded: outcome.succeeded,
             outputSummary: outcome.outputSummary,
             error: outcome.error
@@ -5588,6 +5793,41 @@ final class KanbanBoardViewModel: ObservableObject {
     ) {
         let eventKey = event.rawValue
         expireStalePMExtensionHookDedupKeys()
+        let knownCommandDescriptors = pmExtensionCommands()
+        let installedByPluginID = Dictionary(
+            uniqueKeysWithValues: pmInstalledExtensions().map { ($0.pluginID.lowercased(), $0.name) }
+        )
+
+        func enqueueHookDescriptor(
+            _ descriptor: PMExtensionCommandDescriptor,
+            hookSource: String,
+            hookBindingID: UUID? = nil
+        ) {
+            var mergedInputs = additionalInputs
+            mergedInputs["hookEvent"] = eventKey
+            mergedInputs["hookSource"] = hookSource
+            if let hookBindingID {
+                mergedInputs["hookBindingID"] = hookBindingID.uuidString
+            }
+            if let task {
+                mergedInputs["taskID"] = task.id.uuidString
+                mergedInputs["taskTitle"] = task.title
+                mergedInputs["taskStatus"] = task.status.rawValue
+            }
+            let dedupTaskID = task?.id.uuidString ?? "none"
+            let key = "\(eventKey)|\(descriptor.pluginID.lowercased())|\(descriptor.commandID.lowercased())|\(dedupTaskID)"
+            enqueuePMExtensionHookWorkItem(
+                PMExtensionHookWorkItem(
+                    key: key,
+                    event: event,
+                    descriptor: descriptor,
+                    task: task,
+                    extensionInputs: mergedInputs,
+                    retryCount: 0
+                )
+            )
+        }
+
         let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
         for record in records {
             let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5642,29 +5882,10 @@ final class KanbanBoardViewModel: ObservableObject {
                     timeoutSeconds: Self.resolvedExtensionCommandTimeout(commandManifest.timeoutSeconds),
                     entrypoint: (commandManifest.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 )
-
-                var mergedInputs = additionalInputs
-                mergedInputs["hookEvent"] = eventKey
-                mergedInputs["hookSource"] = hookSource
-                if let hookBindingID {
-                    mergedInputs["hookBindingID"] = hookBindingID.uuidString
-                }
-                if let task {
-                    mergedInputs["taskID"] = task.id.uuidString
-                    mergedInputs["taskTitle"] = task.title
-                    mergedInputs["taskStatus"] = task.status.rawValue
-                }
-                let dedupTaskID = task?.id.uuidString ?? "none"
-                let key = "\(eventKey)|\(pluginID.lowercased())|\(resolvedCommandID.lowercased())|\(dedupTaskID)"
-                enqueuePMExtensionHookWorkItem(
-                    PMExtensionHookWorkItem(
-                        key: key,
-                        event: event,
-                        descriptor: descriptor,
-                        task: task,
-                        extensionInputs: mergedInputs,
-                        retryCount: 0
-                    )
+                enqueueHookDescriptor(
+                    descriptor,
+                    hookSource: hookSource,
+                    hookBindingID: hookBindingID
                 )
             }
 
@@ -5675,19 +5896,32 @@ final class KanbanBoardViewModel: ObservableObject {
                 guard !commandID.isEmpty else { continue }
                 enqueueHookCommand(commandID: commandID, hookSource: "manifest")
             }
+        }
 
-            let boardHooks = pmBoardExtensionHookBindings.filter { binding in
-                binding.isEnabled &&
-                    binding.event.rawValue == eventKey &&
-                    binding.pluginID.caseInsensitiveCompare(pluginID) == .orderedSame
-            }
-            for binding in boardHooks {
-                enqueueHookCommand(
+        let boardHooks = pmBoardExtensionHookBindings.filter { binding in
+            binding.isEnabled && binding.event.rawValue == eventKey
+        }
+        for binding in boardHooks {
+            guard let descriptor = knownCommandDescriptors.first(where: { candidate in
+                candidate.pluginID.caseInsensitiveCompare(binding.pluginID) == .orderedSame &&
+                    candidate.commandID.caseInsensitiveCompare(binding.commandID) == .orderedSame
+            }) else {
+                let pluginName = installedByPluginID[binding.pluginID.lowercased()] ?? binding.pluginID
+                appendPMExtensionActivity(
+                    pluginID: binding.pluginID,
+                    pluginName: pluginName,
                     commandID: binding.commandID,
-                    hookSource: "board",
-                    hookBindingID: binding.id
+                    commandTitle: binding.commandID,
+                    outcome: .info,
+                    detail: "Hook skipped: command not found (board)"
                 )
+                continue
             }
+            enqueueHookDescriptor(
+                descriptor,
+                hookSource: "board",
+                hookBindingID: binding.id
+            )
         }
         drainPMExtensionHookQueueIfNeeded()
     }
@@ -7180,6 +7414,9 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let extensionCommandKanbanToolbarSlot = "kanban.toolbar"
     private static let extensionCommandKanbanSidebarSlot = "kanban.sidebar"
     private static let extensionCommandMarketplacePanelSlot = "marketplace.panel"
+    private static let systemExtensionPluginID = "openmac.system"
+    private static let systemExtensionPluginName = "OpenMac System"
+    private static let systemRealArtifactVerifyCommandID = "system.real-artifact-verify"
     private static let extensionE2EToolbarCommandID = "toolbar-probe"
     private static let extensionE2EHookCommandID = "hook-probe"
     private static let extensionE2EKanbanToolbarCommandID = "kanban-toolbar-probe"
@@ -8822,13 +9059,61 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    private func shouldEnableSystemRealArtifactVerificationBoardHook() -> Bool {
+        let policy = executionRealArtifactVerificationPolicy
+        return policy.isEnabled &&
+            (policy.requireInfoPlistExecutableKey || policy.requireXcodeBuild) &&
+            policy.runVerificationOnlyOnTerminalTask
+    }
+
+    private func hasEnabledSystemRealArtifactVerificationBoardHook() -> Bool {
+        pmBoardExtensionHookBindings.contains { binding in
+            binding.isEnabled &&
+                binding.event == .boardRunFinished &&
+                binding.pluginID.caseInsensitiveCompare(Self.systemExtensionPluginID) == .orderedSame &&
+                binding.commandID.caseInsensitiveCompare(Self.systemRealArtifactVerifyCommandID) == .orderedSame
+        }
+    }
+
+    @discardableResult
+    private func syncSystemRealArtifactVerificationBoardHookBinding() -> Bool {
+        let shouldEnable = shouldEnableSystemRealArtifactVerificationBoardHook()
+        let existingIndex = pmBoardExtensionHookBindings.firstIndex { binding in
+            binding.event == .boardRunFinished &&
+                binding.pluginID.caseInsensitiveCompare(Self.systemExtensionPluginID) == .orderedSame &&
+                binding.commandID.caseInsensitiveCompare(Self.systemRealArtifactVerifyCommandID) == .orderedSame
+        }
+
+        if let existingIndex {
+            guard pmBoardExtensionHookBindings[existingIndex].isEnabled != shouldEnable else {
+                return false
+            }
+            pmBoardExtensionHookBindings[existingIndex].isEnabled = shouldEnable
+            pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(pmBoardExtensionHookBindings)
+            return true
+        }
+
+        guard shouldEnable else { return false }
+        pmBoardExtensionHookBindings.append(
+            PMBoardExtensionHookBinding(
+                event: .boardRunFinished,
+                pluginID: Self.systemExtensionPluginID,
+                commandID: Self.systemRealArtifactVerifyCommandID,
+                isEnabled: true
+            )
+        )
+        pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(pmBoardExtensionHookBindings)
+        return true
+    }
+
     private func emitBoardRunFinishedHook(
         flow: String,
         totalStarted: Int,
         completedPasses: Int,
         wasCancelled: Bool
     ) {
-        let deferredVerification = runDeferredRealArtifactVerificationIfNeeded()
+        let shouldRunViaSystemHook = hasEnabledSystemRealArtifactVerificationBoardHook()
+        let deferredVerification = shouldRunViaSystemHook ? nil : runDeferredRealArtifactVerificationIfNeeded()
         var inputs: [String: String] = [
             "flow": flow,
             "totalStarted": String(totalStarted),
@@ -11644,6 +11929,10 @@ final class KanbanBoardViewModel: ObservableObject {
             board.executionRealArtifactVerificationPolicy ?? executionRealArtifactVerificationDefaultPolicy
         sharedAgentMemory = board.sharedAgentMemory ?? []
         pmBoardExtensionHookBindings = Self.normalizedBoardExtensionHookBindings(board.pmExtensionHookBindings ?? [])
+        if syncSystemRealArtifactVerificationBoardHookBinding() {
+            syncCurrentBoardRecord()
+            persistBoardState()
+        }
         lastUnassignedTaskIDs = Set(tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.map(\.id))
         lastAssignmentReasons = [:]
         lastBoardMessage = nil

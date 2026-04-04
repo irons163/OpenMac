@@ -5386,6 +5386,77 @@ struct KanbanSupportTypeTests {
         #expect(secondSuccessCount == firstSuccessCount)
     }
 
+    @Test("strict real artifact verification auto-configures system board hook")
+    func strictRealArtifactVerificationAutoConfiguresSystemBoardHook() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: true
+            ),
+            announce: false
+        )
+
+        let hooks = viewModel.pmBoardExtensionHookDescriptors().filter {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.real-artifact-verify" &&
+                $0.event == .boardRunFinished
+        }
+        #expect(hooks.count == 1)
+        #expect(hooks[0].isEnabled)
+
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: false,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: true
+            ),
+            announce: false
+        )
+        let disabledHooks = viewModel.pmBoardExtensionHookDescriptors().filter {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.real-artifact-verify" &&
+                $0.event == .boardRunFinished
+        }
+        #expect(disabledHooks.count == 1)
+        #expect(!disabledHooks[0].isEnabled)
+    }
+
+    @Test("system real artifact board hook runs on board.run.finished")
+    func systemRealArtifactBoardHookRunsOnBoardRunFinished() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: true
+            ),
+            announce: false
+        )
+
+        viewModel.triggerPMExtensionHooks(event: .boardRunFinished, task: nil)
+
+        let hasSucceededSystemHook = viewModel.pmExtensionActivityLog.contains(where: { entry in
+            entry.pluginID == "openmac.system" &&
+                entry.commandID == "system.real-artifact-verify" &&
+                entry.outcome == .succeeded
+        })
+        #expect(hasSucceededSystemHook)
+    }
+
     @Test("Update all marketplace sources installs each source")
     func pmExtensionUpdateAllMarketplaceSources() throws {
         let fileManager = FileManager.default
