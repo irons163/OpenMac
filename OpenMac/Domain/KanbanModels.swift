@@ -1185,6 +1185,7 @@ enum PMExtensionHookEvent: String, CaseIterable, Codable, Identifiable {
     case ticketCreated = "ticket.created"
     case runFinished = "run.finished"
     case reviewEntered = "review.entered"
+    case boardRunFinished = "board.run.finished"
 
     var id: String { rawValue }
 }

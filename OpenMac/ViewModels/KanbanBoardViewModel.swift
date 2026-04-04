@@ -7475,13 +7475,12 @@ final class KanbanBoardViewModel: ObservableObject {
             let extensionInputs = workItem.extensionInputs
             let event = workItem.event
             let retryCount = workItem.retryCount
-            runOnMain { [weak self] in
+            runPMExtensionCommandInBackground(
+                descriptor,
+                task: task,
+                extensionInputs: extensionInputs
+            ) { [weak self] succeeded in
                 guard let self else { return }
-                let succeeded = self.runPMExtensionCommand(
-                    descriptor,
-                    task: task,
-                    extensionInputs: extensionInputs
-                )
                 self.pmExtensionHookRunningCount = max(0, self.pmExtensionHookRunningCount - 1)
                 self.pmExtensionHookRunningKeys.remove(workItem.key)
                 if succeeded {
@@ -7810,6 +7809,8 @@ final class KanbanBoardViewModel: ObservableObject {
             return PMExtensionHookEvent.runFinished.rawValue
         case "review.entered", "task.review.entered":
             return PMExtensionHookEvent.reviewEntered.rawValue
+        case "board.run.finished", "board.finished", "pipeline.finished", "autopilot.finished":
+            return PMExtensionHookEvent.boardRunFinished.rawValue
         default:
             return normalized
         }
@@ -8378,6 +8379,12 @@ final class KanbanBoardViewModel: ObservableObject {
         }
     }
 
+    private struct DeferredRealArtifactVerificationOutcome {
+        let task: WorkTask?
+        let status: String
+        let detail: String
+    }
+
     private enum RealArtifactIntegrityIssueCode {
         case missingBundleIdentifier
     }
@@ -8575,6 +8582,119 @@ final class KanbanBoardViewModel: ObservableObject {
         ]
 
         return deferSignals.contains { context.contains($0) }
+    }
+
+    private func candidateTaskForDeferredRealArtifactVerification() -> WorkTask? {
+        let succeededStrictAppTasks = tasks
+            .filter { task in
+                let contract = task.resolvedDeliveryContract
+                guard contract.gateMode == .strict, contract.outputType == .app else { return false }
+                guard !shouldDeferRealArtifactVerification(for: task) else { return false }
+                return task.executionRecord?.status == .succeeded
+            }
+
+        guard !succeededStrictAppTasks.isEmpty else { return nil }
+        if let terminal = succeededStrictAppTasks.first(where: isTerminalTaskForRealArtifactVerification) {
+            return terminal
+        }
+
+        return succeededStrictAppTasks.max { lhs, rhs in
+            let lhsFinishedAt = lhs.executionRecord?.lastFinishedAt ?? lhs.createdAt
+            let rhsFinishedAt = rhs.executionRecord?.lastFinishedAt ?? rhs.createdAt
+            if lhsFinishedAt != rhsFinishedAt {
+                return lhsFinishedAt < rhsFinishedAt
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
+    private func runDeferredRealArtifactVerificationIfNeeded() -> DeferredRealArtifactVerificationOutcome? {
+        let policy = executionRealArtifactVerificationPolicy
+        guard policy.isEnabled else { return nil }
+        guard policy.requireInfoPlistExecutableKey || policy.requireXcodeBuild else { return nil }
+        guard policy.runVerificationOnlyOnTerminalTask else { return nil }
+        let alreadyVerified = tasks.contains { task in
+            guard task.executionRecord?.status == .succeeded else { return false }
+            let summary = task.executionRecord?.lastOutputSummary?.lowercased() ?? ""
+            return summary.contains("real install verification passed")
+        }
+        if alreadyVerified {
+            return DeferredRealArtifactVerificationOutcome(
+                task: nil,
+                status: "skipped",
+                detail: "Real install verification already completed during task execution"
+            )
+        }
+
+        guard let candidate = candidateTaskForDeferredRealArtifactVerification() else {
+            return DeferredRealArtifactVerificationOutcome(
+                task: nil,
+                status: "skipped",
+                detail: "No succeeded strict app task eligible for deferred verification"
+            )
+        }
+
+        let verification = runRealArtifactVerification(for: candidate)
+        if let failureReason = verification.failureReason {
+            let userMessage = message("Real install verification failed: %@", failureReason)
+            if let existing = lastBoardMessage, !existing.isEmpty {
+                lastBoardMessage = existing + "\n" + userMessage
+            } else {
+                lastBoardMessage = userMessage
+            }
+            lastBoardMessageSeverity = .warning
+
+            let detail = verification.debugLog.flatMap { debug in
+                debug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : userMessage + " | " + debug
+            } ?? userMessage
+            return DeferredRealArtifactVerificationOutcome(
+                task: candidate,
+                status: "failed",
+                detail: detail
+            )
+        }
+
+        let successNote = verification.successNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !successNote.isEmpty {
+            if let existing = lastBoardMessage, !existing.isEmpty {
+                lastBoardMessage = existing + "\n" + successNote
+            } else {
+                lastBoardMessage = successNote
+            }
+        }
+        if lastBoardMessageSeverity != .warning {
+            lastBoardMessageSeverity = .info
+        }
+        return DeferredRealArtifactVerificationOutcome(
+            task: candidate,
+            status: "passed",
+            detail: successNote.isEmpty ? "Real install verification passed" : successNote
+        )
+    }
+
+    private func emitBoardRunFinishedHook(
+        flow: String,
+        totalStarted: Int,
+        completedPasses: Int,
+        wasCancelled: Bool
+    ) {
+        let deferredVerification = runDeferredRealArtifactVerificationIfNeeded()
+        var inputs: [String: String] = [
+            "flow": flow,
+            "totalStarted": String(totalStarted),
+            "completedPasses": String(completedPasses),
+            "wasCancelled": wasCancelled ? "true" : "false"
+        ]
+        if let deferredVerification {
+            inputs["realArtifactVerificationStatus"] = deferredVerification.status
+            inputs["realArtifactVerificationDetail"] = deferredVerification.detail
+        }
+        let hookTask = deferredVerification?.task ?? candidateTaskForDeferredRealArtifactVerification()
+        triggerPMExtensionHooks(
+            event: .boardRunFinished,
+            task: hookTask,
+            additionalInputs: inputs
+        )
     }
 
     private func runRealArtifactVerification(for _: WorkTask) -> RealArtifactVerificationResult {
@@ -9913,6 +10033,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     quotaBlockedCount: quotaBlockedCount,
                     qualitySafetyBlockedCount: qualitySafetyBlockedCount
                 )
+                self.emitBoardRunFinishedHook(
+                    flow: "assigned.batch",
+                    totalStarted: counters.startedCount,
+                    completedPasses: 1,
+                    wasCancelled: false
+                )
             }
         )
     }
@@ -9949,6 +10075,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     qualitySafetyBlockedCount: preparation.qualitySafetyBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
+                self.emitBoardRunFinishedHook(
+                    flow: "assigned.batch",
+                    totalStarted: 0,
+                    completedPasses: 0,
+                    wasCancelled: false
+                )
             },
             handleFinished: { state in
                 self.updateExecutionCheckpoint(nil)
@@ -9975,6 +10107,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     approvalBlockedCount: approvalBlockedCount,
                     quotaBlockedCount: quotaBlockedCount,
                     qualitySafetyBlockedCount: qualitySafetyBlockedCount
+                )
+                self.emitBoardRunFinishedHook(
+                    flow: "assigned.batch",
+                    totalStarted: counters.startedCount,
+                    completedPasses: 1,
+                    wasCancelled: state.wasCancelled
                 )
             },
             completion: completion
@@ -10064,6 +10202,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     self.lastBoardMessage = ExecutionSummaryBuilder.autoCycleNoRunnableMessage
                     self.lastBoardMessageSeverity = ExecutionSeverityPolicy.autoCycleNoRunnable
                 }
+                self.emitBoardRunFinishedHook(
+                    flow: "auto.dispatch.cycle",
+                    totalStarted: state.totalStarted,
+                    completedPasses: state.completedPasses,
+                    wasCancelled: state.wasCancelled
+                )
             },
             completion: completion
         )
