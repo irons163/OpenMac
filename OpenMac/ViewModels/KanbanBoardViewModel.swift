@@ -5142,12 +5142,72 @@ final class KanbanBoardViewModel: ObservableObject {
         pmExtensionCommands(slot: Self.extensionCommandMarketplacePanelSlot)
     }
 
+    private struct PreparedPMExtensionCommandExecution {
+        let descriptor: PMExtensionCommandDescriptor
+        let workingDirectoryPath: String
+        let shellCommand: String
+        let payloadJSON: String
+        let timeoutSeconds: Int
+        let startedAt: Date
+    }
+
+    private struct PMExtensionCommandExecutionOutcome {
+        let succeeded: Bool
+        let responseMessage: String?
+        let detail: String
+        let outputSummary: String
+        let error: String?
+    }
+
     @discardableResult
     func runPMExtensionCommand(
         _ descriptor: PMExtensionCommandDescriptor,
         task: WorkTask? = nil,
         extensionInputs: [String: String] = [:]
     ) -> Bool {
+        guard let prepared = preparePMExtensionCommandExecution(
+            descriptor,
+            task: task,
+            extensionInputs: extensionInputs
+        ) else {
+            return false
+        }
+        let outcome = Self.executePMExtensionCommand(prepared)
+        return finishPMExtensionCommandExecution(prepared, outcome: outcome)
+    }
+
+    func runPMExtensionCommandInBackground(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask? = nil,
+        extensionInputs: [String: String] = [:],
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let prepared = preparePMExtensionCommandExecution(
+            descriptor,
+            task: task,
+            extensionInputs: extensionInputs
+        ) else {
+            completion(false)
+            return
+        }
+        runOnBackground { [weak self] in
+            let outcome = Self.executePMExtensionCommand(prepared)
+            self?.runOnMain { [weak self] in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                let succeeded = self.finishPMExtensionCommandExecution(prepared, outcome: outcome)
+                completion(succeeded)
+            }
+        }
+    }
+
+    private func preparePMExtensionCommandExecution(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask?,
+        extensionInputs: [String: String]
+    ) -> PreparedPMExtensionCommandExecution? {
         if pmPlanningPluginPolicy.disabledPluginIDs.contains(descriptor.pluginID.lowercased()) {
             lastBoardMessage = message("Extension command failed: plugin is disabled")
             lastBoardMessageSeverity = .warning
@@ -5159,7 +5219,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .failed,
                 detail: "Plugin is disabled"
             )
-            return false
+            return nil
         }
         let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
         guard let record = records.first(where: {
@@ -5175,7 +5235,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .failed,
                 detail: "Plugin not found"
             )
-            return false
+            return nil
         }
 
         let entrypoint = {
@@ -5196,7 +5256,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .failed,
                 detail: "Entrypoint is missing"
             )
-            return false
+            return nil
         }
 
         let declaredPermissions = Set(Self.normalizedExtensionPermissions(descriptor.permissions))
@@ -5215,7 +5275,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 outcome: .failed,
                 detail: "Missing permission: \(Self.extensionCommandRequiredPermission)"
             )
-            return false
+            return nil
         }
         if declaredPermissions.isEmpty {
             appendPMExtensionActivity(
@@ -5266,17 +5326,24 @@ final class KanbanBoardViewModel: ObservableObject {
               let payloadJSON = String(data: payloadData, encoding: .utf8) else {
             lastBoardMessage = message("Extension command failed: could not build payload")
             lastBoardMessageSeverity = .warning
-            return false
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: "Could not build command payload"
+            )
+            return nil
         }
 
+        let startedAt = Date()
         lastBoardMessage = message("Running extension command: %@", descriptor.title)
         lastBoardMessageSeverity = .info
-        let startedAt = Date()
-        let inputSummary = Self.summarizedExtensionInputs(extensionInputs)
         markPMExtensionRunStarted(
             pluginID: descriptor.pluginID,
             pluginName: descriptor.pluginName,
-            inputSummary: inputSummary
+            inputSummary: Self.summarizedExtensionInputs(extensionInputs)
         )
         appendPMExtensionActivity(
             pluginID: descriptor.pluginID,
@@ -5287,64 +5354,82 @@ final class KanbanBoardViewModel: ObservableObject {
             detail: "Started"
         )
 
-        let shellCommand = Self.shellQuoted(resolvedEntrypointPath)
-        let timeout = descriptor.timeoutSeconds ?? Self.extensionCommandDefaultTimeoutSeconds
+        return PreparedPMExtensionCommandExecution(
+            descriptor: descriptor,
+            workingDirectoryPath: record.directoryURL.path,
+            shellCommand: Self.shellQuoted(resolvedEntrypointPath),
+            payloadJSON: payloadJSON,
+            timeoutSeconds: descriptor.timeoutSeconds ?? Self.extensionCommandDefaultTimeoutSeconds,
+            startedAt: startedAt
+        )
+    }
+
+    private static func executePMExtensionCommand(
+        _ prepared: PreparedPMExtensionCommandExecution
+    ) -> PMExtensionCommandExecutionOutcome {
         do {
-            let result = try Self.runShellCommand(
-                shellCommand,
-                workingDirectoryPath: record.directoryURL.path,
-                stdin: payloadJSON,
-                timeoutSeconds: timeout,
+            let result = try runShellCommand(
+                prepared.shellCommand,
+                workingDirectoryPath: prepared.workingDirectoryPath,
+                stdin: prepared.payloadJSON,
+                timeoutSeconds: prepared.timeoutSeconds,
                 environment: ProcessInfo.processInfo.environment
             )
+
             if result.timedOut {
-                lastBoardMessage = message("Extension command failed: timed out in %d seconds", timeout)
-                lastBoardMessageSeverity = .warning
-                appendPMExtensionActivity(
-                    pluginID: descriptor.pluginID,
-                    pluginName: descriptor.pluginName,
-                    commandID: descriptor.commandID,
-                    commandTitle: descriptor.title,
-                    outcome: .failed,
-                    detail: "Timed out in \(timeout)s"
-                )
-                markPMExtensionRunFinished(
-                    pluginID: descriptor.pluginID,
-                    pluginName: descriptor.pluginName,
-                    startedAt: startedAt,
+                let detail = "Timed out in \(prepared.timeoutSeconds)s"
+                return PMExtensionCommandExecutionOutcome(
                     succeeded: false,
-                    outputSummary: "Timed out in \(timeout)s",
-                    error: "Timed out in \(timeout)s"
+                    responseMessage: nil,
+                    detail: detail,
+                    outputSummary: detail,
+                    error: detail
                 )
-                return false
             }
+
             if result.code != 0 {
                 let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                 let details = stderr.isEmpty ? result.stdout : stderr
-                lastBoardMessage = message("Extension command failed: %@", details.isEmpty ? "exit \(result.code)" : details)
-                lastBoardMessageSeverity = .warning
-                appendPMExtensionActivity(
-                    pluginID: descriptor.pluginID,
-                    pluginName: descriptor.pluginName,
-                    commandID: descriptor.commandID,
-                    commandTitle: descriptor.title,
-                    outcome: .failed,
-                    detail: details.isEmpty ? "exit \(result.code)" : details
-                )
-                markPMExtensionRunFinished(
-                    pluginID: descriptor.pluginID,
-                    pluginName: descriptor.pluginName,
-                    startedAt: startedAt,
+                let detail = details.isEmpty ? "exit \(result.code)" : details
+                return PMExtensionCommandExecutionOutcome(
                     succeeded: false,
-                    outputSummary: Self.summarizedExtensionOutput(details),
-                    error: details.isEmpty ? "exit \(result.code)" : details
+                    responseMessage: nil,
+                    detail: detail,
+                    outputSummary: summarizedExtensionOutput(detail),
+                    error: detail
                 )
-                return false
             }
 
             let stdout = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            let responseMessage = Self.decodedPMExtensionCommandResponseMessage(from: stdout)
-            if let responseMessage, !responseMessage.isEmpty {
+            let responseMessage = decodedPMExtensionCommandResponseMessage(from: stdout)
+            let detail = responseMessage ?? "Completed"
+            return PMExtensionCommandExecutionOutcome(
+                succeeded: true,
+                responseMessage: responseMessage,
+                detail: detail,
+                outputSummary: summarizedExtensionOutput(responseMessage ?? stdout),
+                error: nil
+            )
+        } catch {
+            let detail = error.localizedDescription
+            return PMExtensionCommandExecutionOutcome(
+                succeeded: false,
+                responseMessage: nil,
+                detail: detail,
+                outputSummary: summarizedExtensionOutput(detail),
+                error: detail
+            )
+        }
+    }
+
+    @discardableResult
+    private func finishPMExtensionCommandExecution(
+        _ prepared: PreparedPMExtensionCommandExecution,
+        outcome: PMExtensionCommandExecutionOutcome
+    ) -> Bool {
+        let descriptor = prepared.descriptor
+        if outcome.succeeded {
+            if let responseMessage = outcome.responseMessage, !responseMessage.isEmpty {
                 lastBoardMessage = message("Extension command completed: %@", responseMessage)
             } else {
                 lastBoardMessage = message("Extension command completed: %@", descriptor.title)
@@ -5356,19 +5441,14 @@ final class KanbanBoardViewModel: ObservableObject {
                 commandID: descriptor.commandID,
                 commandTitle: descriptor.title,
                 outcome: .succeeded,
-                detail: responseMessage ?? "Completed"
+                detail: outcome.detail
             )
-            markPMExtensionRunFinished(
-                pluginID: descriptor.pluginID,
-                pluginName: descriptor.pluginName,
-                startedAt: startedAt,
-                succeeded: true,
-                outputSummary: Self.summarizedExtensionOutput(responseMessage ?? stdout),
-                error: nil
-            )
-            return true
-        } catch {
-            lastBoardMessage = message("Extension command failed: %@", error.localizedDescription)
+        } else {
+            if outcome.detail == "Timed out in \(prepared.timeoutSeconds)s" {
+                lastBoardMessage = message("Extension command failed: timed out in %d seconds", prepared.timeoutSeconds)
+            } else {
+                lastBoardMessage = message("Extension command failed: %@", outcome.detail)
+            }
             lastBoardMessageSeverity = .warning
             appendPMExtensionActivity(
                 pluginID: descriptor.pluginID,
@@ -5376,18 +5456,19 @@ final class KanbanBoardViewModel: ObservableObject {
                 commandID: descriptor.commandID,
                 commandTitle: descriptor.title,
                 outcome: .failed,
-                detail: error.localizedDescription
+                detail: outcome.detail
             )
-            markPMExtensionRunFinished(
-                pluginID: descriptor.pluginID,
-                pluginName: descriptor.pluginName,
-                startedAt: startedAt,
-                succeeded: false,
-                outputSummary: Self.summarizedExtensionOutput(error.localizedDescription),
-                error: error.localizedDescription
-            )
-            return false
         }
+
+        markPMExtensionRunFinished(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            startedAt: prepared.startedAt,
+            succeeded: outcome.succeeded,
+            outputSummary: outcome.outputSummary,
+            error: outcome.error
+        )
+        return outcome.succeeded
     }
 
     func triggerPMExtensionHooks(

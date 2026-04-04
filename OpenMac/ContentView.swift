@@ -2173,8 +2173,13 @@ struct ContentView: View {
             return
         }
         runningExtensionCommandIDs.insert(command.id)
-        defer { runningExtensionCommandIDs.remove(command.id) }
-        _ = viewModel.runPMExtensionCommand(command, task: task, extensionInputs: extensionInputs)
+        viewModel.runPMExtensionCommandInBackground(
+            command,
+            task: task,
+            extensionInputs: extensionInputs
+        ) { _ in
+            runningExtensionCommandIDs.remove(command.id)
+        }
     }
 
     private func applyMCPSettingsFromSheet() {
