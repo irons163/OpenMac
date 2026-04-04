@@ -958,6 +958,26 @@ struct PMPlannerUIExtensionDescriptor: Equatable, Identifiable {
     var componentType: String
     var priority: Int
     var source: Source
+    var uiSchema: PMPlannerUIExtensionSchema?
+}
+
+struct PMPlannerUIExtensionSchema: Equatable {
+    var fields: [PMPlannerUIExtensionField]
+    var actions: [PMPlannerUIExtensionAction]
+}
+
+struct PMPlannerUIExtensionField: Equatable, Identifiable {
+    var id: String
+    var type: String
+    var label: String
+    var placeholder: String
+    var minHeight: Int?
+    var maxHeight: Int?
+}
+
+struct PMPlannerUIExtensionAction: Equatable, Identifiable {
+    var id: String
+    var title: String
 }
 
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {

@@ -4804,6 +4804,10 @@ struct KanbanSupportTypeTests {
         let extensions = viewModel.pmPlannerExtensions()
         #expect(extensions.contains(where: { $0.id == "com.example.risk.risk-scan" && $0.componentType == "risk.v1" }))
         #expect(extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
+        #expect(extensions.contains(where: {
+            $0.source == .builtIn &&
+                $0.uiSchema?.actions.contains(where: { $0.id == "pm.brainstorm.run" }) == true
+        }))
     }
 
     @Test("PM planner extensions hide built-in brainstorm when plugin provides brainstorm component")
@@ -4842,6 +4846,59 @@ struct KanbanSupportTypeTests {
 
         let extensions = viewModel.pmPlannerExtensions()
         #expect(extensions.contains(where: { $0.id == "com.example.brainstorm.brainstorm" }))
+        #expect(!extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
+    }
+
+    @Test("PM planner extension UI schema is parsed from plugin manifest")
+    func pmPlannerExtensionsParseUISchemaFromManifest() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("schema-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.schema",
+          "name": "Schema Plugin",
+          "enabled": true,
+          "uiExtensions": [
+            {
+              "id": "brainstorm",
+              "slot": "pm.planner",
+              "title": "Schema Brainstorm",
+              "component": "brainstorm.v1",
+              "enabled": true,
+              "ui": {
+                "fields": [
+                  { "id": "focus", "type": "focus.input", "placeholder": "Focus here" },
+                  { "id": "transcript", "type": "transcript.output", "minHeight": 160, "maxHeight": 260 }
+                ],
+                "actions": [
+                  { "id": "pm.brainstorm.run", "title": "Start Round" },
+                  { "id": "pm.brainstorm.clear", "title": "Reset" }
+                ]
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let extensions = viewModel.pmPlannerExtensions()
+        let descriptor = extensions.first(where: { $0.id == "com.example.schema.brainstorm" })
+
+        #expect(descriptor?.uiSchema?.fields.contains(where: { $0.id == "focus" && $0.type == "focus.input" }) == true)
+        #expect(descriptor?.uiSchema?.fields.contains(where: { $0.id == "transcript" && $0.minHeight == 160 && $0.maxHeight == 260 }) == true)
+        #expect(descriptor?.uiSchema?.actions.contains(where: { $0.id == "pm.brainstorm.run" && $0.title == "Start Round" }) == true)
+        #expect(descriptor?.uiSchema?.actions.contains(where: { $0.id == "pm.brainstorm.clear" && $0.title == "Reset" }) == true)
         #expect(!extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
     }
 

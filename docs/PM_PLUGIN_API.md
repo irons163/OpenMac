@@ -31,6 +31,18 @@ Plugins/
       "title": "Brainstorm Extension",
       "subtitle": "Run brainstorm rounds and fold results into project brief.",
       "component": "brainstorm.v1",
+      "ui": {
+        "fields": [
+          { "id": "focus", "type": "focus.input", "placeholder": "Brainstorm focus (optional)" },
+          { "id": "status", "type": "status.text" },
+          { "id": "transcript", "type": "transcript.output", "minHeight": 130, "maxHeight": 220 }
+        ],
+        "actions": [
+          { "id": "pm.brainstorm.run", "title": "Run Brainstorm Round" },
+          { "id": "pm.brainstorm.apply", "title": "Apply Brainstorm to Brief" },
+          { "id": "pm.brainstorm.clear", "title": "Clear Brainstorm" }
+        ]
+      },
       "priority": 100,
       "enabled": true
     }
@@ -58,6 +70,18 @@ Optional:
 - `subtitle` (string, optional): helper text under title.
 - `component` (string, required): UI component type.
   - Current supported value: `brainstorm.v1`
+- `ui` (object, optional): manifest-driven UI schema for this card.
+  - `fields` (array, optional):
+    - `id` (string, optional)
+    - `type` (string, required): supported `focus.input`, `status.text`, `transcript.output`
+    - `label` (string, optional)
+    - `placeholder` (string, optional)
+    - `minHeight` / `maxHeight` (number, optional, mainly for multiline output)
+    - `enabled` (boolean, optional, default `true`)
+  - `actions` (array, optional):
+    - `id` (string, required): supported `pm.brainstorm.run`, `pm.brainstorm.apply`, `pm.brainstorm.clear`
+    - `title` (string, optional)
+    - `enabled` (boolean, optional, default `true`)
 - `priority` (number, optional, default `0`): higher renders earlier.
 - `enabled` (boolean, optional, default `true`).
 

@@ -9,6 +9,18 @@
       "title": "Brainstorm Extension",
       "subtitle": "Use OpenMac runtime to brainstorm ideas and fold them back into your project brief.",
       "component": "brainstorm.v1",
+      "ui": {
+        "fields": [
+          { "id": "focus", "type": "focus.input", "placeholder": "Brainstorm focus (optional)" },
+          { "id": "status", "type": "status.text" },
+          { "id": "transcript", "type": "transcript.output", "minHeight": 130, "maxHeight": 220 }
+        ],
+        "actions": [
+          { "id": "pm.brainstorm.run", "title": "Run Brainstorm Round" },
+          { "id": "pm.brainstorm.apply", "title": "Apply Brainstorm to Brief" },
+          { "id": "pm.brainstorm.clear", "title": "Clear Brainstorm" }
+        ]
+      },
       "priority": 100,
       "enabled": true
     }

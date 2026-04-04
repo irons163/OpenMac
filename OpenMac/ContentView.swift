@@ -5357,6 +5357,46 @@ private enum PMPlannerExtensionComponentType: String {
     }
 }
 
+private enum PMPlannerExtensionFieldType: String {
+    case focusInput = "focus.input"
+    case statusText = "status.text"
+    case transcriptOutput = "transcript.output"
+
+    static func resolve(_ rawValue: String) -> PMPlannerExtensionFieldType? {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "focus", "focus.input", "input", "text.input", "singleline.input":
+            return .focusInput
+        case "status", "status.text", "message.status":
+            return .statusText
+        case "transcript", "transcript.output", "output", "multiline.output", "text.output":
+            return .transcriptOutput
+        default:
+            return nil
+        }
+    }
+}
+
+private enum PMPlannerExtensionActionID: String {
+    case runRound = "pm.brainstorm.run"
+    case applyToBrief = "pm.brainstorm.apply"
+    case clear = "pm.brainstorm.clear"
+
+    static func resolve(_ rawValue: String) -> PMPlannerExtensionActionID? {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "run", "run-round", "brainstorm.run", "pm.brainstorm.run":
+            return .runRound
+        case "apply", "apply-brief", "brainstorm.apply", "pm.brainstorm.apply":
+            return .applyToBrief
+        case "clear", "brainstorm.clear", "pm.brainstorm.clear":
+            return .clear
+        default:
+            return nil
+        }
+    }
+}
+
 private struct PMPlannerExtensionsHostView: View {
     let extensions: [PMPlannerUIExtensionDescriptor]
     @Binding var projectBrief: String
@@ -5372,9 +5412,10 @@ private struct PMPlannerExtensionsHostView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(extensions) { descriptor in
-                if PMPlannerExtensionComponentType.resolve(descriptor.componentType) == .brainstormV1 {
-                    PMPlannerBrainstormExtensionCard(
+                if let schema = resolvedSchema(for: descriptor) {
+                    PMPlannerManifestExtensionCard(
                         descriptor: descriptor,
+                        schema: schema,
                         projectBrief: $projectBrief,
                         brainstormFocus: $brainstormFocus,
                         brainstormTranscript: $brainstormTranscript,
@@ -5391,10 +5432,64 @@ private struct PMPlannerExtensionsHostView: View {
             }
         }
     }
+
+    private func resolvedSchema(for descriptor: PMPlannerUIExtensionDescriptor) -> PMPlannerUIExtensionSchema? {
+        if let schema = descriptor.uiSchema, (!schema.fields.isEmpty || !schema.actions.isEmpty) {
+            return schema
+        }
+        if PMPlannerExtensionComponentType.resolve(descriptor.componentType) == .brainstormV1 {
+            return Self.defaultBrainstormSchema
+        }
+        return nil
+    }
+
+    private static let defaultBrainstormSchema = PMPlannerUIExtensionSchema(
+        fields: [
+            PMPlannerUIExtensionField(
+                id: "focus",
+                type: PMPlannerExtensionFieldType.focusInput.rawValue,
+                label: "",
+                placeholder: L10n.string("Brainstorm Focus (optional)"),
+                minHeight: nil,
+                maxHeight: nil
+            ),
+            PMPlannerUIExtensionField(
+                id: "status",
+                type: PMPlannerExtensionFieldType.statusText.rawValue,
+                label: "",
+                placeholder: "",
+                minHeight: nil,
+                maxHeight: nil
+            ),
+            PMPlannerUIExtensionField(
+                id: "transcript",
+                type: PMPlannerExtensionFieldType.transcriptOutput.rawValue,
+                label: "",
+                placeholder: L10n.string("No brainstorm output yet. Run a brainstorm round to collect ideas."),
+                minHeight: 130,
+                maxHeight: 200
+            )
+        ],
+        actions: [
+            PMPlannerUIExtensionAction(
+                id: PMPlannerExtensionActionID.runRound.rawValue,
+                title: L10n.string("Run Brainstorm Round")
+            ),
+            PMPlannerUIExtensionAction(
+                id: PMPlannerExtensionActionID.applyToBrief.rawValue,
+                title: L10n.string("Apply Brainstorm to Brief")
+            ),
+            PMPlannerUIExtensionAction(
+                id: PMPlannerExtensionActionID.clear.rawValue,
+                title: L10n.string("Clear Brainstorm")
+            )
+        ]
+    )
 }
 
-private struct PMPlannerBrainstormExtensionCard: View {
+private struct PMPlannerManifestExtensionCard: View {
     let descriptor: PMPlannerUIExtensionDescriptor
+    let schema: PMPlannerUIExtensionSchema
     @Binding var projectBrief: String
     @Binding var brainstormFocus: String
     @Binding var brainstormTranscript: String
@@ -5426,6 +5521,137 @@ private struct PMPlannerBrainstormExtensionCard: View {
         }
     }
 
+    private var visibleFields: [PMPlannerUIExtensionField] {
+        schema.fields.filter { PMPlannerExtensionFieldType.resolve($0.type) != nil }
+    }
+
+    private var visibleActions: [PMPlannerUIExtensionAction] {
+        schema.actions.filter { PMPlannerExtensionActionID.resolve($0.id) != nil }
+    }
+
+    private var defaultFocusPlaceholder: String {
+        L10n.string("Brainstorm Focus (optional)")
+    }
+
+    private var defaultTranscriptPlaceholder: String {
+        L10n.string("No brainstorm output yet. Run a brainstorm round to collect ideas.")
+    }
+
+    private var hasVisibleRoundBadge: Bool {
+        brainstormRoundCount > 0
+    }
+
+    private var hasVisibleStatusText: Bool {
+        !brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func actionTitle(for action: PMPlannerUIExtensionAction) -> String {
+        let trimmed = action.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty else { return trimmed }
+        switch PMPlannerExtensionActionID.resolve(action.id) {
+        case .runRound:
+            return L10n.string("Run Brainstorm Round")
+        case .applyToBrief:
+            return L10n.string("Apply Brainstorm to Brief")
+        case .clear:
+            return L10n.string("Clear Brainstorm")
+        case .none:
+            return action.id
+        }
+    }
+
+    private func isActionDisabled(_ actionID: PMPlannerExtensionActionID) -> Bool {
+        switch actionID {
+        case .runRound:
+            return isBrainstormRunning ||
+                projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .applyToBrief:
+            return brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .clear:
+            return brainstormFocus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                brainstormRoundCount == 0
+        }
+    }
+
+    private func runAction(_ actionID: PMPlannerExtensionActionID) {
+        switch actionID {
+        case .runRound:
+            onRunBrainstormRound()
+        case .applyToBrief:
+            onApplyBrainstormToBrief()
+        case .clear:
+            onClearBrainstorm()
+        }
+    }
+
+    @ViewBuilder
+    private func fieldView(_ field: PMPlannerUIExtensionField) -> some View {
+        if let fieldType = PMPlannerExtensionFieldType.resolve(field.type) {
+            let fieldLabel = field.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch fieldType {
+            case .focusInput:
+                VStack(alignment: .leading, spacing: 4) {
+                    if !fieldLabel.isEmpty {
+                        Text(fieldLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        field.placeholder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? defaultFocusPlaceholder
+                            : field.placeholder,
+                        text: $brainstormFocus
+                    )
+                }
+            case .statusText:
+                if hasVisibleStatusText {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !fieldLabel.isEmpty {
+                            Text(fieldLabel)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(brainstormStatusText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            case .transcriptOutput:
+                VStack(alignment: .leading, spacing: 6) {
+                    if !fieldLabel.isEmpty {
+                        Text(fieldLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: $brainstormTranscript)
+                        .font(.system(size: 13, weight: .regular, design: .default))
+                        .frame(
+                            minHeight: CGFloat(field.minHeight ?? 130),
+                            maxHeight: CGFloat(field.maxHeight ?? 200)
+                        )
+                        .padding(4)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+                    if brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(
+                            field.placeholder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? defaultTranscriptPlaceholder
+                                : field.placeholder
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -5442,7 +5668,7 @@ private struct PMPlannerBrainstormExtensionCard: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
-                if brainstormRoundCount > 0 {
+                if hasVisibleRoundBadge {
                     Text(L10n.format("Brainstorm Round %d", brainstormRoundCount))
                         .font(.caption2.weight(.semibold))
                         .padding(.horizontal, 8)
@@ -5455,50 +5681,24 @@ private struct PMPlannerBrainstormExtensionCard: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            TextField(L10n.string("Brainstorm Focus (optional)"), text: $brainstormFocus)
-
-            if !brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(brainstormStatusText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            ForEach(visibleFields) { field in
+                fieldView(field)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                TextEditor(text: $brainstormTranscript)
-                    .font(.system(size: 13, weight: .regular, design: .default))
-                    .frame(minHeight: 130, maxHeight: 200)
-                    .padding(4)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                    )
-                if brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(L10n.string("No brainstorm output yet. Run a brainstorm round to collect ideas."))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            if !visibleActions.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(visibleActions) { action in
+                        if let actionID = PMPlannerExtensionActionID.resolve(action.id) {
+                            Button(actionTitle(for: action)) {
+                                runAction(actionID)
+                            }
+                            .disabled(isActionDisabled(actionID))
+                        }
+                    }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-
-            HStack(spacing: 8) {
-                Button(L10n.string("Run Brainstorm Round"), action: onRunBrainstormRound)
-                    .disabled(
-                        isBrainstormRunning ||
-                            projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    )
-                Button(L10n.string("Apply Brainstorm to Brief"), action: onApplyBrainstormToBrief)
-                    .disabled(brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button(L10n.string("Clear Brainstorm"), action: onClearBrainstorm)
-                    .disabled(
-                        brainstormFocus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                            brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                            brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                            brainstormRoundCount == 0
-                    )
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(10)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 10))

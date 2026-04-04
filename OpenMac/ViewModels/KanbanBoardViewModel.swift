@@ -5193,6 +5193,12 @@ final class KanbanBoardViewModel: ObservableObject {
                     return trimmed.isEmpty ? pluginName : trimmed
                 }()
                 let subtitle = (extensionManifest.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let parsedSchema = Self.pmPlannerUISchema(from: extensionManifest.ui)
+                let schema = parsedSchema ?? (
+                    component == Self.pmPlannerBrainstormComponent
+                        ? Self.defaultBrainstormPMPlannerUISchema()
+                        : nil
+                )
 
                 return PMPlannerUIExtensionDescriptor(
                     id: "\(pluginID).\(extensionID)",
@@ -5203,7 +5209,8 @@ final class KanbanBoardViewModel: ObservableObject {
                     subtitle: subtitle,
                     componentType: component,
                     priority: extensionManifest.priority ?? 0,
-                    source: .localPlugin
+                    source: .localPlugin,
+                    uiSchema: schema
                 )
             }
         }
@@ -5265,7 +5272,8 @@ final class KanbanBoardViewModel: ObservableObject {
             subtitle: L10n.string("Use OpenMac runtime to brainstorm ideas and fold them back into your project brief."),
             componentType: pmPlannerBrainstormComponent,
             priority: -100,
-            source: .builtIn
+            source: .builtIn,
+            uiSchema: defaultBrainstormPMPlannerUISchema()
         )
     }
 
@@ -5282,6 +5290,130 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let pmPlanningPluginCapability = "pm.plan.generate"
     private static let pmPlannerExtensionSlot = "pm.planner"
     private static let pmPlannerBrainstormComponent = "brainstorm.v1"
+    private static let pmPlannerUIFieldFocusInput = "focus.input"
+    private static let pmPlannerUIFieldStatusText = "status.text"
+    private static let pmPlannerUIFieldTranscriptOutput = "transcript.output"
+    private static let pmPlannerUIActionRun = "pm.brainstorm.run"
+    private static let pmPlannerUIActionApply = "pm.brainstorm.apply"
+    private static let pmPlannerUIActionClear = "pm.brainstorm.clear"
+
+    private static func defaultBrainstormPMPlannerUISchema() -> PMPlannerUIExtensionSchema {
+        PMPlannerUIExtensionSchema(
+            fields: [
+                PMPlannerUIExtensionField(
+                    id: "focus",
+                    type: pmPlannerUIFieldFocusInput,
+                    label: "",
+                    placeholder: L10n.string("Brainstorm Focus (optional)"),
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "status",
+                    type: pmPlannerUIFieldStatusText,
+                    label: "",
+                    placeholder: "",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "transcript",
+                    type: pmPlannerUIFieldTranscriptOutput,
+                    label: "",
+                    placeholder: L10n.string("No brainstorm output yet. Run a brainstorm round to collect ideas."),
+                    minHeight: 130,
+                    maxHeight: 200
+                )
+            ],
+            actions: [
+                PMPlannerUIExtensionAction(
+                    id: pmPlannerUIActionRun,
+                    title: L10n.string("Run Brainstorm Round")
+                ),
+                PMPlannerUIExtensionAction(
+                    id: pmPlannerUIActionApply,
+                    title: L10n.string("Apply Brainstorm to Brief")
+                ),
+                PMPlannerUIExtensionAction(
+                    id: pmPlannerUIActionClear,
+                    title: L10n.string("Clear Brainstorm")
+                )
+            ]
+        )
+    }
+
+    private static func pmPlannerUISchema(
+        from summary: LocalPMPlanningUIExtensionUISummary?
+    ) -> PMPlannerUIExtensionSchema? {
+        guard let summary else { return nil }
+
+        let fields = (summary.fields ?? []).enumerated().compactMap { index, fieldSummary -> PMPlannerUIExtensionField? in
+            guard fieldSummary.enabled ?? true else { return nil }
+            let normalizedType = normalizedPMPlannerUIFieldType(fieldSummary.type ?? "")
+            guard !normalizedType.isEmpty else { return nil }
+            let fieldID = {
+                let trimmed = (fieldSummary.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? "field-\(index)" : trimmed
+            }()
+            let label = (fieldSummary.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let placeholder = (fieldSummary.placeholder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let minHeight = (fieldSummary.minHeight ?? 0) > 0 ? fieldSummary.minHeight : nil
+            let maxHeight = (fieldSummary.maxHeight ?? 0) > 0 ? fieldSummary.maxHeight : nil
+            return PMPlannerUIExtensionField(
+                id: fieldID,
+                type: normalizedType,
+                label: label,
+                placeholder: placeholder,
+                minHeight: minHeight,
+                maxHeight: maxHeight
+            )
+        }
+
+        let actions = (summary.actions ?? []).enumerated().compactMap { index, actionSummary -> PMPlannerUIExtensionAction? in
+            guard actionSummary.enabled ?? true else { return nil }
+            let normalizedActionID = normalizedPMPlannerUIActionID(actionSummary.id ?? "")
+            guard !normalizedActionID.isEmpty else { return nil }
+            let title = (actionSummary.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackTitle = "Action \(index + 1)"
+            return PMPlannerUIExtensionAction(
+                id: normalizedActionID,
+                title: title.isEmpty ? fallbackTitle : title
+            )
+        }
+
+        if fields.isEmpty, actions.isEmpty {
+            return nil
+        }
+        return PMPlannerUIExtensionSchema(fields: fields, actions: actions)
+    }
+
+    private static func normalizedPMPlannerUIFieldType(_ rawValue: String) -> String {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "focus", "focus.input", "input", "text.input", "singleline.input":
+            return pmPlannerUIFieldFocusInput
+        case "status", "status.text", "message.status":
+            return pmPlannerUIFieldStatusText
+        case "transcript", "transcript.output", "output", "multiline.output", "text.output":
+            return pmPlannerUIFieldTranscriptOutput
+        default:
+            return normalized
+        }
+    }
+
+    private static func normalizedPMPlannerUIActionID(_ rawValue: String) -> String {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "run", "run-round", "brainstorm.run", "pm.brainstorm.run":
+            return pmPlannerUIActionRun
+        case "apply", "apply-brief", "brainstorm.apply", "pm.brainstorm.apply":
+            return pmPlannerUIActionApply
+        case "clear", "brainstorm.clear", "pm.brainstorm.clear":
+            return pmPlannerUIActionClear
+        default:
+            return normalized
+        }
+    }
 
     private static func pmPluginNamesPreview(_ names: [String], maxShown: Int = 3) -> String {
         let normalized = names
@@ -5310,7 +5442,29 @@ final class KanbanBoardViewModel: ObservableObject {
         let title: String?
         let subtitle: String?
         let component: String?
+        let ui: LocalPMPlanningUIExtensionUISummary?
         let priority: Int?
+        let enabled: Bool?
+    }
+
+    private struct LocalPMPlanningUIExtensionUISummary: Decodable {
+        let fields: [LocalPMPlanningUIExtensionUIFieldSummary]?
+        let actions: [LocalPMPlanningUIExtensionUIActionSummary]?
+    }
+
+    private struct LocalPMPlanningUIExtensionUIFieldSummary: Decodable {
+        let id: String?
+        let type: String?
+        let label: String?
+        let placeholder: String?
+        let minHeight: Int?
+        let maxHeight: Int?
+        let enabled: Bool?
+    }
+
+    private struct LocalPMPlanningUIExtensionUIActionSummary: Decodable {
+        let id: String?
+        let title: String?
         let enabled: Bool?
     }
 
