@@ -922,10 +922,14 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
 
     var autoDiscoverLocalPlugins: Bool
     var pluginsDirectoryPath: String
+    var disabledPluginIDs: Set<String>
+    var marketplaceSources: [PMExtensionMarketplaceSource]
 
     init(
         autoDiscoverLocalPlugins: Bool = true,
-        pluginsDirectoryPath: String = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+        pluginsDirectoryPath: String = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path,
+        disabledPluginIDs: Set<String> = [],
+        marketplaceSources: [PMExtensionMarketplaceSource] = PMExtensionMarketplaceSource.defaultSources
     ) {
         self.autoDiscoverLocalPlugins = autoDiscoverLocalPlugins
         let trimmedPath = pluginsDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -934,12 +938,99 @@ struct PMPlanningPluginPolicy: Equatable, Codable {
         } else {
             self.pluginsDirectoryPath = (trimmedPath as NSString).expandingTildeInPath
         }
+        self.disabledPluginIDs = Self.normalizedDisabledPluginIDs(disabledPluginIDs)
+        self.marketplaceSources = Self.normalizedMarketplaceSources(marketplaceSources)
     }
 
     nonisolated static func defaultPluginsDirectoryURL(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
         homeDirectory.appendingPathComponent(defaultRelativePath, isDirectory: true)
+    }
+
+    private static func normalizedDisabledPluginIDs(_ ids: Set<String>) -> Set<String> {
+        Set(
+            ids
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    private static func normalizedMarketplaceSources(
+        _ sources: [PMExtensionMarketplaceSource]
+    ) -> [PMExtensionMarketplaceSource] {
+        var seen = Set<String>()
+        var normalized: [PMExtensionMarketplaceSource] = []
+        for source in sources {
+            let key = source.normalizedKey
+            guard !key.isEmpty else { continue }
+            guard seen.insert(key).inserted else { continue }
+            normalized.append(source.normalized())
+        }
+        return normalized
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case autoDiscoverLocalPlugins
+        case pluginsDirectoryPath
+        case disabledPluginIDs
+        case marketplaceSources
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let autoDiscoverLocalPlugins = try container.decodeIfPresent(Bool.self, forKey: .autoDiscoverLocalPlugins) ?? true
+        let pluginsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .pluginsDirectoryPath)
+            ?? PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
+        let disabledPluginIDs = try container.decodeIfPresent(Set<String>.self, forKey: .disabledPluginIDs) ?? []
+        let marketplaceSources = try container.decodeIfPresent([PMExtensionMarketplaceSource].self, forKey: .marketplaceSources)
+            ?? PMExtensionMarketplaceSource.defaultSources
+        self.init(
+            autoDiscoverLocalPlugins: autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pluginsDirectoryPath,
+            disabledPluginIDs: disabledPluginIDs,
+            marketplaceSources: marketplaceSources
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(autoDiscoverLocalPlugins, forKey: .autoDiscoverLocalPlugins)
+        try container.encode(pluginsDirectoryPath, forKey: .pluginsDirectoryPath)
+        try container.encode(Array(disabledPluginIDs).sorted(), forKey: .disabledPluginIDs)
+        try container.encode(marketplaceSources, forKey: .marketplaceSources)
+    }
+}
+
+struct PMExtensionMarketplaceSource: Equatable, Codable, Identifiable {
+    var id: UUID
+    var name: String
+    var source: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        source: String
+    ) {
+        self.id = id
+        self.name = name
+        self.source = source
+    }
+
+    nonisolated static let defaultSources: [PMExtensionMarketplaceSource] = []
+
+    fileprivate var normalizedKey: String {
+        source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    fileprivate func normalized() -> PMExtensionMarketplaceSource {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        return PMExtensionMarketplaceSource(
+            id: id,
+            name: trimmedName.isEmpty ? trimmedSource : trimmedName,
+            source: trimmedSource
+        )
     }
 }
 
@@ -971,6 +1062,8 @@ struct PMInstalledExtensionDescriptor: Equatable, Identifiable {
     var capabilityCount: Int
     var uiExtensionCount: Int
     var commandCount: Int
+    var isEnabled: Bool
+    var compatibilitySummary: String
 }
 
 struct PMExtensionCommandDescriptor: Equatable, Identifiable {
@@ -1021,6 +1114,7 @@ struct PMPlannerUIExtensionField: Equatable, Identifiable {
 struct PMPlannerUIExtensionAction: Equatable, Identifiable {
     var id: String
     var title: String
+    var commandID: String?
 }
 
 enum TaskDeliveryGateMode: String, CaseIterable, Codable, Identifiable {

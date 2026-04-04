@@ -4584,7 +4584,9 @@ final class KanbanBoardViewModel: ObservableObject {
     ) {
         pmPlanningPluginPolicy = PMPlanningPluginPolicy(
             autoDiscoverLocalPlugins: autoDiscoverLocalPlugins,
-            pluginsDirectoryPath: pluginsDirectoryPath
+            pluginsDirectoryPath: pluginsDirectoryPath,
+            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
+            marketplaceSources: pmPlanningPluginPolicy.marketplaceSources
         )
         persistBoardState()
         guard announce else { return }
@@ -4612,6 +4614,96 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
+    func pmExtensionMarketplaceSources() -> [PMExtensionMarketplaceSource] {
+        pmPlanningPluginPolicy.marketplaceSources
+    }
+
+    @discardableResult
+    func addPMExtensionMarketplaceSource(name: String, source: String) -> Bool {
+        let trimmedSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSource.isEmpty else {
+            lastBoardMessage = message("Marketplace source is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = trimmedName.isEmpty ? trimmedSource : trimmedName
+        let duplicate = pmPlanningPluginPolicy.marketplaceSources.contains {
+            $0.source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmedSource.lowercased()
+        }
+        guard !duplicate else {
+            lastBoardMessage = message("Marketplace source already exists")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        var sources = pmPlanningPluginPolicy.marketplaceSources
+        sources.append(PMExtensionMarketplaceSource(name: resolvedName, source: trimmedSource))
+        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
+            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
+            marketplaceSources: sources
+        )
+        persistBoardState()
+        lastBoardMessage = message("Added marketplace source: %@", resolvedName)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func removePMExtensionMarketplaceSource(id: UUID) -> Bool {
+        let original = pmPlanningPluginPolicy.marketplaceSources
+        let filtered = original.filter { $0.id != id }
+        guard filtered.count != original.count else { return false }
+        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
+            disabledPluginIDs: pmPlanningPluginPolicy.disabledPluginIDs,
+            marketplaceSources: filtered
+        )
+        persistBoardState()
+        lastBoardMessage = message("Removed marketplace source")
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    @discardableResult
+    func installPMExtensionFromMarketplaceSource(id: UUID) -> Bool {
+        guard let source = pmPlanningPluginPolicy.marketplaceSources.first(where: { $0.id == id }) else { return false }
+        return installPMExtensionFromRemote(source.source)
+    }
+
+    @discardableResult
+    func setPMExtensionEnabled(pluginID: String, enabled: Bool) -> Bool {
+        let normalizedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPluginID.isEmpty else { return false }
+
+        var disabled = pmPlanningPluginPolicy.disabledPluginIDs
+        let changed: Bool
+        if enabled {
+            changed = disabled.remove(normalizedPluginID) != nil
+        } else {
+            let countBefore = disabled.count
+            disabled.insert(normalizedPluginID)
+            changed = disabled.count != countBefore
+        }
+        guard changed else { return false }
+
+        pmPlanningPluginPolicy = PMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+            pluginsDirectoryPath: pmPlanningPluginPolicy.pluginsDirectoryPath,
+            disabledPluginIDs: disabled,
+            marketplaceSources: pmPlanningPluginPolicy.marketplaceSources
+        )
+        persistBoardState()
+        lastBoardMessage = enabled
+            ? message("Enabled extension: %@", pluginID)
+            : message("Disabled extension: %@", pluginID)
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
     func pmInstalledExtensions() -> [PMInstalledExtensionDescriptor] {
         detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
             .map { record in
@@ -4625,6 +4717,12 @@ final class KanbanBoardViewModel: ObservableObject {
                 let capabilities = record.manifest.capabilities ?? []
                 let commands = (record.manifest.commands ?? []).filter { $0.enabled ?? true }
                 let uiExtensions = (record.manifest.uiExtensions ?? []).filter { $0.enabled ?? true }
+                let normalizedPluginID = pluginID.isEmpty ? name.lowercased() : pluginID.lowercased()
+                let isEnabled = !pmPlanningPluginPolicy.disabledPluginIDs.contains(normalizedPluginID)
+                let compatibilitySummary = Self.pmExtensionCompatibilitySummary(
+                    minVersion: record.manifest.minOpenMacVersion,
+                    maxVersion: record.manifest.maxOpenMacVersion
+                )
                 return PMInstalledExtensionDescriptor(
                     id: pluginID.isEmpty ? name.lowercased() : pluginID,
                     pluginID: pluginID.isEmpty ? name.lowercased() : pluginID,
@@ -4634,7 +4732,9 @@ final class KanbanBoardViewModel: ObservableObject {
                     directoryPath: record.directoryURL.path,
                     capabilityCount: capabilities.count,
                     uiExtensionCount: uiExtensions.count,
-                    commandCount: commands.count
+                    commandCount: commands.count,
+                    isEnabled: isEnabled,
+                    compatibilitySummary: compatibilitySummary
                 )
             }
             .sorted { lhs, rhs in
@@ -4649,6 +4749,7 @@ final class KanbanBoardViewModel: ObservableObject {
             .flatMap { record -> [PMExtensionCommandDescriptor] in
                 let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !pluginID.isEmpty else { return [] }
+                guard !pmPlanningPluginPolicy.disabledPluginIDs.contains(pluginID.lowercased()) else { return [] }
                 let pluginName = {
                     let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
@@ -4702,7 +4803,24 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func runPMExtensionCommand(_ descriptor: PMExtensionCommandDescriptor, task: WorkTask? = nil) -> Bool {
+    func runPMExtensionCommand(
+        _ descriptor: PMExtensionCommandDescriptor,
+        task: WorkTask? = nil,
+        extensionInputs: [String: String] = [:]
+    ) -> Bool {
+        if pmPlanningPluginPolicy.disabledPluginIDs.contains(descriptor.pluginID.lowercased()) {
+            lastBoardMessage = message("Extension command failed: plugin is disabled")
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: "Plugin is disabled"
+            )
+            return false
+        }
         let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
         guard let record = records.first(where: {
             (($0.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == descriptor.pluginID
@@ -4784,6 +4902,7 @@ final class KanbanBoardViewModel: ObservableObject {
             boardName: selectedBoardName,
             projectName: selectedBoardName,
             projectBrief: "",
+            extensionInputs: extensionInputs,
             selectedTask: task.map { selectedTask in
                 PMExtensionCommandTaskDescriptor(
                     id: selectedTask.id,
@@ -4958,6 +5077,22 @@ final class KanbanBoardViewModel: ObservableObject {
             let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? sourceURL.lastPathComponent : trimmed
         }()
+        if let violation = Self.pmExtensionCompatibilityViolation(
+            minVersion: record.manifest.minOpenMacVersion,
+            maxVersion: record.manifest.maxOpenMacVersion
+        ) {
+            lastBoardMessage = message("Extension install blocked: %@", violation)
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install blocked: \(violation)"
+            )
+            return false
+        }
         let pluginVersion = (record.manifest.version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         appendPMExtensionActivity(
             pluginID: pluginID,
@@ -5851,6 +5986,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let extensions = detectedLocalPMPlannerPluginRecords(in: directoryPath).flatMap { record -> [PMPlannerUIExtensionDescriptor] in
             let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !pluginID.isEmpty else { return [] }
+            guard !pmPlanningPluginPolicy.disabledPluginIDs.contains(pluginID.lowercased()) else { return [] }
             let pluginName = {
                 let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
@@ -5963,6 +6099,8 @@ final class KanbanBoardViewModel: ObservableObject {
         switch normalized {
         case "brainstorm", "brainstorm.v1", "pm.brainstorm.v1":
             return pmPlannerBrainstormComponent
+        case "form", "form.v1", "pm.form.v1":
+            return "form.v1"
         default:
             return normalized
         }
@@ -5982,6 +6120,8 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let pmPlannerUIFieldTranscriptOutput = "transcript.output"
     private static let pmPlannerUIActionRun = "pm.brainstorm.run"
     private static let pmPlannerUIActionApply = "pm.brainstorm.apply"
+    private static let pmPlannerUIActionApplyGenerate = "pm.brainstorm.apply.generate"
+    private static let pmPlannerUIActionApplyCreate = "pm.brainstorm.apply.create"
     private static let pmPlannerUIActionClear = "pm.brainstorm.clear"
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -6042,6 +6182,77 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let timeoutSeconds else { return nil }
         let minimum = max(1, timeoutSeconds)
         return min(extensionCommandMaxTimeoutSeconds, minimum)
+    }
+
+    private static func currentOpenMacVersionString() -> String {
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let trimmed = (bundleVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "0.0.0" : trimmed
+    }
+
+    private static func normalizedVersionSegments(_ rawVersion: String) -> [Int] {
+        rawVersion
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ".")
+            .prefix(4)
+            .map { segment in
+                Int(segment.filter(\.isNumber)) ?? 0
+            }
+    }
+
+    private static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        let lhsSegments = normalizedVersionSegments(lhs)
+        let rhsSegments = normalizedVersionSegments(rhs)
+        let maxCount = max(lhsSegments.count, rhsSegments.count)
+        for index in 0..<maxCount {
+            let lhsValue = index < lhsSegments.count ? lhsSegments[index] : 0
+            let rhsValue = index < rhsSegments.count ? rhsSegments[index] : 0
+            if lhsValue < rhsValue { return .orderedAscending }
+            if lhsValue > rhsValue { return .orderedDescending }
+        }
+        return .orderedSame
+    }
+
+    private static func pmExtensionCompatibilitySummary(
+        minVersion: String?,
+        maxVersion: String?
+    ) -> String {
+        let current = currentOpenMacVersionString()
+        let minTrimmed = (minVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxTrimmed = (maxVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !minTrimmed.isEmpty, compareVersions(current, minTrimmed) == .orderedAscending {
+            return "Requires OpenMac >= \(minTrimmed) (current \(current))"
+        }
+        if !maxTrimmed.isEmpty, compareVersions(current, maxTrimmed) == .orderedDescending {
+            return "Requires OpenMac <= \(maxTrimmed) (current \(current))"
+        }
+        if !minTrimmed.isEmpty, !maxTrimmed.isEmpty {
+            return "Compatible with OpenMac \(minTrimmed) - \(maxTrimmed)"
+        }
+        if !minTrimmed.isEmpty {
+            return "Compatible with OpenMac >= \(minTrimmed)"
+        }
+        if !maxTrimmed.isEmpty {
+            return "Compatible with OpenMac <= \(maxTrimmed)"
+        }
+        return "Compatibility: no explicit OpenMac version constraints"
+    }
+
+    private static func pmExtensionCompatibilityViolation(
+        minVersion: String?,
+        maxVersion: String?
+    ) -> String? {
+        let current = currentOpenMacVersionString()
+        let minTrimmed = (minVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxTrimmed = (maxVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !minTrimmed.isEmpty, compareVersions(current, minTrimmed) == .orderedAscending {
+            return "Requires OpenMac >= \(minTrimmed) (current \(current))"
+        }
+        if !maxTrimmed.isEmpty, compareVersions(current, maxTrimmed) == .orderedDescending {
+            return "Requires OpenMac <= \(maxTrimmed) (current \(current))"
+        }
+        return nil
     }
 
     private static func isLikelyHTTPRemoteSource(_ source: String) -> Bool {
@@ -6193,15 +6404,28 @@ final class KanbanBoardViewModel: ObservableObject {
             actions: [
                 PMPlannerUIExtensionAction(
                     id: pmPlannerUIActionRun,
-                    title: L10n.string("Run Brainstorm Round")
+                    title: L10n.string("Run Brainstorm Round"),
+                    commandID: nil
                 ),
                 PMPlannerUIExtensionAction(
                     id: pmPlannerUIActionApply,
-                    title: L10n.string("Apply Brainstorm to Brief")
+                    title: L10n.string("Apply Brainstorm to Brief"),
+                    commandID: nil
+                ),
+                PMPlannerUIExtensionAction(
+                    id: pmPlannerUIActionApplyGenerate,
+                    title: L10n.string("Apply + Generate"),
+                    commandID: nil
+                ),
+                PMPlannerUIExtensionAction(
+                    id: pmPlannerUIActionApplyCreate,
+                    title: L10n.string("Create + Run Assigned"),
+                    commandID: nil
                 ),
                 PMPlannerUIExtensionAction(
                     id: pmPlannerUIActionClear,
-                    title: L10n.string("Clear Brainstorm")
+                    title: L10n.string("Clear Brainstorm"),
+                    commandID: nil
                 )
             ]
         )
@@ -6242,7 +6466,8 @@ final class KanbanBoardViewModel: ObservableObject {
             let fallbackTitle = "Action \(index + 1)"
             return PMPlannerUIExtensionAction(
                 id: normalizedActionID,
-                title: title.isEmpty ? fallbackTitle : title
+                title: title.isEmpty ? fallbackTitle : title,
+                commandID: (actionSummary.commandID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
 
@@ -6255,12 +6480,16 @@ final class KanbanBoardViewModel: ObservableObject {
     private static func normalizedPMPlannerUIFieldType(_ rawValue: String) -> String {
         let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
-        case "focus", "focus.input", "input", "text.input", "singleline.input":
+        case "focus", "focus.input":
             return pmPlannerUIFieldFocusInput
+        case "input", "text.input", "singleline.input":
+            return "text.input"
         case "status", "status.text", "message.status":
             return pmPlannerUIFieldStatusText
-        case "transcript", "transcript.output", "output", "multiline.output", "text.output":
+        case "transcript", "transcript.output":
             return pmPlannerUIFieldTranscriptOutput
+        case "output", "multiline.input", "multiline.output", "text.output", "textarea.input":
+            return "multiline.input"
         default:
             return normalized
         }
@@ -6273,6 +6502,10 @@ final class KanbanBoardViewModel: ObservableObject {
             return pmPlannerUIActionRun
         case "apply", "apply-brief", "brainstorm.apply", "pm.brainstorm.apply":
             return pmPlannerUIActionApply
+        case "apply-generate", "brainstorm.apply.generate", "pm.brainstorm.apply.generate":
+            return pmPlannerUIActionApplyGenerate
+        case "apply-create", "brainstorm.apply.create", "pm.brainstorm.apply.create":
+            return pmPlannerUIActionApplyCreate
         case "clear", "brainstorm.clear", "pm.brainstorm.clear":
             return pmPlannerUIActionClear
         default:
@@ -6298,6 +6531,8 @@ final class KanbanBoardViewModel: ObservableObject {
         let name: String?
         let version: String?
         let summary: String?
+        let minOpenMacVersion: String?
+        let maxOpenMacVersion: String?
         let capabilities: [String]?
         let permissions: [String]?
         let entrypoint: String?
@@ -6347,6 +6582,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private struct LocalPMPlanningUIExtensionUIActionSummary: Decodable {
         let id: String?
         let title: String?
+        let commandID: String?
         let enabled: Bool?
     }
 
@@ -6362,6 +6598,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let boardName: String
         let projectName: String
         let projectBrief: String
+        let extensionInputs: [String: String]
         let selectedTask: PMExtensionCommandTaskDescriptor?
         let availableAgents: [PMExtensionCommandAgentDescriptor]
     }

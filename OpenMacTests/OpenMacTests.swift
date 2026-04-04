@@ -5167,6 +5167,68 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.pmExtensionActivityLog.last?.outcome == .failed)
     }
 
+    @Test("PM extension marketplace sources can be added and removed")
+    func pmExtensionMarketplaceSourcesAddRemove() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let added = viewModel.addPMExtensionMarketplaceSource(
+            name: "Local Source",
+            source: "/tmp/example-extension.zip"
+        )
+        #expect(added)
+
+        let sources = viewModel.pmExtensionMarketplaceSources()
+        #expect(sources.contains(where: { $0.source == "/tmp/example-extension.zip" }))
+        guard let sourceID = sources.first(where: { $0.source == "/tmp/example-extension.zip" })?.id else {
+            #expect(Bool(false), "Expected saved marketplace source")
+            return
+        }
+
+        let removed = viewModel.removePMExtensionMarketplaceSource(id: sourceID)
+        #expect(removed)
+        #expect(!viewModel.pmExtensionMarketplaceSources().contains(where: { $0.id == sourceID }))
+    }
+
+    @Test("disabled PM extensions are hidden from command contribution lists")
+    func disabledPMExtensionsAreExcludedFromCommands() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("disable-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.disable.me",
+          "name": "Disable Me",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "hello", "title": "Hello", "slots": ["app.toolbar"], "permissions": ["command.execute"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"hello"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        #expect(viewModel.pmToolbarExtensionCommands().contains(where: { $0.commandID == "hello" }))
+        let changed = viewModel.setPMExtensionEnabled(pluginID: "com.example.disable.me", enabled: false)
+        #expect(changed)
+        #expect(!viewModel.pmToolbarExtensionCommands().contains(where: { $0.commandID == "hello" }))
+    }
+
     @Test("install PM extension from remote supports local ZIP source")
     func installPMExtensionFromRemoteZIP() throws {
         let fileManager = FileManager.default

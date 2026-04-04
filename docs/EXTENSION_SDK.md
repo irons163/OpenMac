@@ -23,6 +23,7 @@ Default extension folder:
   "id": "com.example.my-plugin",
   "name": "My Plugin",
   "version": "0.1.0",
+  "minOpenMacVersion": "1.0.0",
   "summary": "Optional description",
   "capabilities": ["pm.plan.generate"],
   "permissions": ["command.execute"],
@@ -43,7 +44,7 @@ Default extension folder:
       "id": "brainstorm",
       "slot": "pm.planner",
       "title": "Brainstorm Extension",
-      "component": "brainstorm.v1",
+      "component": "form.v1",
       "priority": 10,
       "enabled": true
     }
@@ -66,6 +67,7 @@ Alias values are normalized by OpenMac (for compatibility), but use the canonica
 - If permissions are declared and `command.execute` is missing, OpenMac blocks command execution.
 - If permissions are not declared, OpenMac runs in compatibility mode and logs a warning.
 - Marketplace includes an activity log for install/run success/failure debugging.
+- Marketplace supports saved install sources and extension enable/disable toggles.
 
 ## Runtime Contract
 
@@ -92,3 +94,4 @@ Expected response on `stdout`:
 ```
 
 OpenMac also sends optional selected task context when running from task card slot.
+For planner-host actions, OpenMac also sends `extensionInputs` (field values collected from extension UI).

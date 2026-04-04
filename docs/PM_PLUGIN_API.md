@@ -23,6 +23,7 @@ Plugins/
 {
   "id": "com.example.brainstormer",
   "name": "Example Brainstormer",
+  "minOpenMacVersion": "1.0.0",
   "capabilities": ["pm.plan.generate"],
   "permissions": ["command.execute"],
   "commands": [
@@ -51,6 +52,8 @@ Plugins/
         "actions": [
           { "id": "pm.brainstorm.run", "title": "Run Brainstorm Round" },
           { "id": "pm.brainstorm.apply", "title": "Apply Brainstorm to Brief" },
+          { "id": "pm.brainstorm.apply.generate", "title": "Apply + Generate" },
+          { "id": "command:health-check", "title": "Run Health Check", "commandID": "health-check" },
           { "id": "pm.brainstorm.clear", "title": "Clear Brainstorm" }
         ]
       },
@@ -71,6 +74,7 @@ Required:
 
 Optional:
 - `enabled` (boolean, default `true`)
+- `minOpenMacVersion` / `maxOpenMacVersion` (string, optional): compatibility guard checked on install.
 - `permissions` (string array): extension-level permissions. If command-level permissions are absent, OpenMac uses this as fallback.
 - `commands` (array): command contributions rendered in OpenMac UI contribution points.
 - `uiExtensions` (array): declares PM extension UI cards that OpenMac can render.
@@ -82,17 +86,18 @@ Optional:
 - `title` (string, optional): card title.
 - `subtitle` (string, optional): helper text under title.
 - `component` (string, required): UI component type.
-  - Current supported value: `brainstorm.v1`
+  - Current supported values: `brainstorm.v1`, `form.v1`
 - `ui` (object, optional): manifest-driven UI schema for this card.
   - `fields` (array, optional):
     - `id` (string, optional)
-    - `type` (string, required): supported `focus.input`, `status.text`, `transcript.output`
+    - `type` (string, required): supported `focus.input`, `status.text`, `transcript.output`, `text.input`, `multiline.input`
     - `label` (string, optional)
     - `placeholder` (string, optional)
     - `minHeight` / `maxHeight` (number, optional, mainly for multiline output)
     - `enabled` (boolean, optional, default `true`)
   - `actions` (array, optional):
-    - `id` (string, required): supported `pm.brainstorm.run`, `pm.brainstorm.apply`, `pm.brainstorm.clear`
+    - `id` (string, required): supports built-ins (`pm.brainstorm.run`, `pm.brainstorm.apply`, `pm.brainstorm.apply.generate`, `pm.brainstorm.apply.create`, `pm.brainstorm.clear`) and command routing (`command:<command-id>` or `pm.command.<command-id>`)
+    - `commandID` (string, optional): explicit command contribution id to execute for this action
     - `title` (string, optional)
     - `enabled` (boolean, optional, default `true`)
 - `priority` (number, optional, default `0`): higher renders earlier.
@@ -124,6 +129,7 @@ OpenMac executes the entrypoint and sends one JSON payload to `stdin`.
 {
   "projectName": "YouBike",
   "projectBrief": "Build a cross-platform app...",
+  "extensionInputs": { "focus": "commuter reliability" },
   "availableAgents": [
     { "name": "A", "skills": ["swiftui", "planning"], "maxConcurrentTasks": 2 }
   ]

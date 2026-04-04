@@ -122,6 +122,7 @@ struct ContentView: View {
     @State private var pmBrainstormStatusText = ""
     @State private var pmBrainstormRoundCount = 0
     @State private var pmBrainstormIsRunning = false
+    @State private var pmPlannerExtensionFieldValues: [String: String] = [:]
     @State private var autoRetryEnabled = true
     @State private var autoRetryMaxRetries = 2
     @State private var autoRetryBackoffSeconds = 1.0
@@ -855,6 +856,7 @@ struct ContentView: View {
                 brainstormStatusText: $pmBrainstormStatusText,
                 brainstormRoundCount: $pmBrainstormRoundCount,
                 isBrainstormRunning: $pmBrainstormIsRunning,
+                plannerExtensionFieldValues: $pmPlannerExtensionFieldValues,
                 testPlanText: pmTestPlanText,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
@@ -865,8 +867,12 @@ struct ContentView: View {
                 onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
                 onRunBrainstormRound: runPMBrainstormRoundFromSheet,
                 onApplyBrainstormToBrief: applyPMBrainstormToBriefFromSheet,
+                onApplyBrainstormAndGenerate: applyPMBrainstormAndGeneratePlanFromSheet,
+                onApplyBrainstormGenerateAndCreate: applyPMBrainstormGenerateAndCreateTicketsFromSheet,
                 onClearBrainstorm: clearPMBrainstormFromSheet,
-                onRunPlannerCommand: runPMExtensionCommandFromToolbar,
+                onRunPlannerCommand: { command, inputs in
+                    runPMExtensionCommand(command, extensionInputs: inputs)
+                },
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
                 onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
@@ -926,6 +932,7 @@ struct ContentView: View {
             PMExtensionsMarketplaceSheet(
                 installedExtensions: installedPMExtensions,
                 commands: installedPMExtensionCommands,
+                marketplaceSources: pmExtensionMarketplaceSources,
                 runningCommandIDs: runningExtensionCommandIDs,
                 activityLog: pmExtensionActivityLog,
                 pluginsFolderPath: resolvedPMPluginsDirectoryPath,
@@ -941,6 +948,20 @@ struct ContentView: View {
                 onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
                 onUninstall: { pluginID in
                     _ = viewModel.uninstallPMExtension(pluginID: pluginID)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onSetExtensionEnabled: { pluginID, enabled in
+                    _ = viewModel.setPMExtensionEnabled(pluginID: pluginID, enabled: enabled)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onAddSource: { name, source in
+                    _ = viewModel.addPMExtensionMarketplaceSource(name: name, source: source)
+                },
+                onRemoveSource: { sourceID in
+                    _ = viewModel.removePMExtensionMarketplaceSource(id: sourceID)
+                },
+                onInstallSource: { sourceID in
+                    _ = viewModel.installPMExtensionFromMarketplaceSource(id: sourceID)
                     refreshPMPluginDiagnostics(announce: false)
                 },
                 onRunCommand: runPMExtensionCommandFromToolbar,
@@ -1285,6 +1306,7 @@ struct ContentView: View {
         pmBrainstormStatusText = ""
         pmBrainstormRoundCount = 0
         pmBrainstormIsRunning = false
+        pmPlannerExtensionFieldValues = [:]
         isShowingPMPlannerSheet = true
     }
 
@@ -1307,6 +1329,7 @@ struct ContentView: View {
         pmBrainstormStatusText = ""
         pmBrainstormRoundCount = 0
         pmBrainstormIsRunning = false
+        pmPlannerExtensionFieldValues = [:]
         isShowingPMPlannerSheet = false
     }
 
@@ -1421,6 +1444,19 @@ struct ContentView: View {
         pmBrainstormStatusText = ""
         pmBrainstormRoundCount = 0
         pmBrainstormIsRunning = false
+        pmPlannerExtensionFieldValues = [:]
+    }
+
+    private func applyPMBrainstormAndGeneratePlanFromSheet() {
+        applyPMBrainstormToBriefFromSheet()
+        generatePMPlanFromSheet()
+    }
+
+    private func applyPMBrainstormGenerateAndCreateTicketsFromSheet() {
+        applyPMBrainstormAndGeneratePlanFromSheet()
+        if !pmPlannedTickets.isEmpty {
+            createPMTicketsFromSheet()
+        }
     }
 
     private func generatePMPlanFromSheet() {
@@ -2072,13 +2108,17 @@ struct ContentView: View {
         runPMExtensionCommand(command, task: task)
     }
 
-    private func runPMExtensionCommand(_ command: PMExtensionCommandDescriptor, task: WorkTask? = nil) {
+    private func runPMExtensionCommand(
+        _ command: PMExtensionCommandDescriptor,
+        task: WorkTask? = nil,
+        extensionInputs: [String: String] = [:]
+    ) {
         if runningExtensionCommandIDs.contains(command.id) {
             return
         }
         runningExtensionCommandIDs.insert(command.id)
         defer { runningExtensionCommandIDs.remove(command.id) }
-        _ = viewModel.runPMExtensionCommand(command, task: task)
+        _ = viewModel.runPMExtensionCommand(command, task: task, extensionInputs: extensionInputs)
     }
 
     private func applyMCPSettingsFromSheet() {
@@ -3237,6 +3277,10 @@ struct ContentView: View {
 
     private var installedPMExtensionCommands: [PMExtensionCommandDescriptor] {
         viewModel.pmExtensionCommands()
+    }
+
+    private var pmExtensionMarketplaceSources: [PMExtensionMarketplaceSource] {
+        viewModel.pmExtensionMarketplaceSources()
     }
 
     private var toolbarPMExtensionCommands: [PMExtensionCommandDescriptor] {
@@ -5508,12 +5552,15 @@ fileprivate enum PMPlanningEngineSource {
 
 private enum PMPlannerExtensionComponentType: String {
     case brainstormV1 = "brainstorm.v1"
+    case formV1 = "form.v1"
 
     static func resolve(_ rawValue: String) -> PMPlannerExtensionComponentType? {
         let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
         case "brainstorm", "brainstorm.v1", "pm.brainstorm.v1":
             return .brainstormV1
+        case "form", "form.v1", "pm.form.v1":
+            return .formV1
         default:
             return nil
         }
@@ -5524,16 +5571,22 @@ private enum PMPlannerExtensionFieldType: String {
     case focusInput = "focus.input"
     case statusText = "status.text"
     case transcriptOutput = "transcript.output"
+    case textInput = "text.input"
+    case multilineInput = "multiline.input"
 
     static func resolve(_ rawValue: String) -> PMPlannerExtensionFieldType? {
         let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
-        case "focus", "focus.input", "input", "text.input", "singleline.input":
+        case "focus", "focus.input":
             return .focusInput
+        case "input", "text.input", "singleline.input":
+            return .textInput
         case "status", "status.text", "message.status":
             return .statusText
-        case "transcript", "transcript.output", "output", "multiline.output", "text.output":
+        case "transcript", "transcript.output":
             return .transcriptOutput
+        case "output", "multiline.input", "multiline.output", "text.output", "textarea.input":
+            return .multilineInput
         default:
             return nil
         }
@@ -5543,6 +5596,8 @@ private enum PMPlannerExtensionFieldType: String {
 private enum PMPlannerExtensionActionID: String {
     case runRound = "pm.brainstorm.run"
     case applyToBrief = "pm.brainstorm.apply"
+    case applyAndGenerate = "pm.brainstorm.apply.generate"
+    case applyGenerateAndCreate = "pm.brainstorm.apply.create"
     case clear = "pm.brainstorm.clear"
 
     static func resolve(_ rawValue: String) -> PMPlannerExtensionActionID? {
@@ -5552,6 +5607,10 @@ private enum PMPlannerExtensionActionID: String {
             return .runRound
         case "apply", "apply-brief", "brainstorm.apply", "pm.brainstorm.apply":
             return .applyToBrief
+        case "apply-generate", "brainstorm.apply.generate", "pm.brainstorm.apply.generate":
+            return .applyAndGenerate
+        case "apply-create", "brainstorm.apply.create", "pm.brainstorm.apply.create":
+            return .applyGenerateAndCreate
         case "clear", "brainstorm.clear", "pm.brainstorm.clear":
             return .clear
         default:
@@ -5568,8 +5627,14 @@ private struct PMPlannerExtensionsHostView: View {
     @Binding var brainstormStatusText: String
     @Binding var brainstormRoundCount: Int
     @Binding var isBrainstormRunning: Bool
+    @Binding var plannerExtensionFieldValues: [String: String]
+    let plannerCommands: [PMExtensionCommandDescriptor]
+    let runningCommandIDs: Set<String>
     let onRunBrainstormRound: () -> Void
     let onApplyBrainstormToBrief: () -> Void
+    let onApplyBrainstormAndGenerate: () -> Void
+    let onApplyBrainstormGenerateAndCreate: () -> Void
+    let onRunPlannerCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
     let onClearBrainstorm: () -> Void
 
     var body: some View {
@@ -5585,8 +5650,14 @@ private struct PMPlannerExtensionsHostView: View {
                         brainstormStatusText: $brainstormStatusText,
                         brainstormRoundCount: $brainstormRoundCount,
                         isBrainstormRunning: $isBrainstormRunning,
+                        plannerExtensionFieldValues: $plannerExtensionFieldValues,
+                        plannerCommands: plannerCommands,
+                        runningCommandIDs: runningCommandIDs,
                         onRunBrainstormRound: onRunBrainstormRound,
                         onApplyBrainstormToBrief: onApplyBrainstormToBrief,
+                        onApplyBrainstormAndGenerate: onApplyBrainstormAndGenerate,
+                        onApplyBrainstormGenerateAndCreate: onApplyBrainstormGenerateAndCreate,
+                        onRunPlannerCommand: onRunPlannerCommand,
                         onClearBrainstorm: onClearBrainstorm
                     )
                 } else {
@@ -5636,15 +5707,18 @@ private struct PMPlannerExtensionsHostView: View {
         actions: [
             PMPlannerUIExtensionAction(
                 id: PMPlannerExtensionActionID.runRound.rawValue,
-                title: L10n.string("Run Brainstorm Round")
+                title: L10n.string("Run Brainstorm Round"),
+                commandID: nil
             ),
             PMPlannerUIExtensionAction(
                 id: PMPlannerExtensionActionID.applyToBrief.rawValue,
-                title: L10n.string("Apply Brainstorm to Brief")
+                title: L10n.string("Apply Brainstorm to Brief"),
+                commandID: nil
             ),
             PMPlannerUIExtensionAction(
                 id: PMPlannerExtensionActionID.clear.rawValue,
-                title: L10n.string("Clear Brainstorm")
+                title: L10n.string("Clear Brainstorm"),
+                commandID: nil
             )
         ]
     )
@@ -5659,20 +5733,24 @@ private struct PMPlannerManifestExtensionCard: View {
     @Binding var brainstormStatusText: String
     @Binding var brainstormRoundCount: Int
     @Binding var isBrainstormRunning: Bool
+    @Binding var plannerExtensionFieldValues: [String: String]
+    let plannerCommands: [PMExtensionCommandDescriptor]
+    let runningCommandIDs: Set<String>
     let onRunBrainstormRound: () -> Void
     let onApplyBrainstormToBrief: () -> Void
+    let onApplyBrainstormAndGenerate: () -> Void
+    let onApplyBrainstormGenerateAndCreate: () -> Void
+    let onRunPlannerCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
     let onClearBrainstorm: () -> Void
 
     private var titleText: String {
         let trimmed = descriptor.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? L10n.string("Brainstorm Extension") : trimmed
+        return trimmed.isEmpty ? descriptor.pluginName : trimmed
     }
 
     private var subtitleText: String {
         let trimmed = descriptor.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty
-            ? L10n.string("Use OpenMac runtime to brainstorm ideas and fold them back into your project brief.")
-            : trimmed
+        return trimmed.isEmpty ? descriptor.pluginID : trimmed
     }
 
     private var sourceTagText: String {
@@ -5689,7 +5767,9 @@ private struct PMPlannerManifestExtensionCard: View {
     }
 
     private var visibleActions: [PMPlannerUIExtensionAction] {
-        schema.actions.filter { PMPlannerExtensionActionID.resolve($0.id) != nil }
+        schema.actions.filter { action in
+            PMPlannerExtensionActionID.resolve(action.id) != nil || resolvedCommandID(for: action) != nil
+        }
     }
 
     private var defaultFocusPlaceholder: String {
@@ -5701,11 +5781,15 @@ private struct PMPlannerManifestExtensionCard: View {
     }
 
     private var hasVisibleRoundBadge: Bool {
-        brainstormRoundCount > 0
+        brainstormRoundCount > 0 && supportsBuiltInBrainstormActions
     }
 
     private var hasVisibleStatusText: Bool {
-        !brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !brainstormStatusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && supportsBuiltInBrainstormActions
+    }
+
+    private var supportsBuiltInBrainstormActions: Bool {
+        schema.actions.contains { PMPlannerExtensionActionID.resolve($0.id) != nil }
     }
 
     private func actionTitle(for action: PMPlannerUIExtensionAction) -> String {
@@ -5716,19 +5800,30 @@ private struct PMPlannerManifestExtensionCard: View {
             return L10n.string("Run Brainstorm Round")
         case .applyToBrief:
             return L10n.string("Apply Brainstorm to Brief")
+        case .applyAndGenerate:
+            return L10n.string("Apply + Generate")
+        case .applyGenerateAndCreate:
+            return L10n.string("Create + Run Assigned")
         case .clear:
             return L10n.string("Clear Brainstorm")
         case .none:
+            if let commandID = resolvedCommandID(for: action) {
+                return commandID
+            }
             return action.id
         }
     }
 
-    private func isActionDisabled(_ actionID: PMPlannerExtensionActionID) -> Bool {
+    private func isBuiltInActionDisabled(_ actionID: PMPlannerExtensionActionID) -> Bool {
         switch actionID {
         case .runRound:
             return isBrainstormRunning ||
                 projectBrief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .applyToBrief:
+            return brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .applyAndGenerate:
+            return brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .applyGenerateAndCreate:
             return brainstormTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .clear:
             return brainstormFocus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -5738,15 +5833,98 @@ private struct PMPlannerManifestExtensionCard: View {
         }
     }
 
-    private func runAction(_ actionID: PMPlannerExtensionActionID) {
+    private func runBuiltInAction(_ actionID: PMPlannerExtensionActionID) {
         switch actionID {
         case .runRound:
             onRunBrainstormRound()
         case .applyToBrief:
             onApplyBrainstormToBrief()
+        case .applyAndGenerate:
+            onApplyBrainstormAndGenerate()
+        case .applyGenerateAndCreate:
+            onApplyBrainstormGenerateAndCreate()
         case .clear:
             onClearBrainstorm()
         }
+    }
+
+    private func resolvedCommandID(for action: PMPlannerUIExtensionAction) -> String? {
+        let explicit = (action.commandID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicit.isEmpty {
+            return explicit
+        }
+        let normalized = action.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = normalized.lowercased()
+        if lowercased.hasPrefix("command:") {
+            return String(normalized.dropFirst("command:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if lowercased.hasPrefix("pm.command.") {
+            return String(normalized.dropFirst("pm.command.".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private func commandDescriptor(for commandID: String) -> PMExtensionCommandDescriptor? {
+        plannerCommands.first {
+            $0.pluginID.caseInsensitiveCompare(descriptor.pluginID) == .orderedSame &&
+            $0.commandID.caseInsensitiveCompare(commandID) == .orderedSame
+        }
+    }
+
+    private func actionDisabled(_ action: PMPlannerUIExtensionAction) -> Bool {
+        if let builtIn = PMPlannerExtensionActionID.resolve(action.id) {
+            return isBuiltInActionDisabled(builtIn)
+        }
+        guard let commandID = resolvedCommandID(for: action),
+              let command = commandDescriptor(for: commandID) else {
+            return true
+        }
+        return runningCommandIDs.contains(command.id)
+    }
+
+    private func extensionFieldStorageKey(_ fieldID: String) -> String {
+        "\(descriptor.id)::\(fieldID)"
+    }
+
+    private func extensionFieldValueBinding(for field: PMPlannerUIExtensionField) -> Binding<String> {
+        let key = extensionFieldStorageKey(field.id)
+        return Binding<String>(
+            get: { plannerExtensionFieldValues[key, default: ""] },
+            set: { plannerExtensionFieldValues[key] = $0 }
+        )
+    }
+
+    private func extensionInputPayload() -> [String: String] {
+        var payload: [String: String] = [:]
+        for field in visibleFields {
+            if let type = PMPlannerExtensionFieldType.resolve(field.type) {
+                switch type {
+                case .focusInput:
+                    payload[field.id] = brainstormFocus
+                case .statusText:
+                    payload[field.id] = brainstormStatusText
+                case .transcriptOutput:
+                    payload[field.id] = brainstormTranscript
+                case .textInput, .multilineInput:
+                    payload[field.id] = plannerExtensionFieldValues[extensionFieldStorageKey(field.id), default: ""]
+                }
+            }
+        }
+        payload["projectBrief"] = projectBrief
+        payload["projectName"] = descriptor.pluginName
+        return payload
+    }
+
+    private func runAction(_ action: PMPlannerUIExtensionAction) {
+        if let builtIn = PMPlannerExtensionActionID.resolve(action.id) {
+            runBuiltInAction(builtIn)
+            return
+        }
+        guard let commandID = resolvedCommandID(for: action),
+              let command = commandDescriptor(for: commandID) else {
+            return
+        }
+        onRunPlannerCommand(command, extensionInputPayload())
     }
 
     @ViewBuilder
@@ -5811,6 +5989,41 @@ private struct PMPlannerManifestExtensionCard: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+            case .textInput:
+                VStack(alignment: .leading, spacing: 4) {
+                    if !fieldLabel.isEmpty {
+                        Text(fieldLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        field.placeholder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? field.id
+                            : field.placeholder,
+                        text: extensionFieldValueBinding(for: field)
+                    )
+                    .textFieldStyle(.roundedBorder)
+                }
+            case .multilineInput:
+                VStack(alignment: .leading, spacing: 6) {
+                    if !fieldLabel.isEmpty {
+                        Text(fieldLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: extensionFieldValueBinding(for: field))
+                        .font(.system(size: 13, weight: .regular, design: .default))
+                        .frame(
+                            minHeight: CGFloat(field.minHeight ?? 110),
+                            maxHeight: CGFloat(field.maxHeight ?? 180)
+                        )
+                        .padding(4)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+                }
             }
         }
     }
@@ -5821,7 +6034,7 @@ private struct PMPlannerManifestExtensionCard: View {
                 Text(titleText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                if isBrainstormRunning {
+                if isBrainstormRunning && supportsBuiltInBrainstormActions {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -5851,12 +6064,10 @@ private struct PMPlannerManifestExtensionCard: View {
             if !visibleActions.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(visibleActions) { action in
-                        if let actionID = PMPlannerExtensionActionID.resolve(action.id) {
-                            Button(actionTitle(for: action)) {
-                                runAction(actionID)
-                            }
-                            .disabled(isActionDisabled(actionID))
+                        Button(actionTitle(for: action)) {
+                            runAction(action)
                         }
+                        .disabled(actionDisabled(action))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -5902,6 +6113,7 @@ private struct PMPlannerUnsupportedExtensionCard: View {
 private struct PMExtensionsMarketplaceSheet: View {
     let installedExtensions: [PMInstalledExtensionDescriptor]
     let commands: [PMExtensionCommandDescriptor]
+    let marketplaceSources: [PMExtensionMarketplaceSource]
     let runningCommandIDs: Set<String>
     let activityLog: [PMExtensionActivityLogEntry]
     let pluginsFolderPath: String
@@ -5913,11 +6125,17 @@ private struct PMExtensionsMarketplaceSheet: View {
     let onOpenPluginsFolder: () -> Void
     let onCopyPluginsFolderPath: () -> Void
     let onUninstall: (String) -> Void
+    let onSetExtensionEnabled: (String, Bool) -> Void
+    let onAddSource: (String, String) -> Void
+    let onRemoveSource: (UUID) -> Void
+    let onInstallSource: (UUID) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
     let onCopyActivityLog: () -> Void
     let onClearActivityLog: () -> Void
     let onClose: () -> Void
     @State private var remoteSource = ""
+    @State private var sourceName = ""
+    @State private var sourceURL = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -5953,6 +6171,55 @@ private struct PMExtensionsMarketplaceSheet: View {
                 .disabled(remoteSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Saved Sources")
+                    .font(.headline)
+                HStack(spacing: 8) {
+                    TextField("Source name", text: $sourceName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                    TextField("Git URL / ZIP URL / local path", text: $sourceURL)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        let name = sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let source = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !source.isEmpty else { return }
+                        onAddSource(name, source)
+                        sourceName = ""
+                        sourceURL = ""
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if marketplaceSources.isEmpty {
+                    Text("No saved sources")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(marketplaceSources) { source in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(source.name)
+                                    .font(.caption.weight(.semibold))
+                                Text(source.source)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button("Install") { onInstallSource(source.id) }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            Button("Remove") { onRemoveSource(source.id) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                        .padding(8)
+                        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+
             Text(pluginsFolderPath)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
@@ -5970,6 +6237,17 @@ private struct PMExtensionsMarketplaceSheet: View {
                                 HStack {
                                     Text(ext.name)
                                         .font(.headline)
+                                    Toggle(
+                                        isOn: Binding(
+                                            get: { ext.isEnabled },
+                                            set: { onSetExtensionEnabled(ext.pluginID, $0) }
+                                        )
+                                    ) {
+                                        Text(ext.isEnabled ? "Enabled" : "Disabled")
+                                            .font(.caption2)
+                                    }
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
                                     Text("v\(ext.version)")
                                         .font(.caption2.weight(.semibold))
                                         .padding(.horizontal, 6)
@@ -5992,6 +6270,14 @@ private struct PMExtensionsMarketplaceSheet: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
+
+                                Text(ext.compatibilitySummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(
+                                        ext.compatibilitySummary.contains("Requires OpenMac")
+                                            ? Color.orange
+                                            : Color.secondary
+                                    )
 
                                 Text("Capabilities: \(ext.capabilityCount) · UI Extensions: \(ext.uiExtensionCount) · Commands: \(ext.commandCount)")
                                     .font(.caption2)
@@ -6136,6 +6422,7 @@ private struct PMPlannerSheet: View {
     @Binding var brainstormStatusText: String
     @Binding var brainstormRoundCount: Int
     @Binding var isBrainstormRunning: Bool
+    @Binding var plannerExtensionFieldValues: [String: String]
     let testPlanText: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
@@ -6146,8 +6433,10 @@ private struct PMPlannerSheet: View {
     let onApplyBlueprintAndGenerate: () -> Void
     let onRunBrainstormRound: () -> Void
     let onApplyBrainstormToBrief: () -> Void
+    let onApplyBrainstormAndGenerate: () -> Void
+    let onApplyBrainstormGenerateAndCreate: () -> Void
     let onClearBrainstorm: () -> Void
-    let onRunPlannerCommand: (PMExtensionCommandDescriptor) -> Void
+    let onRunPlannerCommand: (PMExtensionCommandDescriptor, [String: String]) -> Void
     let onGeneratePlan: () -> Void
     let onGenerateTestPlan: () -> Void
     let onCreateMissingAgents: () -> Void
@@ -6314,8 +6603,14 @@ private struct PMPlannerSheet: View {
                         brainstormStatusText: $brainstormStatusText,
                         brainstormRoundCount: $brainstormRoundCount,
                         isBrainstormRunning: $isBrainstormRunning,
+                        plannerExtensionFieldValues: $plannerExtensionFieldValues,
+                        plannerCommands: plannerPanelCommands,
+                        runningCommandIDs: runningExtensionCommandIDs,
                         onRunBrainstormRound: onRunBrainstormRound,
                         onApplyBrainstormToBrief: onApplyBrainstormToBrief,
+                        onApplyBrainstormAndGenerate: onApplyBrainstormAndGenerate,
+                        onApplyBrainstormGenerateAndCreate: onApplyBrainstormGenerateAndCreate,
+                        onRunPlannerCommand: onRunPlannerCommand,
                         onClearBrainstorm: onClearBrainstorm
                     )
 
@@ -6337,7 +6632,7 @@ private struct PMPlannerSheet: View {
                                     }
                                     Spacer()
                                     Button(L10n.string("Run")) {
-                                        onRunPlannerCommand(command)
+                                        onRunPlannerCommand(command, [:])
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)

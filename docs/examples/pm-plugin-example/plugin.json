@@ -31,6 +31,8 @@
         "actions": [
           { "id": "pm.brainstorm.run", "title": "Run Brainstorm Round" },
           { "id": "pm.brainstorm.apply", "title": "Apply Brainstorm to Brief" },
+          { "id": "pm.brainstorm.apply.generate", "title": "Apply + Generate" },
+          { "id": "command:quick-brief-audit", "title": "Run Quick Brief Audit", "commandID": "quick-brief-audit" },
           { "id": "pm.brainstorm.clear", "title": "Clear Brainstorm" }
         ]
       },
