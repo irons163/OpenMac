@@ -4610,6 +4610,153 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
+    func pmInstalledExtensions() -> [PMInstalledExtensionDescriptor] {
+        detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+            .map { record in
+                let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let name = {
+                    let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
+                }()
+                let version = (record.manifest.version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let summary = (record.manifest.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let capabilities = record.manifest.capabilities ?? []
+                let commands = (record.manifest.commands ?? []).filter { $0.enabled ?? true }
+                let uiExtensions = (record.manifest.uiExtensions ?? []).filter { $0.enabled ?? true }
+                return PMInstalledExtensionDescriptor(
+                    id: pluginID.isEmpty ? name.lowercased() : pluginID,
+                    pluginID: pluginID.isEmpty ? name.lowercased() : pluginID,
+                    name: name,
+                    version: version.isEmpty ? "0.0.0" : version,
+                    summary: summary,
+                    directoryPath: record.directoryURL.path,
+                    capabilityCount: capabilities.count,
+                    uiExtensionCount: uiExtensions.count,
+                    commandCount: commands.count
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+    }
+
+    func pmExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+            .flatMap { record -> [PMExtensionCommandDescriptor] in
+                let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !pluginID.isEmpty else { return [] }
+                let pluginName = {
+                    let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? record.directoryURL.lastPathComponent : trimmed
+                }()
+                return (record.manifest.commands ?? []).compactMap { command in
+                    guard command.enabled ?? true else { return nil }
+                    let commandID = (command.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !commandID.isEmpty else { return nil }
+                    let title = {
+                        let trimmed = (command.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? commandID : trimmed
+                    }()
+                    let subtitle = (command.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return PMExtensionCommandDescriptor(
+                        id: "\(pluginID).\(commandID)",
+                        pluginID: pluginID,
+                        pluginName: pluginName,
+                        commandID: commandID,
+                        title: title,
+                        subtitle: subtitle
+                    )
+                }
+            }
+            .sorted { lhs, rhs in
+                if lhs.pluginName.caseInsensitiveCompare(rhs.pluginName) == .orderedSame {
+                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                }
+                return lhs.pluginName.localizedCaseInsensitiveCompare(rhs.pluginName) == .orderedAscending
+            }
+    }
+
+    @discardableResult
+    func runPMExtensionCommand(_ descriptor: PMExtensionCommandDescriptor) -> Bool {
+        let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        guard let record = records.first(where: {
+            (($0.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == descriptor.pluginID
+        }) else {
+            lastBoardMessage = message("Extension command failed: plugin not found")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let entrypoint = (record.manifest.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entrypoint.isEmpty else {
+            lastBoardMessage = message("Extension command failed: plugin entrypoint is missing")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let resolvedEntrypointPath: String
+        if entrypoint.hasPrefix("/") || entrypoint.hasPrefix("~") {
+            resolvedEntrypointPath = (entrypoint as NSString).expandingTildeInPath
+        } else {
+            resolvedEntrypointPath = record.directoryURL.appendingPathComponent(entrypoint).path
+        }
+
+        let payload = PMExtensionCommandRequest(
+            type: "command",
+            commandID: descriptor.commandID,
+            boardName: selectedBoardName,
+            projectName: selectedBoardName,
+            projectBrief: "",
+            availableAgents: agents.map { agent in
+                PMExtensionCommandAgentDescriptor(
+                    name: agent.name,
+                    skills: Array(agent.skills).sorted(),
+                    maxConcurrentTasks: agent.maxConcurrentTasks
+                )
+            }
+        )
+        guard let payloadData = try? JSONEncoder().encode(payload),
+              let payloadJSON = String(data: payloadData, encoding: .utf8) else {
+            lastBoardMessage = message("Extension command failed: could not build payload")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        lastBoardMessage = message("Running extension command: %@", descriptor.title)
+        lastBoardMessageSeverity = .info
+
+        let shellCommand = Self.shellQuoted(resolvedEntrypointPath)
+        do {
+            let result = try Self.runShellCommand(
+                shellCommand,
+                workingDirectoryPath: record.directoryURL.path,
+                stdin: payloadJSON,
+                environment: ProcessInfo.processInfo.environment
+            )
+            if result.code != 0 {
+                let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let details = stderr.isEmpty ? result.stdout : stderr
+                lastBoardMessage = message("Extension command failed: %@", details.isEmpty ? "exit \(result.code)" : details)
+                lastBoardMessageSeverity = .warning
+                return false
+            }
+
+            let stdout = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let responseMessage = Self.decodedPMExtensionCommandResponseMessage(from: stdout)
+            if let responseMessage, !responseMessage.isEmpty {
+                lastBoardMessage = message("Extension command completed: %@", responseMessage)
+            } else {
+                lastBoardMessage = message("Extension command completed: %@", descriptor.title)
+            }
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = message("Extension command failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+    }
+
     @discardableResult
     func installPMExtensionFromDirectory(_ sourceDirectoryPath: String) -> Bool {
         let trimmedSourcePath = sourceDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4658,12 +4805,19 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let baseFolderName = Self.sanitizedExtensionDirectoryName(pluginID, fallback: sourceURL.lastPathComponent)
         let sourceCanonicalPath = sourceURL.standardizedFileURL.path
+        let existingPluginRecord = detectedLocalPMPlannerPluginRecords(in: destinationRootURL.path).first {
+            (($0.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == pluginID
+        }
         var destinationURL = destinationRootURL.appendingPathComponent(baseFolderName, isDirectory: true)
-        var index = 2
-        while FileManager.default.fileExists(atPath: destinationURL.path),
-              destinationURL.standardizedFileURL.path != sourceCanonicalPath {
-            destinationURL = destinationRootURL.appendingPathComponent("\(baseFolderName)-\(index)", isDirectory: true)
-            index += 1
+        if let existingPluginRecord {
+            destinationURL = existingPluginRecord.directoryURL
+        } else {
+            var index = 2
+            while FileManager.default.fileExists(atPath: destinationURL.path),
+                  destinationURL.standardizedFileURL.path != sourceCanonicalPath {
+                destinationURL = destinationRootURL.appendingPathComponent("\(baseFolderName)-\(index)", isDirectory: true)
+                index += 1
+            }
         }
 
         if destinationURL.standardizedFileURL.path == sourceCanonicalPath {
@@ -4673,12 +4827,52 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         do {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-            lastBoardMessage = message("Installed PM extension: %@", pluginName)
+            let isUpdate = existingPluginRecord != nil
+            lastBoardMessage = isUpdate
+                ? message("Updated PM extension: %@", pluginName)
+                : message("Installed PM extension: %@", pluginName)
             lastBoardMessageSeverity = .info
             return true
         } catch {
             lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+    }
+
+    @discardableResult
+    func uninstallPMExtension(pluginID: String) -> Bool {
+        let trimmedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPluginID.isEmpty else {
+            lastBoardMessage = message("Extension remove failed: plugin id is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+        guard let record = records.first(where: {
+            (($0.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == trimmedPluginID
+        }) else {
+            lastBoardMessage = message("Extension remove failed: plugin not found")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        do {
+            try FileManager.default.removeItem(at: record.directoryURL)
+            let pluginName = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            lastBoardMessage = message(
+                "Removed PM extension: %@",
+                pluginName.isEmpty ? trimmedPluginID : pluginName
+            )
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = message("Extension remove failed: %@", error.localizedDescription)
             lastBoardMessageSeverity = .warning
             return false
         }
@@ -5390,6 +5584,30 @@ final class KanbanBoardViewModel: ObservableObject {
         return fallbackNormalized.isEmpty ? "extension" : fallbackNormalized
     }
 
+    private static func decodedPMExtensionCommandResponseMessage(from rawOutput: String) -> String? {
+        let trimmed = rawOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let data = trimmed.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(PMExtensionCommandResponse.self, from: data) {
+            let message = decoded.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return message.isEmpty ? nil : message
+        }
+
+        guard let start = trimmed.firstIndex(of: "{"),
+              let end = trimmed.lastIndex(of: "}"),
+              start <= end else {
+            return trimmed
+        }
+        let candidate = String(trimmed[start ... end])
+        if let data = candidate.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(PMExtensionCommandResponse.self, from: data) {
+            let message = decoded.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return message.isEmpty ? trimmed : message
+        }
+        return trimmed
+    }
+
     private static func defaultBrainstormPMPlannerUISchema() -> PMPlannerUIExtensionSchema {
         PMPlannerUIExtensionSchema(
             fields: [
@@ -5524,9 +5742,20 @@ final class KanbanBoardViewModel: ObservableObject {
     private struct LocalPMPlanningPluginManifestSummary: Decodable {
         let id: String?
         let name: String?
+        let version: String?
+        let summary: String?
         let capabilities: [String]?
+        let entrypoint: String?
+        let commands: [LocalPMPlanningCommandManifestSummary]?
         let enabled: Bool?
         let uiExtensions: [LocalPMPlanningUIExtensionManifestSummary]?
+    }
+
+    private struct LocalPMPlanningCommandManifestSummary: Decodable {
+        let id: String?
+        let title: String?
+        let subtitle: String?
+        let enabled: Bool?
     }
 
     private struct LocalPMPlanningUIExtensionManifestSummary: Decodable {
@@ -5564,6 +5793,25 @@ final class KanbanBoardViewModel: ObservableObject {
     private struct LocalPMPlanningPluginRecord {
         let manifest: LocalPMPlanningPluginManifestSummary
         let directoryURL: URL
+    }
+
+    private struct PMExtensionCommandRequest: Encodable {
+        let type: String
+        let commandID: String
+        let boardName: String
+        let projectName: String
+        let projectBrief: String
+        let availableAgents: [PMExtensionCommandAgentDescriptor]
+    }
+
+    private struct PMExtensionCommandAgentDescriptor: Encodable {
+        let name: String
+        let skills: [String]
+        let maxConcurrentTasks: Int
+    }
+
+    private struct PMExtensionCommandResponse: Decodable {
+        let message: String?
     }
 
     private func shouldSyncMCPRegistry(lastSyncedAt: Date?) -> Bool {
@@ -5883,6 +6131,39 @@ final class KanbanBoardViewModel: ObservableObject {
         let output = String(data: outputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return (process.terminationStatus, output)
+    }
+
+    private static func runShellCommand(
+        _ command: String,
+        workingDirectoryPath: String,
+        stdin: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> (code: Int32, stdout: String, stderr: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectoryPath, isDirectory: true)
+        process.environment = shellCommandEnvironment(environment)
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        try process.run()
+        if let inputData = stdin.data(using: .utf8) {
+            inputPipe.fileHandleForWriting.write(inputData)
+        }
+        inputPipe.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+
+        let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        return (process.terminationStatus, stdout, stderr)
     }
 
     private func executeWithAutoRetry(

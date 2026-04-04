@@ -4993,6 +4993,91 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.lastBoardMessage?.contains("Installed PM extension") == true)
     }
 
+    @Test("PM extension command contributions can be discovered and executed")
+    func pmExtensionCommandsCanRun() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("cmd-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.commander",
+          "name": "Commander",
+          "version": "1.2.3",
+          "summary": "Command contribution sample",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "ping", "title": "Ping Command", "subtitle": "Verify command hook", "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"pong"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let commands = viewModel.pmExtensionCommands()
+        let hasPingCommand = commands.contains(where: { $0.pluginID == "com.example.commander" && $0.commandID == "ping" })
+        #expect(hasPingCommand)
+        let installed = viewModel.pmInstalledExtensions()
+        let installedCommander = installed.first(where: { $0.pluginID == "com.example.commander" })
+        #expect(installedCommander != nil)
+        #expect(installedCommander?.version == "1.2.3")
+        #expect(installedCommander?.commandCount == 1)
+
+        guard let command = commands.first(where: { $0.pluginID == "com.example.commander" && $0.commandID == "ping" }) else {
+            #expect(Bool(false), "Expected command contribution")
+            return
+        }
+        let succeeded = viewModel.runPMExtensionCommand(command)
+        #expect(succeeded)
+        #expect(viewModel.lastBoardMessage?.contains("pong") == true)
+    }
+
+    @Test("uninstall PM extension removes plugin directory by id")
+    func uninstallPMExtensionRemovesPluginDirectory() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("remove-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.removable",
+          "name": "Removable",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        #expect(viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.removable" }))
+        let removed = viewModel.uninstallPMExtension(pluginID: "com.example.removable")
+        #expect(removed)
+        #expect(!viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.removable" }))
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

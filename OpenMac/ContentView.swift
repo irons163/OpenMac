@@ -161,6 +161,8 @@ struct ContentView: View {
     @State private var pmPluginsAutoDiscover = true
     @State private var pmPluginsDirectoryPath = PMPlanningPluginPolicy.defaultPluginsDirectoryURL().path
     @State private var pmPluginStatusLastScannedAt: Date?
+    @State private var isShowingExtensionsMarketplaceSheet = false
+    @State private var runningExtensionCommandIDs: Set<String> = []
     @State private var pmLastGeneratedPlanAt: Date?
     @State private var pmStatusReferenceNow = Date()
     private static let pmStatusAutoRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -543,6 +545,22 @@ struct ContentView: View {
                     }
                 }
                 .help(L10n.string("Switch app language or follow system default"))
+                Menu("Extensions") {
+                    Button("Marketplace...") {
+                        openExtensionsMarketplaceSheet()
+                    }
+                    Divider()
+                    if installedPMExtensionCommands.isEmpty {
+                        Text("No extension commands")
+                    } else {
+                        ForEach(installedPMExtensionCommands) { command in
+                            Button(command.title) {
+                                runPMExtensionCommandFromToolbar(command)
+                            }
+                            .disabled(runningExtensionCommandIDs.contains(command.id))
+                        }
+                    }
+                }
                 Menu(L10n.string("Developer")) {
                     Toggle(L10n.string("Developer Mode"), isOn: $developerModeEnabled)
                     Divider()
@@ -690,6 +708,9 @@ struct ContentView: View {
                     Toggle(L10n.string("Auto-discover local PM plugins"), isOn: $pmPluginsAutoDiscover)
                     Button(L10n.string("Apply PM Plugin Settings")) {
                         applyPMPluginSettings()
+                    }
+                    Button("Open Extension Marketplace...") {
+                        openExtensionsMarketplaceSheet()
                     }
                     Text(pmPluginsDirectoryPath)
                         .font(.caption2.monospaced())
@@ -896,6 +917,26 @@ struct ContentView: View {
                 },
                 onRemoveManualServer: removeManualMCPServerFromSheet,
                 onClose: closeMCPServersSheet
+            )
+        }
+        .sheet(isPresented: $isShowingExtensionsMarketplaceSheet) {
+            PMExtensionsMarketplaceSheet(
+                installedExtensions: installedPMExtensions,
+                commands: installedPMExtensionCommands,
+                runningCommandIDs: runningExtensionCommandIDs,
+                pluginsFolderPath: resolvedPMPluginsDirectoryPath,
+                boardMessage: viewModel.lastBoardMessage,
+                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+                onInstallFromFolder: installPMExtensionFromFolder,
+                onRescan: { refreshPMPluginDiagnostics() },
+                onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
+                onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
+                onUninstall: { pluginID in
+                    _ = viewModel.uninstallPMExtension(pluginID: pluginID)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
+                onRunCommand: runPMExtensionCommandFromToolbar,
+                onClose: closeExtensionsMarketplaceSheet
             )
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
@@ -2002,6 +2043,24 @@ struct ContentView: View {
 
     private func closeMCPServersSheet() {
         isShowingMCPServersSheet = false
+    }
+
+    private func openExtensionsMarketplaceSheet() {
+        refreshPMPluginDiagnostics(announce: false)
+        isShowingExtensionsMarketplaceSheet = true
+    }
+
+    private func closeExtensionsMarketplaceSheet() {
+        isShowingExtensionsMarketplaceSheet = false
+    }
+
+    private func runPMExtensionCommandFromToolbar(_ command: PMExtensionCommandDescriptor) {
+        if runningExtensionCommandIDs.contains(command.id) {
+            return
+        }
+        runningExtensionCommandIDs.insert(command.id)
+        defer { runningExtensionCommandIDs.remove(command.id) }
+        _ = viewModel.runPMExtensionCommand(command)
     }
 
     private func applyMCPSettingsFromSheet() {
@@ -3152,6 +3211,14 @@ struct ContentView: View {
 
     private var pmPlannerExtensions: [PMPlannerUIExtensionDescriptor] {
         viewModel.pmPlannerExtensions()
+    }
+
+    private var installedPMExtensions: [PMInstalledExtensionDescriptor] {
+        viewModel.pmInstalledExtensions()
+    }
+
+    private var installedPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmExtensionCommands()
     }
 
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
@@ -5754,6 +5821,125 @@ private struct PMPlannerUnsupportedExtensionCard: View {
         }
         .padding(10)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct PMExtensionsMarketplaceSheet: View {
+    let installedExtensions: [PMInstalledExtensionDescriptor]
+    let commands: [PMExtensionCommandDescriptor]
+    let runningCommandIDs: Set<String>
+    let pluginsFolderPath: String
+    let boardMessage: String?
+    let boardMessageSeverity: BoardMessageSeverity?
+    let onInstallFromFolder: () -> Void
+    let onRescan: () -> Void
+    let onOpenPluginsFolder: () -> Void
+    let onCopyPluginsFolderPath: () -> Void
+    let onUninstall: (String) -> Void
+    let onRunCommand: (PMExtensionCommandDescriptor) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Extension Marketplace")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Button("Close", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            if let boardMessage, !boardMessage.isEmpty {
+                BoardMessageBanner(message: boardMessage, severity: boardMessageSeverity)
+            }
+
+            HStack(spacing: 8) {
+                Button("Install / Update from Folder...", action: onInstallFromFolder)
+                Button("Rescan", action: onRescan)
+                Button("Open Plugins Folder", action: onOpenPluginsFolder)
+                Button("Copy Plugins Path", action: onCopyPluginsFolderPath)
+            }
+            .buttonStyle(.bordered)
+
+            Text(pluginsFolderPath)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if installedExtensions.isEmpty {
+                        Text("No extensions installed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(installedExtensions) { ext in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(ext.name)
+                                        .font(.headline)
+                                    Text("v\(ext.version)")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.quaternary, in: Capsule())
+                                    Spacer()
+                                    Button("Remove") {
+                                        onUninstall(ext.pluginID)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+
+                                Text(ext.pluginID)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+
+                                if !ext.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text(ext.summary)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Text("Capabilities: \(ext.capabilityCount) · UI Extensions: \(ext.uiExtensionCount) · Commands: \(ext.commandCount)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                                if !commands.filter({ $0.pluginID == ext.pluginID }).isEmpty {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(commands.filter { $0.pluginID == ext.pluginID }) { command in
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(command.title)
+                                                        .font(.caption.weight(.semibold))
+                                                    if !command.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                        Text(command.subtitle)
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                }
+                                                Spacer()
+                                                Button("Run") {
+                                                    onRunCommand(command)
+                                                }
+                                                .buttonStyle(.borderedProminent)
+                                                .controlSize(.small)
+                                                .disabled(runningCommandIDs.contains(command.id))
+                                            }
+                                        }
+                                    }
+                                    .padding(.top, 2)
+                                }
+                            }
+                            .padding(10)
+                            .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(minWidth: 760, minHeight: 560)
     }
 }
 

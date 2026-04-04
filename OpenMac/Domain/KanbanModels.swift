@@ -961,6 +961,27 @@ struct PMPlannerUIExtensionDescriptor: Equatable, Identifiable {
     var uiSchema: PMPlannerUIExtensionSchema?
 }
 
+struct PMInstalledExtensionDescriptor: Equatable, Identifiable {
+    var id: String
+    var pluginID: String
+    var name: String
+    var version: String
+    var summary: String
+    var directoryPath: String
+    var capabilityCount: Int
+    var uiExtensionCount: Int
+    var commandCount: Int
+}
+
+struct PMExtensionCommandDescriptor: Equatable, Identifiable {
+    var id: String
+    var pluginID: String
+    var pluginName: String
+    var commandID: String
+    var title: String
+    var subtitle: String
+}
+
 struct PMPlannerUIExtensionSchema: Equatable {
     var fields: [PMPlannerUIExtensionField]
     var actions: [PMPlannerUIExtensionAction]
