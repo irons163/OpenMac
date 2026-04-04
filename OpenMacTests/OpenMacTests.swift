@@ -4319,6 +4319,7 @@ struct KanbanFlowTests {
     }
 }
 
+@Suite(.serialized)
 @MainActor
 struct KanbanSupportTypeTests {
     @Test("board health recommendation id is stable for each action")
@@ -4989,7 +4990,7 @@ struct KanbanSupportTypeTests {
 
         let installed = viewModel.installPMExtensionFromDirectory(extensionFolder.path)
         #expect(installed)
-        #expect(viewModel.pmPlanningLocalPluginNames().contains("Brainstorm Extension"))
+        #expect(viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.brainstorm.extension" }))
         #expect(viewModel.lastBoardMessage?.contains("Installed PM extension") == true)
     }
 
@@ -5076,6 +5077,147 @@ struct KanbanSupportTypeTests {
         let removed = viewModel.uninstallPMExtension(pluginID: "com.example.removable")
         #expect(removed)
         #expect(!viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.removable" }))
+    }
+
+    @Test("PM extension commands are filtered by contribution slots")
+    func pmExtensionCommandsRespectSlots() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("slot-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.slot",
+          "name": "Slot Plugin",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "toolbar", "title": "Toolbar", "slots": ["app.toolbar"], "permissions": ["command.execute"], "enabled": true },
+            { "id": "task", "title": "Task Card", "slots": ["task.card"], "permissions": ["command.execute"], "enabled": true },
+            { "id": "planner", "title": "Planner", "slots": ["pm.planner.panel"], "permissions": ["command.execute"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"ok"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        #expect(viewModel.pmToolbarExtensionCommands().contains(where: { $0.commandID == "toolbar" }))
+        #expect(viewModel.pmTaskCardExtensionCommands().contains(where: { $0.commandID == "task" }))
+        #expect(viewModel.pmPlannerPanelExtensionCommands().contains(where: { $0.commandID == "planner" }))
+        #expect(!viewModel.pmToolbarExtensionCommands().contains(where: { $0.commandID == "task" }))
+    }
+
+    @Test("PM extension command is blocked when declared permissions miss command.execute")
+    func pmExtensionCommandPermissionBlock() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("permission-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.permission",
+          "name": "Permission Plugin",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "blocked", "title": "Blocked", "permissions": ["network.outbound"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"should-not-run"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        guard let blocked = viewModel.pmExtensionCommands().first(where: { $0.commandID == "blocked" }) else {
+            #expect(Bool(false), "Missing blocked command")
+            return
+        }
+        let result = viewModel.runPMExtensionCommand(blocked)
+        #expect(!result)
+        #expect(viewModel.lastBoardMessage?.contains("missing command.execute permission") == true)
+        #expect(viewModel.pmExtensionActivityLog.last?.outcome == .failed)
+    }
+
+    @Test("install PM extension from remote supports local ZIP source")
+    func installPMExtensionFromRemoteZIP() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let sourceRoot = root.appendingPathComponent("source", isDirectory: true)
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        let plugin = sourceRoot.appendingPathComponent("remote-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.remote.zip",
+          "name": "Remote ZIP Plugin",
+          "version": "1.0.0",
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"ok"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let archive = root.appendingPathComponent("remote-plugin.zip")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [
+            "-lc",
+            "cd \(sourceRoot.path.debugDescription) && /usr/bin/zip -qr \(archive.path.debugDescription) remote-plugin"
+        ]
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+
+        let installed = viewModel.installPMExtensionFromRemote(archive.path)
+        #expect(installed)
+        #expect(viewModel.pmInstalledExtensions().contains(where: { $0.pluginID == "com.example.remote.zip" }))
     }
 
     @Test("delivery contract defaults cover all output and gate combinations")

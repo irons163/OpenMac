@@ -980,6 +980,28 @@ struct PMExtensionCommandDescriptor: Equatable, Identifiable {
     var commandID: String
     var title: String
     var subtitle: String
+    var slots: [String]
+    var permissions: [String]
+    var timeoutSeconds: Int?
+    var entrypoint: String?
+}
+
+struct PMExtensionActivityLogEntry: Equatable, Identifiable {
+    enum Outcome: String, Codable {
+        case running
+        case succeeded
+        case failed
+        case info
+    }
+
+    var id: UUID
+    var timestamp: Date
+    var pluginID: String
+    var pluginName: String
+    var commandID: String?
+    var commandTitle: String?
+    var outcome: Outcome
+    var detail: String
 }
 
 struct PMPlannerUIExtensionSchema: Equatable {

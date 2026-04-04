@@ -24,6 +24,17 @@ Plugins/
   "id": "com.example.brainstormer",
   "name": "Example Brainstormer",
   "capabilities": ["pm.plan.generate"],
+  "permissions": ["command.execute"],
+  "commands": [
+    {
+      "id": "health-check",
+      "title": "Health Check",
+      "slots": ["app.toolbar", "pm.planner.panel"],
+      "permissions": ["command.execute"],
+      "timeoutSeconds": 30,
+      "enabled": true
+    }
+  ],
   "uiExtensions": [
     {
       "id": "brainstorm",
@@ -60,6 +71,8 @@ Required:
 
 Optional:
 - `enabled` (boolean, default `true`)
+- `permissions` (string array): extension-level permissions. If command-level permissions are absent, OpenMac uses this as fallback.
+- `commands` (array): command contributions rendered in OpenMac UI contribution points.
 - `uiExtensions` (array): declares PM extension UI cards that OpenMac can render.
 
 ## `uiExtensions` fields
@@ -86,6 +99,20 @@ Optional:
 - `enabled` (boolean, optional, default `true`).
 
 If no local `brainstorm.v1` extension is found, OpenMac inserts a built-in brainstorm extension as fallback.
+
+## `commands` fields
+
+- `id` (string, required)
+- `title` (string, optional)
+- `subtitle` (string, optional)
+- `slots` (string array, optional): canonical slots:
+  - `app.toolbar`
+  - `task.card`
+  - `pm.planner.panel`
+- `permissions` (string array, optional): include `command.execute` to allow execution when permissions are declared.
+- `timeoutSeconds` (number, optional): command timeout in seconds.
+- `entrypoint` (string, optional): override plugin-level entrypoint for this command.
+- `enabled` (boolean, optional, default `true`)
 
 ## Runtime contract
 

@@ -1,6 +1,7 @@
 # OpenMac AI Brainstorm Plugin (Real LLM)
 
 This example plugin performs real AI planning (not static/mock output).
+It also contributes command actions to extension slots (`app.toolbar`, `pm.planner.panel`).
 
 It supports:
 - OpenAI-compatible API key mode (`OPENAI_API_KEY` / `OPENAI_COMPAT_API_KEY`)
@@ -8,7 +9,7 @@ It supports:
 
 ## Files
 
-- `plugin.json`: PM plugin manifest (`pm.plan.generate`) + PM planner `uiExtensions`
+- `plugin.json`: PM plugin manifest (`pm.plan.generate`) + command contributions + PM planner `uiExtensions`
 - `run.sh`: shell entrypoint used by OpenMac
 - `run.py`: AI planner implementation
 

@@ -33,6 +33,11 @@ OpenMac is a macOS-first AI agent Kanban app for planning, dispatching, and runn
   - Quick templates (`SaaS Product`, `Desktop App`, `Developer API`)
   - `Create + Run Assigned` flow
 - Agent Live Console with copyable output/debug logs
+- Extension Marketplace (install/update/remove/rescan)
+- Extension command contribution slots:
+  - `app.toolbar`
+  - `task.card`
+  - `pm.planner.panel`
 - Board health recommendations, WIP limits, and manual triage
 - Workspace import/export JSON
 - Multi-language UI:
@@ -84,6 +89,17 @@ OpenMacUITests/   # UI tests
 1. Install Codex CLI / Codex app.
 2. Run `codex login` in Terminal.
 3. In app runtime settings, choose `OpenAI Compatible` + `Codex Bridge`.
+
+## Extension SDK
+
+- SDK docs: [docs/EXTENSION_SDK.md](docs/EXTENSION_SDK.md)
+- PM plugin API: [docs/PM_PLUGIN_API.md](docs/PM_PLUGIN_API.md)
+
+Scaffold a new extension:
+
+```bash
+./tools/openmac-plugin-init.sh com.example.my-plugin ~/Desktop "My Plugin"
+```
 
 ## Testing (TDD-friendly)
 

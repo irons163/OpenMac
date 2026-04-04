@@ -1510,6 +1510,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var mcpServerPolicy: MCPServerPolicy
     @Published private(set) var pmPlannerEngineMode: PMPlannerEngineMode
     @Published private(set) var pmPlanningPluginPolicy: PMPlanningPluginPolicy
+    @Published private(set) var pmExtensionActivityLog: [PMExtensionActivityLogEntry] = []
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1524,6 +1525,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let defaultBoardName = "Default Board"
     private static let maxAgentExecutionEventsPerAgent = 120
     private static let maxTaskTimelineEventsPerTask = 240
+    private static let maxExtensionActivityLogEntries = 200
     private static let mcpRegistrySyncTTL: TimeInterval = 60 * 30
     private var mcpReadinessCacheByServerName: [String: Bool] = [:]
 
@@ -4640,8 +4642,10 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
-    func pmExtensionCommands() -> [PMExtensionCommandDescriptor] {
-        detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
+    func pmExtensionCommands(slot: String? = nil) -> [PMExtensionCommandDescriptor] {
+        let normalizedFilter = Self.normalizedExtensionCommandSlot(slot ?? "")
+
+        return detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
             .flatMap { record -> [PMExtensionCommandDescriptor] in
                 let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !pluginID.isEmpty else { return [] }
@@ -4653,18 +4657,27 @@ final class KanbanBoardViewModel: ObservableObject {
                     guard command.enabled ?? true else { return nil }
                     let commandID = (command.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !commandID.isEmpty else { return nil }
+                    let commandSlots = Self.normalizedExtensionCommandSlots(command.slots, singleSlot: command.slot)
+                    if !normalizedFilter.isEmpty, !commandSlots.contains(normalizedFilter) {
+                        return nil
+                    }
                     let title = {
                         let trimmed = (command.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         return trimmed.isEmpty ? commandID : trimmed
                     }()
                     let subtitle = (command.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let permissions = Self.normalizedExtensionPermissions(command.permissions ?? record.manifest.permissions ?? [])
                     return PMExtensionCommandDescriptor(
                         id: "\(pluginID).\(commandID)",
                         pluginID: pluginID,
                         pluginName: pluginName,
                         commandID: commandID,
                         title: title,
-                        subtitle: subtitle
+                        subtitle: subtitle,
+                        slots: commandSlots,
+                        permissions: permissions,
+                        timeoutSeconds: Self.resolvedExtensionCommandTimeout(command.timeoutSeconds),
+                        entrypoint: (command.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                 }
             }
@@ -4676,22 +4689,85 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
+    func pmToolbarExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandDefaultSlot)
+    }
+
+    func pmTaskCardExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandTaskCardSlot)
+    }
+
+    func pmPlannerPanelExtensionCommands() -> [PMExtensionCommandDescriptor] {
+        pmExtensionCommands(slot: Self.extensionCommandPlannerPanelSlot)
+    }
+
     @discardableResult
-    func runPMExtensionCommand(_ descriptor: PMExtensionCommandDescriptor) -> Bool {
+    func runPMExtensionCommand(_ descriptor: PMExtensionCommandDescriptor, task: WorkTask? = nil) -> Bool {
         let records = detectedLocalPMPlannerPluginRecords(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
         guard let record = records.first(where: {
             (($0.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) == descriptor.pluginID
         }) else {
             lastBoardMessage = message("Extension command failed: plugin not found")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: "Plugin not found"
+            )
             return false
         }
 
-        let entrypoint = (record.manifest.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let entrypoint = {
+            let commandEntrypoint = (descriptor.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !commandEntrypoint.isEmpty {
+                return commandEntrypoint
+            }
+            return (record.manifest.entrypoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }()
         guard !entrypoint.isEmpty else {
             lastBoardMessage = message("Extension command failed: plugin entrypoint is missing")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: "Entrypoint is missing"
+            )
             return false
+        }
+
+        let declaredPermissions = Set(Self.normalizedExtensionPermissions(descriptor.permissions))
+        if !declaredPermissions.isEmpty,
+           !declaredPermissions.contains(Self.extensionCommandRequiredPermission) {
+            lastBoardMessage = message(
+                "Extension command blocked: missing %@ permission",
+                Self.extensionCommandRequiredPermission
+            )
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: "Missing permission: \(Self.extensionCommandRequiredPermission)"
+            )
+            return false
+        }
+        if declaredPermissions.isEmpty {
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .info,
+                detail: "No permissions declared; proceeding in compatibility mode"
+            )
         }
 
         let resolvedEntrypointPath: String
@@ -4704,9 +4780,21 @@ final class KanbanBoardViewModel: ObservableObject {
         let payload = PMExtensionCommandRequest(
             type: "command",
             commandID: descriptor.commandID,
+            slots: descriptor.slots,
             boardName: selectedBoardName,
             projectName: selectedBoardName,
             projectBrief: "",
+            selectedTask: task.map { selectedTask in
+                PMExtensionCommandTaskDescriptor(
+                    id: selectedTask.id,
+                    title: selectedTask.title,
+                    details: selectedTask.details,
+                    status: selectedTask.status.rawValue,
+                    storyPoints: selectedTask.storyPoints,
+                    requiredSkills: selectedTask.requiredSkills.sorted(),
+                    assignedAgent: agentName(for: selectedTask.assignedAgentID)
+                )
+            },
             availableAgents: agents.map { agent in
                 PMExtensionCommandAgentDescriptor(
                     name: agent.name,
@@ -4724,20 +4812,51 @@ final class KanbanBoardViewModel: ObservableObject {
 
         lastBoardMessage = message("Running extension command: %@", descriptor.title)
         lastBoardMessageSeverity = .info
+        appendPMExtensionActivity(
+            pluginID: descriptor.pluginID,
+            pluginName: descriptor.pluginName,
+            commandID: descriptor.commandID,
+            commandTitle: descriptor.title,
+            outcome: .running,
+            detail: "Started"
+        )
 
         let shellCommand = Self.shellQuoted(resolvedEntrypointPath)
+        let timeout = descriptor.timeoutSeconds ?? Self.extensionCommandDefaultTimeoutSeconds
         do {
             let result = try Self.runShellCommand(
                 shellCommand,
                 workingDirectoryPath: record.directoryURL.path,
                 stdin: payloadJSON,
+                timeoutSeconds: timeout,
                 environment: ProcessInfo.processInfo.environment
             )
+            if result.timedOut {
+                lastBoardMessage = message("Extension command failed: timed out in %d seconds", timeout)
+                lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: descriptor.pluginID,
+                    pluginName: descriptor.pluginName,
+                    commandID: descriptor.commandID,
+                    commandTitle: descriptor.title,
+                    outcome: .failed,
+                    detail: "Timed out in \(timeout)s"
+                )
+                return false
+            }
             if result.code != 0 {
                 let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                 let details = stderr.isEmpty ? result.stdout : stderr
                 lastBoardMessage = message("Extension command failed: %@", details.isEmpty ? "exit \(result.code)" : details)
                 lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: descriptor.pluginID,
+                    pluginName: descriptor.pluginName,
+                    commandID: descriptor.commandID,
+                    commandTitle: descriptor.title,
+                    outcome: .failed,
+                    detail: details.isEmpty ? "exit \(result.code)" : details
+                )
                 return false
             }
 
@@ -4749,10 +4868,26 @@ final class KanbanBoardViewModel: ObservableObject {
                 lastBoardMessage = message("Extension command completed: %@", descriptor.title)
             }
             lastBoardMessageSeverity = .info
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .succeeded,
+                detail: responseMessage ?? "Completed"
+            )
             return true
         } catch {
             lastBoardMessage = message("Extension command failed: %@", error.localizedDescription)
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: descriptor.pluginID,
+                pluginName: descriptor.pluginName,
+                commandID: descriptor.commandID,
+                commandTitle: descriptor.title,
+                outcome: .failed,
+                detail: error.localizedDescription
+            )
             return false
         }
     }
@@ -4763,6 +4898,14 @@ final class KanbanBoardViewModel: ObservableObject {
         guard !trimmedSourcePath.isEmpty else {
             lastBoardMessage = message("Extension install failed: source folder is empty")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: "unknown",
+                pluginName: "Unknown",
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: source folder is empty"
+            )
             return false
         }
 
@@ -4771,12 +4914,28 @@ final class KanbanBoardViewModel: ObservableObject {
         guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             lastBoardMessage = message("Extension install failed: source folder not found")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: "unknown",
+                pluginName: "Unknown",
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: source folder not found"
+            )
             return false
         }
 
         guard let record = localPMPlanningPluginRecord(at: sourceURL) else {
             lastBoardMessage = message("Extension install failed: plugin.json/manifest.json is missing or invalid")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: "unknown",
+                pluginName: sourceURL.lastPathComponent,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: plugin manifest is missing or invalid"
+            )
             return false
         }
 
@@ -4784,6 +4943,14 @@ final class KanbanBoardViewModel: ObservableObject {
         guard !pluginID.isEmpty else {
             lastBoardMessage = message("Extension install failed: plugin id is required")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: "unknown",
+                pluginName: sourceURL.lastPathComponent,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: plugin id is required"
+            )
             return false
         }
 
@@ -4791,6 +4958,15 @@ final class KanbanBoardViewModel: ObservableObject {
             let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? sourceURL.lastPathComponent : trimmed
         }()
+        let pluginVersion = (record.manifest.version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        appendPMExtensionActivity(
+            pluginID: pluginID,
+            pluginName: pluginName,
+            commandID: nil,
+            commandTitle: nil,
+            outcome: .running,
+            detail: "Installing from folder: \(sourceURL.path)"
+        )
 
         let destinationRootPath = (pmPlanningPluginPolicy.pluginsDirectoryPath as NSString).expandingTildeInPath
         let destinationRootURL = URL(fileURLWithPath: destinationRootPath, isDirectory: true)
@@ -4800,6 +4976,14 @@ final class KanbanBoardViewModel: ObservableObject {
         } catch {
             lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: \(error.localizedDescription)"
+            )
             return false
         }
 
@@ -4823,7 +5007,32 @@ final class KanbanBoardViewModel: ObservableObject {
         if destinationURL.standardizedFileURL.path == sourceCanonicalPath {
             lastBoardMessage = message("Extension already installed: %@", pluginName)
             lastBoardMessageSeverity = .info
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .info,
+                detail: "Install skipped: already installed"
+            )
             return true
+        }
+
+        if let existingPluginRecord {
+            let installedVersion = (existingPluginRecord.manifest.version ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pluginVersion.isEmpty, installedVersion == pluginVersion {
+                lastBoardMessage = message("Extension already up to date: %@ (v%@)", pluginName, pluginVersion)
+                lastBoardMessageSeverity = .info
+                appendPMExtensionActivity(
+                    pluginID: pluginID,
+                    pluginName: pluginName,
+                    commandID: nil,
+                    commandTitle: nil,
+                    outcome: .info,
+                    detail: "Already up to date (v\(pluginVersion))"
+                )
+                return true
+            }
         }
 
         do {
@@ -4836,10 +5045,26 @@ final class KanbanBoardViewModel: ObservableObject {
                 ? message("Updated PM extension: %@", pluginName)
                 : message("Installed PM extension: %@", pluginName)
             lastBoardMessageSeverity = .info
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .succeeded,
+                detail: isUpdate ? "Updated to v\(pluginVersion.isEmpty ? "unknown" : pluginVersion)" : "Installed v\(pluginVersion.isEmpty ? "unknown" : pluginVersion)"
+            )
             return true
         } catch {
             lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: pluginID,
+                pluginName: pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Install failed: \(error.localizedDescription)"
+            )
             return false
         }
     }
@@ -4859,6 +5084,14 @@ final class KanbanBoardViewModel: ObservableObject {
         }) else {
             lastBoardMessage = message("Extension remove failed: plugin not found")
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: trimmedPluginID,
+                pluginName: trimmedPluginID,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Remove failed: plugin not found"
+            )
             return false
         }
 
@@ -4870,12 +5103,188 @@ final class KanbanBoardViewModel: ObservableObject {
                 pluginName.isEmpty ? trimmedPluginID : pluginName
             )
             lastBoardMessageSeverity = .info
+            appendPMExtensionActivity(
+                pluginID: trimmedPluginID,
+                pluginName: pluginName.isEmpty ? trimmedPluginID : pluginName,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .succeeded,
+                detail: "Removed"
+            )
             return true
         } catch {
             lastBoardMessage = message("Extension remove failed: %@", error.localizedDescription)
             lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: trimmedPluginID,
+                pluginName: trimmedPluginID,
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Remove failed: \(error.localizedDescription)"
+            )
             return false
         }
+    }
+
+    @discardableResult
+    func installPMExtensionFromRemote(_ remoteSource: String) -> Bool {
+        let trimmedSource = remoteSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSource.isEmpty else {
+            lastBoardMessage = message("Extension install failed: remote source is empty")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let fileManager = FileManager.default
+        let tempRootURL = fileManager.temporaryDirectory.appendingPathComponent("openmac-extension-\(UUID().uuidString)", isDirectory: true)
+        let extractionRootURL = tempRootURL.appendingPathComponent("payload", isDirectory: true)
+        defer { try? fileManager.removeItem(at: tempRootURL) }
+        do {
+            try fileManager.createDirectory(at: extractionRootURL, withIntermediateDirectories: true)
+        } catch {
+            lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        appendPMExtensionActivity(
+            pluginID: "remote",
+            pluginName: "Remote Source",
+            commandID: nil,
+            commandTitle: nil,
+            outcome: .running,
+            detail: "Fetching extension source: \(trimmedSource)"
+        )
+
+        let expandedSourcePath = (trimmedSource as NSString).expandingTildeInPath
+        let localSourceExists = fileManager.fileExists(atPath: expandedSourcePath)
+
+        var candidateRootURL: URL?
+
+        if localSourceExists {
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: expandedSourcePath, isDirectory: &isDirectory), isDirectory.boolValue {
+                candidateRootURL = URL(fileURLWithPath: expandedSourcePath, isDirectory: true)
+            } else if Self.isLikelyZipSource(expandedSourcePath) {
+                let unzipCommand = "/usr/bin/unzip -q \(Self.shellQuoted(expandedSourcePath)) -d \(Self.shellQuoted(extractionRootURL.path))"
+                let unzipResult = try? Self.runShellCommand(unzipCommand)
+                guard let unzipResult, unzipResult.code == 0 else {
+                    let details = unzipResult?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let failure = details?.isEmpty == false ? details! : "unzip failed"
+                    lastBoardMessage = message("Extension install failed: %@", failure)
+                    lastBoardMessageSeverity = .warning
+                    appendPMExtensionActivity(
+                        pluginID: "remote",
+                        pluginName: "Remote Source",
+                        commandID: nil,
+                        commandTitle: nil,
+                        outcome: .failed,
+                        detail: "Unzip failed: \(failure)"
+                    )
+                    return false
+                }
+                candidateRootURL = extractionRootURL
+            }
+        } else if Self.isLikelyGitRemoteSource(trimmedSource) {
+            let cloneURL = extractionRootURL.appendingPathComponent("repo", isDirectory: true)
+            let cloneCommand = "/usr/bin/git clone --depth 1 \(Self.shellQuoted(trimmedSource)) \(Self.shellQuoted(cloneURL.path))"
+            let cloneResult = try? Self.runShellCommand(cloneCommand)
+            guard let cloneResult, cloneResult.code == 0 else {
+                let details = cloneResult?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let failure = details?.isEmpty == false ? details! : "git clone failed"
+                lastBoardMessage = message("Extension install failed: %@", failure)
+                lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: "remote",
+                    pluginName: "Remote Source",
+                    commandID: nil,
+                    commandTitle: nil,
+                    outcome: .failed,
+                    detail: "Git clone failed: \(failure)"
+                )
+                return false
+            }
+            candidateRootURL = cloneURL
+        } else if Self.isLikelyHTTPRemoteSource(trimmedSource) {
+            let archiveURL = tempRootURL.appendingPathComponent("plugin.zip")
+            let downloadCommand = "/usr/bin/curl -L --fail \(Self.shellQuoted(trimmedSource)) -o \(Self.shellQuoted(archiveURL.path))"
+            let downloadResult = try? Self.runShellCommand(downloadCommand)
+            guard let downloadResult, downloadResult.code == 0 else {
+                let details = downloadResult?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let failure = details?.isEmpty == false ? details! : "download failed"
+                lastBoardMessage = message("Extension install failed: %@", failure)
+                lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: "remote",
+                    pluginName: "Remote Source",
+                    commandID: nil,
+                    commandTitle: nil,
+                    outcome: .failed,
+                    detail: "Remote download failed: \(failure)"
+                )
+                return false
+            }
+            let unzipCommand = "/usr/bin/unzip -q \(Self.shellQuoted(archiveURL.path)) -d \(Self.shellQuoted(extractionRootURL.path))"
+            let unzipResult = try? Self.runShellCommand(unzipCommand)
+            guard let unzipResult, unzipResult.code == 0 else {
+                let details = unzipResult?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let failure = details?.isEmpty == false ? details! : "unzip failed"
+                lastBoardMessage = message("Extension install failed: %@", failure)
+                lastBoardMessageSeverity = .warning
+                appendPMExtensionActivity(
+                    pluginID: "remote",
+                    pluginName: "Remote Source",
+                    commandID: nil,
+                    commandTitle: nil,
+                    outcome: .failed,
+                    detail: "Remote unzip failed: \(failure)"
+                )
+                return false
+            }
+            candidateRootURL = extractionRootURL
+        }
+
+        guard let candidateRootURL else {
+            lastBoardMessage = message("Extension install failed: unsupported source")
+            lastBoardMessageSeverity = .warning
+            appendPMExtensionActivity(
+                pluginID: "remote",
+                pluginName: "Remote Source",
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .failed,
+                detail: "Unsupported source"
+            )
+            return false
+        }
+
+        let pluginRootURL = firstPMExtensionDirectoryCandidate(in: candidateRootURL) ?? candidateRootURL
+        let installed = installPMExtensionFromDirectory(pluginRootURL.path)
+        if installed {
+            appendPMExtensionActivity(
+                pluginID: "remote",
+                pluginName: "Remote Source",
+                commandID: nil,
+                commandTitle: nil,
+                outcome: .succeeded,
+                detail: "Installed from remote source"
+            )
+        }
+        return installed
+    }
+
+    func clearPMExtensionActivityLog() {
+        pmExtensionActivityLog = []
+        objectWillChange.send()
+    }
+
+    func pmExtensionActivityLogText() -> String {
+        pmExtensionActivityLog.map { entry in
+            let timestamp = Self.iso8601Formatter.string(from: entry.timestamp)
+            let commandText = (entry.commandID ?? "").isEmpty ? "-" : (entry.commandID ?? "-")
+            return "[\(timestamp)] \(entry.outcome.rawValue.uppercased()) \(entry.pluginID) \(commandText) \(entry.detail)"
+        }.joined(separator: "\n")
     }
 
     func pmPlannerExtensions(slot: String = KanbanBoardViewModel.pmPlannerExtensionSlot) -> [PMPlannerUIExtensionDescriptor] {
@@ -5561,6 +5970,12 @@ final class KanbanBoardViewModel: ObservableObject {
 
     private static let pmPlanningPluginCapability = "pm.plan.generate"
     private static let pmPlannerExtensionSlot = "pm.planner"
+    private static let extensionCommandDefaultSlot = "app.toolbar"
+    private static let extensionCommandTaskCardSlot = "task.card"
+    private static let extensionCommandPlannerPanelSlot = "pm.planner.panel"
+    private static let extensionCommandRequiredPermission = "command.execute"
+    private static let extensionCommandDefaultTimeoutSeconds = 45
+    private static let extensionCommandMaxTimeoutSeconds = 300
     private static let pmPlannerBrainstormComponent = "brainstorm.v1"
     private static let pmPlannerUIFieldFocusInput = "focus.input"
     private static let pmPlannerUIFieldStatusText = "status.text"
@@ -5568,6 +5983,145 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let pmPlannerUIActionRun = "pm.brainstorm.run"
     private static let pmPlannerUIActionApply = "pm.brainstorm.apply"
     private static let pmPlannerUIActionClear = "pm.brainstorm.clear"
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static func normalizedExtensionCommandSlot(_ rawValue: String) -> String {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "", "default", "toolbar", "toolbar.menu", "app.toolbar", "extensions.menu":
+            return extensionCommandDefaultSlot
+        case "task", "task.card", "task.card.menu", "kanban.task.card":
+            return extensionCommandTaskCardSlot
+        case "planner", "pm.planner.panel", "pm.panel", "planner.panel":
+            return extensionCommandPlannerPanelSlot
+        default:
+            return normalized
+        }
+    }
+
+    private static func normalizedExtensionCommandSlots(_ slots: [String]?, singleSlot: String?) -> [String] {
+        var collected: [String] = []
+        if let slots {
+            collected.append(contentsOf: slots)
+        }
+        if let singleSlot, !singleSlot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            collected.append(singleSlot)
+        }
+        if collected.isEmpty {
+            return [extensionCommandDefaultSlot]
+        }
+
+        var resolved: [String] = []
+        var seen = Set<String>()
+        for slot in collected {
+            let normalized = normalizedExtensionCommandSlot(slot)
+            guard !normalized.isEmpty else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            resolved.append(normalized)
+        }
+        return resolved.isEmpty ? [extensionCommandDefaultSlot] : resolved
+    }
+
+    private static func normalizedExtensionPermissions(_ permissions: [String]) -> [String] {
+        var normalized: [String] = []
+        var seen = Set<String>()
+        for permission in permissions {
+            let trimmed = permission.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { continue }
+            guard seen.insert(trimmed).inserted else { continue }
+            normalized.append(trimmed)
+        }
+        return normalized
+    }
+
+    private static func resolvedExtensionCommandTimeout(_ timeoutSeconds: Int?) -> Int? {
+        guard let timeoutSeconds else { return nil }
+        let minimum = max(1, timeoutSeconds)
+        return min(extensionCommandMaxTimeoutSeconds, minimum)
+    }
+
+    private static func isLikelyHTTPRemoteSource(_ source: String) -> Bool {
+        let lowercased = source.lowercased()
+        return lowercased.hasPrefix("https://") || lowercased.hasPrefix("http://")
+    }
+
+    private static func isLikelyGitRemoteSource(_ source: String) -> Bool {
+        let lowercased = source.lowercased()
+        if lowercased.hasSuffix(".git") || lowercased.hasPrefix("git@") {
+            return true
+        }
+        return lowercased.hasPrefix("https://github.com/") || lowercased.hasPrefix("http://github.com/")
+    }
+
+    private static func isLikelyZipSource(_ source: String) -> Bool {
+        source.lowercased().hasSuffix(".zip")
+    }
+
+    private func firstPMExtensionDirectoryCandidate(in rootURL: URL) -> URL? {
+        if localPMPlanningPluginRecord(at: rootURL) != nil {
+            return rootURL
+        }
+
+        let fileManager = FileManager.default
+        var queue: [(url: URL, depth: Int)] = [(rootURL, 0)]
+        let maxDepth = 3
+        var visited = Set<String>()
+
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            guard current.depth <= maxDepth else { continue }
+            let key = current.url.standardizedFileURL.path
+            guard visited.insert(key).inserted else { continue }
+
+            guard let children = try? fileManager.contentsOfDirectory(
+                at: current.url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for childURL in children {
+                guard let values = try? childURL.resourceValues(forKeys: [.isDirectoryKey]),
+                      values.isDirectory == true else {
+                    continue
+                }
+                if localPMPlanningPluginRecord(at: childURL) != nil {
+                    return childURL
+                }
+                queue.append((childURL, current.depth + 1))
+            }
+        }
+        return nil
+    }
+
+    private func appendPMExtensionActivity(
+        pluginID: String,
+        pluginName: String,
+        commandID: String?,
+        commandTitle: String?,
+        outcome: PMExtensionActivityLogEntry.Outcome,
+        detail: String
+    ) {
+        let entry = PMExtensionActivityLogEntry(
+            id: UUID(),
+            timestamp: Date(),
+            pluginID: pluginID,
+            pluginName: pluginName,
+            commandID: commandID,
+            commandTitle: commandTitle,
+            outcome: outcome,
+            detail: detail
+        )
+        pmExtensionActivityLog.append(entry)
+        if pmExtensionActivityLog.count > Self.maxExtensionActivityLogEntries {
+            pmExtensionActivityLog.removeFirst(pmExtensionActivityLog.count - Self.maxExtensionActivityLogEntries)
+        }
+    }
 
     private static func sanitizedExtensionDirectoryName(_ rawValue: String, fallback: String) -> String {
         let normalized = rawValue
@@ -5745,6 +6299,7 @@ final class KanbanBoardViewModel: ObservableObject {
         let version: String?
         let summary: String?
         let capabilities: [String]?
+        let permissions: [String]?
         let entrypoint: String?
         let commands: [LocalPMPlanningCommandManifestSummary]?
         let enabled: Bool?
@@ -5755,6 +6310,11 @@ final class KanbanBoardViewModel: ObservableObject {
         let id: String?
         let title: String?
         let subtitle: String?
+        let slots: [String]?
+        let slot: String?
+        let permissions: [String]?
+        let timeoutSeconds: Int?
+        let entrypoint: String?
         let enabled: Bool?
     }
 
@@ -5798,10 +6358,22 @@ final class KanbanBoardViewModel: ObservableObject {
     private struct PMExtensionCommandRequest: Encodable {
         let type: String
         let commandID: String
+        let slots: [String]
         let boardName: String
         let projectName: String
         let projectBrief: String
+        let selectedTask: PMExtensionCommandTaskDescriptor?
         let availableAgents: [PMExtensionCommandAgentDescriptor]
+    }
+
+    private struct PMExtensionCommandTaskDescriptor: Encodable {
+        let id: UUID
+        let title: String
+        let details: String
+        let status: String
+        let storyPoints: Int
+        let requiredSkills: [String]
+        let assignedAgent: String?
     }
 
     private struct PMExtensionCommandAgentDescriptor: Encodable {
@@ -6137,8 +6709,9 @@ final class KanbanBoardViewModel: ObservableObject {
         _ command: String,
         workingDirectoryPath: String,
         stdin: String,
+        timeoutSeconds: Int,
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) throws -> (code: Int32, stdout: String, stderr: String) {
+    ) throws -> (code: Int32, stdout: String, stderr: String, timedOut: Bool) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
@@ -6152,18 +6725,30 @@ final class KanbanBoardViewModel: ObservableObject {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
+        let waitGroup = DispatchGroup()
+        waitGroup.enter()
+        process.terminationHandler = { _ in
+            waitGroup.leave()
+        }
+
         try process.run()
         if let inputData = stdin.data(using: .utf8) {
             inputPipe.fileHandleForWriting.write(inputData)
         }
         inputPipe.fileHandleForWriting.closeFile()
-        process.waitUntilExit()
+
+        let resolvedTimeout = max(1, timeoutSeconds)
+        let timedOut = waitGroup.wait(timeout: .now() + .seconds(resolvedTimeout)) == .timedOut
+        if timedOut {
+            process.terminate()
+            _ = waitGroup.wait(timeout: .now() + .seconds(2))
+        }
 
         let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdout, stderr)
+        return (timedOut ? -9 : process.terminationStatus, stdout, stderr, timedOut)
     }
 
     private func executeWithAutoRetry(

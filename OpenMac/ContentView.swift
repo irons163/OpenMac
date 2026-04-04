@@ -550,10 +550,10 @@ struct ContentView: View {
                         openExtensionsMarketplaceSheet()
                     }
                     Divider()
-                    if installedPMExtensionCommands.isEmpty {
+                    if toolbarPMExtensionCommands.isEmpty {
                         Text("No extension commands")
                     } else {
-                        ForEach(installedPMExtensionCommands) { command in
+                        ForEach(toolbarPMExtensionCommands) { command in
                             Button(command.title) {
                                 runPMExtensionCommandFromToolbar(command)
                             }
@@ -848,6 +848,8 @@ struct ContentView: View {
                 blueprintConstraints: $pmBlueprintConstraints,
                 blueprintQualityBar: $pmBlueprintQualityBar,
                 plannerExtensions: pmPlannerExtensions,
+                plannerPanelCommands: plannerPanelPMExtensionCommands,
+                runningExtensionCommandIDs: runningExtensionCommandIDs,
                 brainstormFocus: $pmBrainstormFocus,
                 brainstormTranscript: $pmBrainstormTranscript,
                 brainstormStatusText: $pmBrainstormStatusText,
@@ -864,6 +866,7 @@ struct ContentView: View {
                 onRunBrainstormRound: runPMBrainstormRoundFromSheet,
                 onApplyBrainstormToBrief: applyPMBrainstormToBriefFromSheet,
                 onClearBrainstorm: clearPMBrainstormFromSheet,
+                onRunPlannerCommand: runPMExtensionCommandFromToolbar,
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
                 onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
@@ -924,10 +927,15 @@ struct ContentView: View {
                 installedExtensions: installedPMExtensions,
                 commands: installedPMExtensionCommands,
                 runningCommandIDs: runningExtensionCommandIDs,
+                activityLog: pmExtensionActivityLog,
                 pluginsFolderPath: resolvedPMPluginsDirectoryPath,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onInstallFromFolder: installPMExtensionFromFolder,
+                onInstallFromRemote: { source in
+                    _ = viewModel.installPMExtensionFromRemote(source)
+                    refreshPMPluginDiagnostics(announce: false)
+                },
                 onRescan: { refreshPMPluginDiagnostics() },
                 onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
@@ -936,6 +944,8 @@ struct ContentView: View {
                     refreshPMPluginDiagnostics(announce: false)
                 },
                 onRunCommand: runPMExtensionCommandFromToolbar,
+                onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
+                onClearActivityLog: viewModel.clearPMExtensionActivityLog,
                 onClose: closeExtensionsMarketplaceSheet
             )
         }
@@ -2055,12 +2065,20 @@ struct ContentView: View {
     }
 
     private func runPMExtensionCommandFromToolbar(_ command: PMExtensionCommandDescriptor) {
+        runPMExtensionCommand(command)
+    }
+
+    private func runPMExtensionCommandForTask(_ task: WorkTask, command: PMExtensionCommandDescriptor) {
+        runPMExtensionCommand(command, task: task)
+    }
+
+    private func runPMExtensionCommand(_ command: PMExtensionCommandDescriptor, task: WorkTask? = nil) {
         if runningExtensionCommandIDs.contains(command.id) {
             return
         }
         runningExtensionCommandIDs.insert(command.id)
         defer { runningExtensionCommandIDs.remove(command.id) }
-        _ = viewModel.runPMExtensionCommand(command)
+        _ = viewModel.runPMExtensionCommand(command, task: task)
     }
 
     private func applyMCPSettingsFromSheet() {
@@ -3221,6 +3239,22 @@ struct ContentView: View {
         viewModel.pmExtensionCommands()
     }
 
+    private var toolbarPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmToolbarExtensionCommands()
+    }
+
+    private var taskCardPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmTaskCardExtensionCommands()
+    }
+
+    private var plannerPanelPMExtensionCommands: [PMExtensionCommandDescriptor] {
+        viewModel.pmPlannerPanelExtensionCommands()
+    }
+
+    private var pmExtensionActivityLog: [PMExtensionActivityLogEntry] {
+        viewModel.pmExtensionActivityLog
+    }
+
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
         viewModel.selectedBoardDependencyInsights
     }
@@ -3850,6 +3884,11 @@ struct ContentView: View {
                 viewModel.hasExecutionTimeline(for: task.id)
             },
             onCopyExecutionTimeline: copyTaskExecutionTimeline,
+            taskExtensionCommands: taskCardPMExtensionCommands,
+            runningExtensionCommandIDs: runningExtensionCommandIDs,
+            onRunTaskExtensionCommand: { task, command in
+                runPMExtensionCommandForTask(task, command: command)
+            },
             onDropTask: { taskID in
                 viewModel.handleDrop(taskID, to: status)
             }
@@ -4599,6 +4638,9 @@ private struct KanbanColumnView: View {
     let onShowExecutionDetails: (WorkTask) -> Void
     let hasExecutionTimeline: (WorkTask) -> Bool
     let onCopyExecutionTimeline: (UUID) -> Void
+    let taskExtensionCommands: [PMExtensionCommandDescriptor]
+    let runningExtensionCommandIDs: Set<String>
+    let onRunTaskExtensionCommand: (WorkTask, PMExtensionCommandDescriptor) -> Void
     let onDropTask: (UUID) -> Bool
 
     @State private var isDropTarget = false
@@ -4702,6 +4744,11 @@ private struct KanbanColumnView: View {
             onCopyExecutionTimeline: {
                 onCopyExecutionTimeline(task.id)
             },
+            extensionCommands: taskExtensionCommands,
+            runningExtensionCommandIDs: runningExtensionCommandIDs,
+            onRunExtensionCommand: { command in
+                onRunTaskExtensionCommand(task, command)
+            },
             onMoveBackward: { moveBackward(task) },
             onMoveForward: { moveForward(task) }
         )
@@ -4754,6 +4801,9 @@ private struct TaskCardView: View {
     let onShowExecutionDetails: () -> Void
     let hasExecutionTimeline: Bool
     let onCopyExecutionTimeline: () -> Void
+    let extensionCommands: [PMExtensionCommandDescriptor]
+    let runningExtensionCommandIDs: Set<String>
+    let onRunExtensionCommand: (PMExtensionCommandDescriptor) -> Void
     let onMoveBackward: () -> Void
     let onMoveForward: () -> Void
 
@@ -4850,6 +4900,21 @@ private struct TaskCardView: View {
             }
 
             HStack(spacing: 8) {
+                if !extensionCommands.isEmpty {
+                    Menu {
+                        ForEach(extensionCommands) { command in
+                            Button(command.title) {
+                                onRunExtensionCommand(command)
+                            }
+                            .disabled(runningExtensionCommandIDs.contains(command.id))
+                        }
+                    } label: {
+                        Label(L10n.string("Extensions"), systemImage: "puzzlepiece.extension")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .controlSize(.small)
+                }
+
                 if canMoveBackward {
                     Button {
                         onMoveBackward()
@@ -4893,6 +4958,16 @@ private struct TaskCardView: View {
             }
             if hasExecutionTimeline {
                 Button(L10n.string("Copy Execution Timeline"), action: onCopyExecutionTimeline)
+            }
+            if !extensionCommands.isEmpty {
+                Menu(L10n.string("Extension Actions")) {
+                    ForEach(extensionCommands) { command in
+                        Button(command.title) {
+                            onRunExtensionCommand(command)
+                        }
+                        .disabled(runningExtensionCommandIDs.contains(command.id))
+                    }
+                }
             }
             if !manualAssignableAgents.isEmpty {
                 Menu(L10n.string("Assign To Agent")) {
@@ -5828,16 +5903,21 @@ private struct PMExtensionsMarketplaceSheet: View {
     let installedExtensions: [PMInstalledExtensionDescriptor]
     let commands: [PMExtensionCommandDescriptor]
     let runningCommandIDs: Set<String>
+    let activityLog: [PMExtensionActivityLogEntry]
     let pluginsFolderPath: String
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
     let onInstallFromFolder: () -> Void
+    let onInstallFromRemote: (String) -> Void
     let onRescan: () -> Void
     let onOpenPluginsFolder: () -> Void
     let onCopyPluginsFolderPath: () -> Void
     let onUninstall: (String) -> Void
     let onRunCommand: (PMExtensionCommandDescriptor) -> Void
+    let onCopyActivityLog: () -> Void
+    let onClearActivityLog: () -> Void
     let onClose: () -> Void
+    @State private var remoteSource = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -5860,6 +5940,18 @@ private struct PMExtensionsMarketplaceSheet: View {
                 Button("Copy Plugins Path", action: onCopyPluginsFolderPath)
             }
             .buttonStyle(.bordered)
+
+            HStack(spacing: 8) {
+                TextField("Git URL / ZIP URL / local ZIP path", text: $remoteSource)
+                    .textFieldStyle(.roundedBorder)
+                Button("Install from Remote") {
+                    let source = remoteSource.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !source.isEmpty else { return }
+                    onInstallFromRemote(source)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(remoteSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
 
             Text(pluginsFolderPath)
                 .font(.caption2.monospaced())
@@ -5908,23 +6000,38 @@ private struct PMExtensionsMarketplaceSheet: View {
                                 if !commands.filter({ $0.pluginID == ext.pluginID }).isEmpty {
                                     VStack(alignment: .leading, spacing: 6) {
                                         ForEach(commands.filter { $0.pluginID == ext.pluginID }) { command in
-                                            HStack {
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text(command.title)
-                                                        .font(.caption.weight(.semibold))
-                                                    if !command.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                        Text(command.subtitle)
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                HStack {
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text(command.title)
+                                                            .font(.caption.weight(.semibold))
+                                                        if !command.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                            Text(command.subtitle)
+                                                                .font(.caption2)
+                                                                .foregroundStyle(.secondary)
+                                                        }
                                                     }
+                                                    Spacer()
+                                                    Button("Run") {
+                                                        onRunCommand(command)
+                                                    }
+                                                    .buttonStyle(.borderedProminent)
+                                                    .controlSize(.small)
+                                                    .disabled(runningCommandIDs.contains(command.id))
                                                 }
-                                                Spacer()
-                                                Button("Run") {
-                                                    onRunCommand(command)
+                                                Text("Slots: \(command.slots.joined(separator: ", "))")
+                                                    .font(.caption2.monospaced())
+                                                    .foregroundStyle(.secondary)
+                                                if !command.permissions.isEmpty {
+                                                    Text("Perms: \(command.permissions.joined(separator: ", "))")
+                                                        .font(.caption2.monospaced())
+                                                        .foregroundStyle(.secondary)
                                                 }
-                                                .buttonStyle(.borderedProminent)
-                                                .controlSize(.small)
-                                                .disabled(runningCommandIDs.contains(command.id))
+                                                if let timeout = command.timeoutSeconds {
+                                                    Text("Timeout: \(timeout)s")
+                                                        .font(.caption2.monospaced())
+                                                        .foregroundStyle(.secondary)
+                                                }
                                             }
                                         }
                                     }
@@ -5935,11 +6042,65 @@ private struct PMExtensionsMarketplaceSheet: View {
                             .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Activity Log")
+                                .font(.headline)
+                            Spacer()
+                            Button("Copy Log", action: onCopyActivityLog)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(activityLog.isEmpty)
+                            Button("Clear", action: onClearActivityLog)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(activityLog.isEmpty)
+                        }
+
+                        if activityLog.isEmpty {
+                            Text("No extension activity yet")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(activityLog.suffix(30).reversed())) { entry in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        Text(entry.outcome.rawValue.uppercased())
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(entry.outcome == .failed ? .red : .secondary)
+                                        Text(entry.pluginName)
+                                            .font(.caption2.weight(.semibold))
+                                        Text(shortDateTime(entry.timestamp))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let commandTitle = entry.commandTitle, !commandTitle.isEmpty {
+                                        Text(commandTitle)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(entry.detail)
+                                        .font(.caption2.monospaced())
+                                        .textSelection(.enabled)
+                                }
+                                .padding(8)
+                                .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
                 }
             }
         }
         .padding(18)
         .frame(minWidth: 760, minHeight: 560)
+    }
+
+    private func shortDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter.string(from: date)
     }
 }
 
@@ -5968,6 +6129,8 @@ private struct PMPlannerSheet: View {
     @Binding var blueprintConstraints: String
     @Binding var blueprintQualityBar: String
     let plannerExtensions: [PMPlannerUIExtensionDescriptor]
+    let plannerPanelCommands: [PMExtensionCommandDescriptor]
+    let runningExtensionCommandIDs: Set<String>
     @Binding var brainstormFocus: String
     @Binding var brainstormTranscript: String
     @Binding var brainstormStatusText: String
@@ -5984,6 +6147,7 @@ private struct PMPlannerSheet: View {
     let onRunBrainstormRound: () -> Void
     let onApplyBrainstormToBrief: () -> Void
     let onClearBrainstorm: () -> Void
+    let onRunPlannerCommand: (PMExtensionCommandDescriptor) -> Void
     let onGeneratePlan: () -> Void
     let onGenerateTestPlan: () -> Void
     let onCreateMissingAgents: () -> Void
@@ -6154,6 +6318,36 @@ private struct PMPlannerSheet: View {
                         onApplyBrainstormToBrief: onApplyBrainstormToBrief,
                         onClearBrainstorm: onClearBrainstorm
                     )
+
+                    if !plannerPanelCommands.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(L10n.string("Planner Extensions"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(plannerPanelCommands) { command in
+                                HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(command.title)
+                                            .font(.caption.weight(.semibold))
+                                        if !command.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                            Text(command.subtitle)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button(L10n.string("Run")) {
+                                        onRunPlannerCommand(command)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .disabled(runningExtensionCommandIDs.contains(command.id))
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+                    }
 
             Text(L10n.string("Describe your goal, scope, and constraints. PM planner will turn this into executable tickets."))
                 .font(.caption)
@@ -8494,6 +8688,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: {},
             hasExecutionTimeline: false,
             onCopyExecutionTimeline: {},
+            extensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunExtensionCommand: { _ in },
             onMoveBackward: {},
             onMoveForward: {}
         )
@@ -8541,6 +8738,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: {},
             hasExecutionTimeline: false,
             onCopyExecutionTimeline: {},
+            extensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunExtensionCommand: { _ in },
             onMoveBackward: {},
             onMoveForward: {}
         )
@@ -9296,6 +9496,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: { _ in },
             hasExecutionTimeline: { _ in false },
             onCopyExecutionTimeline: { _ in },
+            taskExtensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunTaskExtensionCommand: { _, _ in },
             onDropTask: { _ in true }
         ))
         render(KanbanColumnView(
@@ -9324,6 +9527,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: { _ in },
             hasExecutionTimeline: { _ in true },
             onCopyExecutionTimeline: { _ in },
+            taskExtensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunTaskExtensionCommand: { _, _ in },
             onDropTask: { _ in true }
         ))
 
@@ -9356,6 +9562,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: {},
             hasExecutionTimeline: true,
             onCopyExecutionTimeline: {},
+            extensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunExtensionCommand: { _ in },
             onMoveBackward: {},
             onMoveForward: {}
         ))
@@ -9388,6 +9597,9 @@ enum ContentViewTestHooks {
             onShowExecutionDetails: {},
             hasExecutionTimeline: true,
             onCopyExecutionTimeline: {},
+            extensionCommands: [],
+            runningExtensionCommandIDs: [],
+            onRunExtensionCommand: { _ in },
             onMoveBackward: {},
             onMoveForward: {}
         ))

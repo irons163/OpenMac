@@ -1,7 +1,20 @@
 {
   "id": "com.openmac.examples.brainstorm",
   "name": "OpenMac AI Brainstorm",
+  "version": "1.0.0",
   "capabilities": ["pm.plan.generate"],
+  "permissions": ["command.execute"],
+  "commands": [
+    {
+      "id": "quick-brief-audit",
+      "title": "Quick Brief Audit",
+      "subtitle": "Check brief readiness before generating plan",
+      "slots": ["app.toolbar", "pm.planner.panel"],
+      "permissions": ["command.execute"],
+      "timeoutSeconds": 30,
+      "enabled": true
+    }
+  ],
   "uiExtensions": [
     {
       "id": "brainstorm",
