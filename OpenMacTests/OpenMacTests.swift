@@ -2499,6 +2499,30 @@ struct KanbanFlowTests {
         #expect(viewModel.tasks[0].assignedAgentID == nil)
     }
 
+    @Test("moving task backward invalidates succeeded execution record")
+    func movingTaskBackwardInvalidatesSucceededExecutionRecord() {
+        let task = WorkTask(
+            title: "Regression fix",
+            details: "Rework implementation",
+            requiredSkills: ["swift"],
+            storyPoints: 2,
+            status: .review,
+            assignedAgentID: nil,
+            executionRecord: TaskExecutionRecord(
+                status: .succeeded,
+                runCount: 1,
+                lastOutputSummary: "Completed"
+            )
+        )
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [])
+
+        let moved = viewModel.moveTask(task.id, to: .inProgress)
+
+        #expect(moved)
+        #expect(viewModel.tasks[0].status == .inProgress)
+        #expect(viewModel.tasks[0].executionRecord == nil)
+    }
+
     @Test("drop handler applies adjacent move and rejects skipped columns")
     func dropHandlerRespectsWorkflow() {
         let task = WorkTask(
@@ -12881,6 +12905,44 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first?.executionRecord == nil)
         #expect(viewModel.lastBoardMessage == "Task blocked by dependencies: Missing Spec")
         #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("dependency completion ignores succeeded execution when status is not review or done")
+    func dependencyCompletionIgnoresSucceededExecutionWithoutWorkflowProgress() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let prerequisite = WorkTask(
+            title: "Design Spec",
+            details: "Draft completed",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .succeeded,
+                runCount: 1,
+                lastOutputSummary: "Spec drafted"
+            )
+        )
+        let dependent = WorkTask(
+            title: "Implementation",
+            details: """
+            Depends on: Design Spec
+            Build feature.
+            """,
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [prerequisite, dependent],
+            agents: [agent],
+            taskExecutor: StubTaskExecutor()
+        )
+
+        let unresolved = viewModel.unresolvedDependencies(for: dependent.id)
+
+        #expect(unresolved.contains("Design Spec"))
     }
 
     @Test("batch run executes assigned runnable tasks and skips empty details")

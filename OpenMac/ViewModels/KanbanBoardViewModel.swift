@@ -2657,6 +2657,10 @@ final class KanbanBoardViewModel: ObservableObject {
         }
 
         tasks[index].status = status
+        if sourceStatus.previous == status,
+           tasks[index].executionRecord?.status == .succeeded {
+            tasks[index].executionRecord = nil
+        }
 
         if status == .done || status == .todo {
             tasks[index].assignedAgentID = nil
@@ -10232,13 +10236,7 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private static func isDependencyCompleted(_ task: WorkTask) -> Bool {
-        if task.status == .review || task.status == .done {
-            return true
-        }
-        if task.executionRecord?.status == .succeeded {
-            return true
-        }
-        return false
+        task.status == .review || task.status == .done
     }
 
     private func dependencyCompletionMap() -> [String: Bool] {
