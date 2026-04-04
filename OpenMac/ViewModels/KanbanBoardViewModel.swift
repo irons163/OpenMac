@@ -1536,6 +1536,7 @@ final class KanbanBoardViewModel: ObservableObject {
     @Published private(set) var pmExtensionActivityLog: [PMExtensionActivityLogEntry] = []
     @Published private(set) var pmExtensionObservability: [PMExtensionObservabilitySnapshot] = []
     @Published private(set) var pmExtensionLastAcceptanceReport: PMExtensionE2EAcceptanceReport?
+    @Published private(set) var sharedAgentMemory: [SharedAgentMemoryEntry] = []
     @Published private(set) var agentExecutionEventsByAgentID: [UUID: [AgentExecutionEvent]] = [:]
     @Published private(set) var executionTimelineByTaskID: [UUID: [AgentExecutionEvent]] = [:]
 
@@ -1551,6 +1552,9 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let maxAgentExecutionEventsPerAgent = 120
     private static let maxTaskTimelineEventsPerTask = 240
     private static let maxExtensionActivityLogEntries = 200
+    private static let maxSharedAgentMemoryEntries = 160
+    private static let sharedAgentMemoryPromptLimit = 12
+    private static let sharedAgentMemoryPromptCharsLimit = 2800
     private static let maxHookRetryCount = 2
     private static let hookRetryBackoffBaseSeconds: Double = 1
     private static let hookDedupWindowSeconds: Double = 6
@@ -1753,6 +1757,7 @@ final class KanbanBoardViewModel: ObservableObject {
         mcpServerPolicy: MCPServerPolicy = .init(),
         pmPlannerEngineMode: PMPlannerEngineMode = .builtIn,
         pmPlanningPluginPolicy: PMPlanningPluginPolicy = .init(),
+        sharedAgentMemory: [SharedAgentMemoryEntry] = [],
         projectsDirectoryPathProvider: @escaping () -> String = {
             CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath()
         },
@@ -1777,7 +1782,8 @@ final class KanbanBoardViewModel: ObservableObject {
             tasks: tasks,
             agents: agents,
             wipLimits: normalizedLimits,
-            executionRealArtifactVerificationPolicy: nil
+            executionRealArtifactVerificationPolicy: nil,
+            sharedAgentMemory: sharedAgentMemory
         )
         self.boards = [initialBoard]
         self.selectedBoardID = initialBoard.id
@@ -1801,6 +1807,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.mcpServerPolicy = mcpServerPolicy
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
+        self.sharedAgentMemory = sharedAgentMemory
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -1885,6 +1892,7 @@ final class KanbanBoardViewModel: ObservableObject {
         self.mcpServerPolicy = mcpServerPolicy
         self.pmPlannerEngineMode = pmPlannerEngineMode
         self.pmPlanningPluginPolicy = pmPlanningPluginPolicy
+        self.sharedAgentMemory = resolvedBoard.sharedAgentMemory ?? []
         self.projectsDirectoryPathProvider = projectsDirectoryPathProvider
         self.assignmentEngine = assignmentEngine
         self.projectPlanner = projectPlanner
@@ -2401,7 +2409,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,
                 wipLimits: snapshot.wipLimits,
-                executionRealArtifactVerificationPolicy: nil
+                executionRealArtifactVerificationPolicy: nil,
+                sharedAgentMemory: snapshot.sharedAgentMemory
             )
             importedBoards = normalizedImportedBoardRecords([fallbackBoard])
         }
@@ -2475,7 +2484,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 tasks: snapshot.tasks,
                 agents: snapshot.agents,
                 wipLimits: snapshot.wipLimits,
-                executionRealArtifactVerificationPolicy: nil
+                executionRealArtifactVerificationPolicy: nil,
+                sharedAgentMemory: snapshot.sharedAgentMemory
             )
             importedBoards = normalizedImportedBoardRecords([fallbackBoard])
             preferredSelectedBoardID = nil
@@ -4316,6 +4326,52 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func clearExecutionTimeline(for taskID: UUID) {
         executionTimelineByTaskID[taskID] = []
+    }
+
+    func addSharedAgentMemoryNote(_ note: String) -> Bool {
+        let normalizedNote = normalizeExecutionText(note)
+        guard let normalizedNote else {
+            lastBoardMessage = message("Shared memory note is empty")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+        appendSharedAgentMemoryEntry(
+            SharedAgentMemoryEntry(
+                source: .manual,
+                agentID: nil,
+                agentName: message("Human"),
+                taskID: nil,
+                taskTitle: message("Manual note"),
+                summary: normalizedNote
+            )
+        )
+        persistBoardState()
+        lastBoardMessage = message("Shared memory note added")
+        lastBoardMessageSeverity = .info
+        return true
+    }
+
+    func removeSharedAgentMemoryEntry(_ entryID: UUID) {
+        sharedAgentMemory.removeAll { $0.id == entryID }
+        persistBoardState()
+    }
+
+    func clearSharedAgentMemory() {
+        sharedAgentMemory = []
+        persistBoardState()
+        lastBoardMessage = message("Cleared shared memory")
+        lastBoardMessageSeverity = .warning
+    }
+
+    func sharedAgentMemoryText(limit: Int = 80) -> String {
+        let entries = sharedAgentMemoryEntries(limit: limit)
+        guard !entries.isEmpty else { return "-" }
+        return entries
+            .map { entry in
+                let timestamp = Self.iso8601Formatter.string(from: entry.createdAt)
+                return "[\(timestamp)] \(entry.source.rawValue) \(entry.agentName) · \(entry.taskTitle): \(entry.summary)"
+            }
+            .joined(separator: "\n")
     }
 
     func clearLocalizedTransientBoardMessage() {
@@ -10330,6 +10386,119 @@ final class KanbanBoardViewModel: ObservableObject {
         return merged.isEmpty ? nil : merged
     }
 
+    private func sharedAgentMemoryEntries(limit: Int) -> [SharedAgentMemoryEntry] {
+        guard limit > 0 else { return [] }
+        if sharedAgentMemory.count <= limit {
+            return sharedAgentMemory.reversed()
+        }
+        return sharedAgentMemory.suffix(limit).reversed()
+    }
+
+    private func sharedAgentMemoryPromptContext(excludingTaskID: UUID?) -> String {
+        let selectedEntries = sharedAgentMemory
+            .reversed()
+            .filter { entry in
+                guard let excludingTaskID else { return true }
+                return entry.taskID != excludingTaskID
+            }
+            .prefix(Self.sharedAgentMemoryPromptLimit)
+
+        guard !selectedEntries.isEmpty else { return "" }
+
+        var lines: [String] = []
+        var usedCharacters = 0
+        for entry in selectedEntries {
+            let summary = Self.summarizedExtensionOutput(entry.summary)
+            guard !summary.isEmpty else { continue }
+            let line = "- [\(entry.source.rawValue)] \(entry.taskTitle) (\(entry.agentName)): \(summary)"
+            let additionalChars = line.count + 1
+            if usedCharacters + additionalChars > Self.sharedAgentMemoryPromptCharsLimit {
+                break
+            }
+            usedCharacters += additionalChars
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func taskSnapshotWithSharedMemoryContext(_ task: WorkTask, agent: AgentProfile) -> WorkTask {
+        let context = sharedAgentMemoryPromptContext(excludingTaskID: task.id)
+        guard !context.isEmpty else { return task }
+
+        let baseDetails = task.details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let memoryHeader = """
+        Shared team memory (latest context):
+        \(context)
+        """
+        var enrichedTask = task
+        if baseDetails.isEmpty {
+            enrichedTask.details = memoryHeader
+        } else {
+            enrichedTask.details = "\(baseDetails)\n\n\(memoryHeader)"
+        }
+        appendAgentExecutionEvent(
+            agentID: agent.id,
+            taskID: task.id,
+            taskTitle: task.title,
+            status: .running,
+            phase: .system,
+            message: message(
+                "Loaded shared memory context (%d entries)",
+                max(1, context.split(whereSeparator: \.isNewline).count)
+            )
+        )
+        return enrichedTask
+    }
+
+    private func appendSharedAgentMemoryEntry(_ entry: SharedAgentMemoryEntry) {
+        let normalizedSummary = normalizeExecutionText(entry.summary)
+        guard let normalizedSummary else { return }
+
+        let normalizedEntry = SharedAgentMemoryEntry(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            source: entry.source,
+            agentID: entry.agentID,
+            agentName: entry.agentName,
+            taskID: entry.taskID,
+            taskTitle: entry.taskTitle,
+            summary: normalizedSummary
+        )
+        if let latest = sharedAgentMemory.last,
+           latest.source == normalizedEntry.source,
+           latest.taskID == normalizedEntry.taskID,
+           latest.agentID == normalizedEntry.agentID,
+           latest.summary == normalizedEntry.summary,
+           abs(latest.createdAt.timeIntervalSince(normalizedEntry.createdAt)) < 4 {
+            return
+        }
+        sharedAgentMemory.append(normalizedEntry)
+        if sharedAgentMemory.count > Self.maxSharedAgentMemoryEntries {
+            sharedAgentMemory.removeFirst(sharedAgentMemory.count - Self.maxSharedAgentMemoryEntries)
+        }
+    }
+
+    private func rememberExecutionOutcomeInSharedMemory(
+        task: WorkTask,
+        agent: AgentProfile,
+        status: TaskExecutionStatus,
+        summary: String?,
+        source: SharedAgentMemoryEntry.Source
+    ) {
+        let normalizedSummary = normalizeExecutionText(summary)
+        guard let normalizedSummary else { return }
+        appendSharedAgentMemoryEntry(
+            SharedAgentMemoryEntry(
+                source: source,
+                agentID: agent.id,
+                agentName: agent.name,
+                taskID: task.id,
+                taskTitle: task.title,
+                summary: "[\(status.rawValue)] \(normalizedSummary)"
+            )
+        )
+    }
+
     private func appendAgentExecutionEvent(
         agentID: UUID,
         taskID: UUID,
@@ -10496,9 +10665,10 @@ final class KanbanBoardViewModel: ObservableObject {
             details: message("Story points: %d", tasks[taskIndex].storyPoints)
         )
 
+        let taskSnapshot = taskSnapshotWithSharedMemoryContext(tasks[taskIndex], agent: agent)
         return PreparedTaskExecution(
             taskID: taskID,
-            taskSnapshot: tasks[taskIndex],
+            taskSnapshot: taskSnapshot,
             agent: agent
         )
     }
@@ -10533,6 +10703,13 @@ final class KanbanBoardViewModel: ObservableObject {
                     message: blockerMessage,
                     details: normalizedSummary
                 )
+                rememberExecutionOutcomeInSharedMemory(
+                    task: tasks[taskIndex],
+                    agent: prepared.agent,
+                    status: .failed,
+                    summary: normalizedSummary,
+                    source: .executionFailed
+                )
                 triggerPMExtensionHooks(
                     event: .runFinished,
                     task: tasks[taskIndex],
@@ -10560,6 +10737,13 @@ final class KanbanBoardViewModel: ObservableObject {
                     phase: .governance,
                     message: blockerMessage,
                     details: normalizedSummary
+                )
+                rememberExecutionOutcomeInSharedMemory(
+                    task: tasks[taskIndex],
+                    agent: prepared.agent,
+                    status: .failed,
+                    summary: normalizedSummary,
+                    source: .executionFailed
                 )
                 triggerPMExtensionHooks(
                     event: .runFinished,
@@ -10602,6 +10786,13 @@ final class KanbanBoardViewModel: ObservableObject {
                     message: message("Execution succeeded · %@", tasks[taskIndex].title),
                     details: normalizedSummary
                 )
+                rememberExecutionOutcomeInSharedMemory(
+                    task: tasks[taskIndex],
+                    agent: prepared.agent,
+                    status: .succeeded,
+                    summary: normalizedSummary ?? message("Execution succeeded"),
+                    source: .executionSucceeded
+                )
                 triggerPMExtensionHooks(
                     event: .runFinished,
                     task: tasks[taskIndex],
@@ -10640,6 +10831,13 @@ final class KanbanBoardViewModel: ObservableObject {
                 phase: .result,
                 message: failedRecord.lastError ?? self.message("Unknown execution error"),
                 details: eventDetails
+            )
+            rememberExecutionOutcomeInSharedMemory(
+                task: tasks[taskIndex],
+                agent: prepared.agent,
+                status: .failed,
+                summary: failedRecord.lastError,
+                source: .executionFailed
             )
             triggerPMExtensionHooks(
                 event: .runFinished,
@@ -10839,6 +11037,7 @@ final class KanbanBoardViewModel: ObservableObject {
         boards[selectedBoardIndex].tasks = tasks
         boards[selectedBoardIndex].agents = agents
         boards[selectedBoardIndex].wipLimits = wipLimits
+        boards[selectedBoardIndex].sharedAgentMemory = sharedAgentMemory
         boards[selectedBoardIndex].executionRealArtifactVerificationPolicy =
             selectedBoardUsesDefaultRealArtifactVerificationPolicy
             ? nil
@@ -10862,6 +11061,7 @@ final class KanbanBoardViewModel: ObservableObject {
             board.executionRealArtifactVerificationPolicy == nil
         executionRealArtifactVerificationPolicy =
             board.executionRealArtifactVerificationPolicy ?? executionRealArtifactVerificationDefaultPolicy
+        sharedAgentMemory = board.sharedAgentMemory ?? []
         lastUnassignedTaskIDs = Set(tasks.filter { $0.status == .todo && $0.assignedAgentID == nil }.map(\.id))
         lastAssignmentReasons = [:]
         lastBoardMessage = nil
@@ -10919,7 +11119,10 @@ final class KanbanBoardViewModel: ObservableObject {
             tasks: resolvedTasks,
             agents: board.agents,
             wipLimits: resolvedWIPLimits,
-            executionRealArtifactVerificationPolicy: board.executionRealArtifactVerificationPolicy
+            executionRealArtifactVerificationPolicy: board.executionRealArtifactVerificationPolicy,
+            sharedAgentMemory: (board.sharedAgentMemory ?? []).filter {
+                !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
         )
     }
 
@@ -11036,7 +11239,8 @@ final class KanbanBoardViewModel: ObservableObject {
             executionRealArtifactVerificationPolicy: executionRealArtifactVerificationDefaultPolicy,
             mcpServerPolicy: mcpServerPolicy,
             pmPlannerEngineMode: pmPlannerEngineMode,
-            pmPlanningPluginPolicy: pmPlanningPluginPolicy
+            pmPlanningPluginPolicy: pmPlanningPluginPolicy,
+            sharedAgentMemory: sharedAgentMemory
         )
         try? boardStore.save(snapshot)
     }
@@ -11109,6 +11313,7 @@ extension KanbanBoardViewModel {
                 mcpServerPolicy: snapshot.mcpServerPolicy ?? .init(),
                 pmPlannerEngineMode: snapshot.pmPlannerEngineMode ?? .builtIn,
                 pmPlanningPluginPolicy: snapshot.pmPlanningPluginPolicy ?? .init(),
+                sharedAgentMemory: snapshot.sharedAgentMemory ?? [],
                 projectsDirectoryPathProvider: projectsDirectoryPathProvider,
                 assignmentEngine: assignmentEngine,
                 projectPlanner: projectPlanner,

@@ -12493,6 +12493,76 @@ struct KanbanPersistenceTests {
         #expect(replay?.contains("[result]") == true)
     }
 
+    @Test("shared agent memory records execution outcomes and injects context into subsequent runs")
+    func sharedAgentMemoryRecordsAndInjectsContext() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let first = WorkTask(
+            title: "First task",
+            details: "Implement authentication flow",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let second = WorkTask(
+            title: "Second task",
+            details: "Integrate profile editor",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        var executedDetailsByTaskID: [UUID: String] = [:]
+        let executor = HookedTaskExecutor(
+            outcomesByTaskID: [
+                first.id: .success(summary: "Implemented auth flow and added smoke checks."),
+                second.id: .success(summary: "Integrated profile editor.")
+            ]
+        )
+        executor.onExecute = { task in
+            executedDetailsByTaskID[task.id] = task.details
+        }
+        let viewModel = KanbanBoardViewModel(
+            tasks: [first, second],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        #expect(viewModel.runTaskExecution(first.id))
+        #expect(viewModel.sharedAgentMemory.contains(where: {
+            $0.taskID == first.id && $0.summary.contains("Implemented auth flow")
+        }))
+
+        #expect(viewModel.runTaskExecution(second.id))
+        let secondRunDetails = executedDetailsByTaskID[second.id] ?? ""
+        #expect(secondRunDetails.contains("Shared team memory (latest context):"))
+        #expect(secondRunDetails.contains("First task"))
+        #expect(secondRunDetails.contains("Implemented auth flow"))
+    }
+
+    @Test("shared agent memory manual notes persist and remain board-scoped")
+    func sharedAgentMemoryManualNotesAreBoardScoped() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+        let boardOneID = viewModel.selectedBoardID
+
+        #expect(viewModel.addSharedAgentMemoryNote("Board one note"))
+        #expect(viewModel.sharedAgentMemory.count == 1)
+        #expect(viewModel.sharedAgentMemoryText().contains("Board one note"))
+        #expect(store.savedSnapshots.last?.sharedAgentMemory?.contains(where: { $0.summary.contains("Board one note") }) == true)
+
+        #expect(viewModel.createBoard(name: "Board Two"))
+        let boardTwoID = viewModel.selectedBoardID
+        #expect(boardTwoID != boardOneID)
+        #expect(viewModel.sharedAgentMemory.isEmpty)
+        #expect(viewModel.addSharedAgentMemoryNote("Board two note"))
+        #expect(viewModel.sharedAgentMemoryText().contains("Board two note"))
+
+        #expect(viewModel.switchBoard(to: boardOneID))
+        #expect(viewModel.sharedAgentMemoryText().contains("Board one note"))
+        #expect(!viewModel.sharedAgentMemoryText().contains("Board two note"))
+    }
+
     @Test("run task execution blocks when unresolved dependencies remain")
     func runTaskExecutionBlocksOnUnresolvedDependencies() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)

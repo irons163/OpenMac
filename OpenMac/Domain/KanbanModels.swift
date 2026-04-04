@@ -1411,6 +1411,43 @@ struct WorkTask: Identifiable, Equatable, Codable {
     }
 }
 
+struct SharedAgentMemoryEntry: Identifiable, Equatable, Codable {
+    enum Source: String, Codable {
+        case executionSucceeded = "execution.succeeded"
+        case executionFailed = "execution.failed"
+        case manual = "manual"
+    }
+
+    var id: UUID
+    var createdAt: Date
+    var source: Source
+    var agentID: UUID?
+    var agentName: String
+    var taskID: UUID?
+    var taskTitle: String
+    var summary: String
+
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        source: Source,
+        agentID: UUID? = nil,
+        agentName: String,
+        taskID: UUID? = nil,
+        taskTitle: String,
+        summary: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.source = source
+        self.agentID = agentID
+        self.agentName = agentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.taskID = taskID
+        self.taskTitle = taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 struct KanbanBoardRecord: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
@@ -1418,6 +1455,7 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
     var agents: [AgentProfile]
     var wipLimits: [KanbanStatus: Int]
     var executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy?
+    var sharedAgentMemory: [SharedAgentMemoryEntry]?
 
     init(
         id: UUID = UUID(),
@@ -1425,7 +1463,8 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
         tasks: [WorkTask] = [],
         agents: [AgentProfile] = [],
         wipLimits: [KanbanStatus: Int] = [.inProgress: 3, .review: 2],
-        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil
+        executionRealArtifactVerificationPolicy: ExecutionRealArtifactVerificationPolicy? = nil,
+        sharedAgentMemory: [SharedAgentMemoryEntry]? = nil
     ) {
         self.id = id
         self.name = name
@@ -1435,5 +1474,6 @@ struct KanbanBoardRecord: Identifiable, Equatable, Codable {
             partialResult[pair.key] = max(1, pair.value)
         }
         self.executionRealArtifactVerificationPolicy = executionRealArtifactVerificationPolicy
+        self.sharedAgentMemory = sharedAgentMemory
     }
 }

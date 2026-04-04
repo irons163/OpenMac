@@ -164,6 +164,7 @@ struct ContentView: View {
     @State private var pmPluginStatusLastScannedAt: Date?
     @State private var isShowingExtensionsMarketplaceSheet = false
     @State private var runningExtensionCommandIDs: Set<String> = []
+    @State private var sharedMemoryDraft = ""
     @State private var pmLastGeneratedPlanAt: Date?
     @State private var pmStatusReferenceNow = Date()
     private static let pmStatusAutoRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -272,6 +273,8 @@ struct ContentView: View {
                     if let message = viewModel.lastBoardMessage {
                         boardMessageSection(message)
                     }
+
+                    sharedAgentMemorySection()
 
                     if let selectedAgent = selectedAgentForConsole {
                         AgentLiveConsoleView(
@@ -3368,6 +3371,10 @@ struct ContentView: View {
         viewModel.pmExtensionObservability
     }
 
+    private var sharedAgentMemoryEntries: [SharedAgentMemoryEntry] {
+        viewModel.sharedAgentMemory
+    }
+
     private var selectedBoardDependencyInsights: DependencyGraphInsights {
         viewModel.selectedBoardDependencyInsights
     }
@@ -3777,6 +3784,90 @@ struct ContentView: View {
             isBatchRunning: isBatchRunning,
             isAutoCycleRunning: isAutoCycleRunning
         )
+    }
+
+    @ViewBuilder
+    private func sharedAgentMemorySection() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Shared Agent Memory")
+                    .font(.headline)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                Text("\(sharedAgentMemoryEntries.count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                Button("Copy") {
+                    copyToPasteboard(viewModel.sharedAgentMemoryText())
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(sharedAgentMemoryEntries.isEmpty)
+                Button("Clear") {
+                    viewModel.clearSharedAgentMemory()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(sharedAgentMemoryEntries.isEmpty)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Add shared note for all agents", text: $sharedMemoryDraft)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    let note = sharedMemoryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !note.isEmpty else { return }
+                    if viewModel.addSharedAgentMemoryNote(note) {
+                        sharedMemoryDraft = ""
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(sharedMemoryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if sharedAgentMemoryEntries.isEmpty {
+                Text("No shared memory yet. Execution outcomes and manual notes will appear here.")
+                    .font(.caption)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+            } else {
+                ForEach(sharedAgentMemoryEntries.prefix(8)) { entry in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(entry.taskTitle) · \(entry.agentName)")
+                                .font(.caption.weight(.semibold))
+                            Text("\(shortDateTimeString(entry.createdAt)) · \(entry.source.rawValue)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                            Text(entry.summary)
+                                .font(.caption)
+                                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                                .textSelection(.enabled)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Remove") {
+                            viewModel.removeSharedAgentMemoryEntry(entry.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(
+                        BoardSurfacePalette.supplementaryCardColor(for: effectiveColorScheme),
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                BoardChromePalette.supplementaryCardBorderColor(for: effectiveColorScheme),
+                                lineWidth: 1
+                            )
+                    )
+                }
+            }
+        }
     }
 
     @ViewBuilder

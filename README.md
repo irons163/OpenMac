@@ -33,6 +33,7 @@ OpenMac is a macOS-first AI agent Kanban app for planning, dispatching, and runn
   - Quick templates (`SaaS Product`, `Desktop App`, `Developer API`)
   - `Create + Run Assigned` flow
 - Agent Live Console with copyable output/debug logs
+- Shared Agent Memory (board-scoped context notes + automatic execution outcome memory)
 - Extension Marketplace (install/update/remove/rescan, saved sources, enable/disable)
 - Extension command contribution slots:
   - `app.toolbar`
