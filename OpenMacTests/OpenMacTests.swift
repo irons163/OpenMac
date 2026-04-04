@@ -4955,6 +4955,44 @@ struct KanbanSupportTypeTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
+    @Test("install PM extension copies plugin folder into configured plugins directory")
+    func installPMExtensionFromDirectoryCopiesPlugin() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let sourceRoot = root.appendingPathComponent("source", isDirectory: true)
+        let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try fileManager.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pluginsRoot, withIntermediateDirectories: true)
+
+        let extensionFolder = sourceRoot.appendingPathComponent("brainstorm-ext", isDirectory: true)
+        try fileManager.createDirectory(at: extensionFolder, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.brainstorm.extension",
+          "name": "Brainstorm Extension",
+          "enabled": true,
+          "uiExtensions": [
+            { "id": "brainstorm", "slot": "pm.planner", "component": "brainstorm.v1", "enabled": true }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: extensionFolder.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: pluginsRoot.path,
+            announce: false
+        )
+
+        let installed = viewModel.installPMExtensionFromDirectory(extensionFolder.path)
+        #expect(installed)
+        #expect(viewModel.pmPlanningLocalPluginNames().contains("Brainstorm Extension"))
+        #expect(viewModel.lastBoardMessage?.contains("Installed PM extension") == true)
+    }
+
     @Test("delivery contract defaults cover all output and gate combinations")
     func taskDeliveryContractDefaultArtifactsCoverage() {
         let strictExpected: [TaskDeliveryOutputType: Set<TaskDeliveryArtifact>] = [

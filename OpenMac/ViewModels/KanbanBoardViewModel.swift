@@ -4610,6 +4610,80 @@ final class KanbanBoardViewModel: ObservableObject {
         detectedLocalPMPlanningPlugins(in: pmPlanningPluginPolicy.pluginsDirectoryPath)
     }
 
+    @discardableResult
+    func installPMExtensionFromDirectory(_ sourceDirectoryPath: String) -> Bool {
+        let trimmedSourcePath = sourceDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSourcePath.isEmpty else {
+            lastBoardMessage = message("Extension install failed: source folder is empty")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let sourceURL = URL(fileURLWithPath: (trimmedSourcePath as NSString).expandingTildeInPath, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            lastBoardMessage = message("Extension install failed: source folder not found")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        guard let record = localPMPlanningPluginRecord(at: sourceURL) else {
+            lastBoardMessage = message("Extension install failed: plugin.json/manifest.json is missing or invalid")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let pluginID = (record.manifest.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pluginID.isEmpty else {
+            lastBoardMessage = message("Extension install failed: plugin id is required")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let pluginName = {
+            let trimmed = (record.manifest.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? sourceURL.lastPathComponent : trimmed
+        }()
+
+        let destinationRootPath = (pmPlanningPluginPolicy.pluginsDirectoryPath as NSString).expandingTildeInPath
+        let destinationRootURL = URL(fileURLWithPath: destinationRootPath, isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(at: destinationRootURL, withIntermediateDirectories: true)
+        } catch {
+            lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        let baseFolderName = Self.sanitizedExtensionDirectoryName(pluginID, fallback: sourceURL.lastPathComponent)
+        let sourceCanonicalPath = sourceURL.standardizedFileURL.path
+        var destinationURL = destinationRootURL.appendingPathComponent(baseFolderName, isDirectory: true)
+        var index = 2
+        while FileManager.default.fileExists(atPath: destinationURL.path),
+              destinationURL.standardizedFileURL.path != sourceCanonicalPath {
+            destinationURL = destinationRootURL.appendingPathComponent("\(baseFolderName)-\(index)", isDirectory: true)
+            index += 1
+        }
+
+        if destinationURL.standardizedFileURL.path == sourceCanonicalPath {
+            lastBoardMessage = message("Extension already installed: %@", pluginName)
+            lastBoardMessageSeverity = .info
+            return true
+        }
+
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            lastBoardMessage = message("Installed PM extension: %@", pluginName)
+            lastBoardMessageSeverity = .info
+            return true
+        } catch {
+            lastBoardMessage = message("Extension install failed: %@", error.localizedDescription)
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+    }
+
     func pmPlannerExtensions(slot: String = KanbanBoardViewModel.pmPlannerExtensionSlot) -> [PMPlannerUIExtensionDescriptor] {
         let localExtensions = pmPlanningPluginPolicy.autoDiscoverLocalPlugins
             ? detectedLocalPMPlannerExtensions(
@@ -5241,25 +5315,29 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let candidateDirectories = [directoryURL] + childEntries
         return candidateDirectories.compactMap { entryURL in
-            guard let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey]),
-                  values.isDirectory == true else {
-                return nil
-            }
-
-            let pluginManifestCandidates = [
-                entryURL.appendingPathComponent("plugin.json"),
-                entryURL.appendingPathComponent("manifest.json")
-            ]
-
-            guard let manifestURL = pluginManifestCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-                  let data = try? Data(contentsOf: manifestURL),
-                  let manifest = try? JSONDecoder().decode(LocalPMPlanningPluginManifestSummary.self, from: data) else {
-                return nil
-            }
-
-            guard manifest.enabled ?? true else { return nil }
-            return LocalPMPlanningPluginRecord(manifest: manifest, directoryURL: entryURL)
+            localPMPlanningPluginRecord(at: entryURL)
         }
+    }
+
+    private func localPMPlanningPluginRecord(at entryURL: URL) -> LocalPMPlanningPluginRecord? {
+        guard let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey]),
+              values.isDirectory == true else {
+            return nil
+        }
+
+        let pluginManifestCandidates = [
+            entryURL.appendingPathComponent("plugin.json"),
+            entryURL.appendingPathComponent("manifest.json")
+        ]
+
+        guard let manifestURL = pluginManifestCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(LocalPMPlanningPluginManifestSummary.self, from: data) else {
+            return nil
+        }
+
+        guard manifest.enabled ?? true else { return nil }
+        return LocalPMPlanningPluginRecord(manifest: manifest, directoryURL: entryURL)
     }
 
     private static func builtInBrainstormPMPlannerExtension(slot: String) -> PMPlannerUIExtensionDescriptor {
@@ -5296,6 +5374,21 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let pmPlannerUIActionRun = "pm.brainstorm.run"
     private static let pmPlannerUIActionApply = "pm.brainstorm.apply"
     private static let pmPlannerUIActionClear = "pm.brainstorm.clear"
+
+    private static func sanitizedExtensionDirectoryName(_ rawValue: String, fallback: String) -> String {
+        let normalized = rawValue
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9._-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if !normalized.isEmpty {
+            return normalized
+        }
+        let fallbackNormalized = fallback
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9._-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return fallbackNormalized.isEmpty ? "extension" : fallbackNormalized
+    }
 
     private static func defaultBrainstormPMPlannerUISchema() -> PMPlannerUIExtensionSchema {
         PMPlannerUIExtensionSchema(

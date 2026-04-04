@@ -696,6 +696,9 @@ struct ContentView: View {
                     Button(L10n.string("Choose PM Plugins Folder...")) {
                         choosePMPluginsDirectory()
                     }
+                    Button("Install PM Extension from Folder...") {
+                        installPMExtensionFromFolder()
+                    }
                     Button(L10n.string("Use Default PM Plugins Folder")) {
                         useDefaultPMPluginsDirectory()
                     }
@@ -855,6 +858,7 @@ struct ContentView: View {
                 onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
                 onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
                 onRefreshPMPlugins: { refreshPMPluginDiagnostics() },
+                onInstallPMExtension: installPMExtensionFromFolder,
                 onCopyPMPluginDiagnostics: {
                     let names = viewModel.pmPlanningLocalPluginNames()
                     let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
@@ -3428,6 +3432,23 @@ struct ContentView: View {
         applyPMPluginSettings()
     }
 
+    private func installPMExtensionFromFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.title = "Install PM Extension"
+        panel.message = "Select a plugin folder that contains plugin.json or manifest.json."
+        panel.prompt = L10n.string("Install")
+        panel.directoryURL = URL(fileURLWithPath: resolvedPMPluginsDirectoryPath, isDirectory: true)
+
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
+        guard modalResponse == .OK, let url else { return }
+        _ = viewModel.installPMExtensionFromDirectory(url.path)
+        refreshPMPluginDiagnostics(announce: false)
+    }
+
     private func chooseGitHubRepositoryDirectory() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -5792,6 +5813,7 @@ private struct PMPlannerSheet: View {
     let onOpenPMPluginsFolder: () -> Void
     let onCopyPMPluginsPath: () -> Void
     let onRefreshPMPlugins: () -> Void
+    let onInstallPMExtension: () -> Void
     let onCopyPMPluginDiagnostics: () -> Void
 
     private var totalStoryPoints: Int {
@@ -6033,6 +6055,9 @@ private struct PMPlannerSheet: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .disabled(!pmPluginsAutoDiscover)
+                            Button("Install PM Extension", action: onInstallPMExtension)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                             Button(L10n.string("Open PM Plugins Folder in Finder"), action: onOpenPMPluginsFolder)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
