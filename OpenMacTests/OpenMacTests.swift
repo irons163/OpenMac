@@ -12640,6 +12640,65 @@ struct KanbanPersistenceTests {
         #expect(providers.allSatisfy { $0.pluginID == "com.example.memory" })
     }
 
+    @Test("shared memory execution providers respect preferred and muted settings")
+    func sharedMemoryExecutionProvidersRespectPreferredAndMuted() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("memory-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.memory",
+          "name": "Memory Plugin",
+          "enabled": true,
+          "commands": [
+            { "id": "inject-high", "enabled": true },
+            { "id": "inject-low", "enabled": true }
+          ],
+          "memoryProviders": [
+            { "id": "high", "title": "High Priority", "commandID": "inject-high", "priority": 20, "enabled": true },
+            { "id": "low", "title": "Low Priority", "commandID": "inject-low", "priority": 5, "enabled": true }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let defaultOrder = viewModel.sharedMemoryExecutionProviders().map(\.title)
+        #expect(defaultOrder == ["High Priority", "Low Priority"])
+
+        viewModel.updateSharedAgentMemoryPreferredProviderID("com.example.memory.low")
+        let preferredOrder = viewModel.sharedMemoryExecutionProviders().map(\.title)
+        #expect(preferredOrder == ["Low Priority", "High Priority"])
+
+        viewModel.updateSharedAgentMemoryProviderEnabled("com.example.memory.low", isEnabled: false)
+        let afterMute = viewModel.sharedMemoryExecutionProviders().map(\.title)
+        #expect(afterMute == ["High Priority"])
+        #expect(viewModel.sharedAgentMemoryPreferredProviderID == nil)
+    }
+
+    @Test("shared memory provider settings persist to workspace snapshot")
+    func sharedMemoryProviderSettingsPersistToSnapshot() {
+        let store = SpyBoardStore()
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [], boardStore: store)
+
+        viewModel.updateSharedAgentMemoryProviderMode(.extensionPreferred)
+        viewModel.updateSharedAgentMemoryPreferredProviderID("com.example.memory.high")
+        viewModel.updateSharedAgentMemoryProviderEnabled("com.example.memory.low", isEnabled: false)
+
+        #expect(store.savedSnapshots.last?.sharedAgentMemoryProviderMode == .extensionPreferred)
+        #expect(store.savedSnapshots.last?.sharedAgentMemoryPreferredProviderID == "com.example.memory.high")
+        #expect(store.savedSnapshots.last?.sharedAgentMemoryMutedProviderIDs?.contains("com.example.memory.low") == true)
+    }
+
     @Test("run task execution blocks when unresolved dependencies remain")
     func runTaskExecutionBlocksOnUnresolvedDependencies() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)

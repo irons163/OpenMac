@@ -3797,6 +3797,19 @@ struct ContentView: View {
             get: { viewModel.sharedAgentMemoryProviderMode },
             set: { viewModel.updateSharedAgentMemoryProviderMode($0) }
         )
+        let preferredProviderBinding = Binding<String>(
+            get: {
+                guard let preferredID = viewModel.sharedAgentMemoryPreferredProviderID,
+                      providers.contains(where: { $0.id == preferredID }) else {
+                    return "__auto__"
+                }
+                return preferredID
+            },
+            set: { selectedID in
+                let resolved = selectedID == "__auto__" ? nil : selectedID
+                viewModel.updateSharedAgentMemoryPreferredProviderID(resolved)
+            }
+        )
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Shared Agent Memory")
@@ -3841,10 +3854,37 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
                     } else {
-                        Text("Detected providers: \(providers.map(\.title).joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-                            .textSelection(.enabled)
+                        HStack(spacing: 8) {
+                            Text("Preferred")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                            Picker("Preferred Provider", selection: preferredProviderBinding) {
+                                Text("Auto (Priority)").tag("__auto__")
+                                ForEach(providers) { provider in
+                                    Text("\(provider.title) · \(provider.pluginName)").tag(provider.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(providers) { provider in
+                                Toggle(
+                                    isOn: Binding(
+                                        get: { !viewModel.sharedAgentMemoryMutedProviderIDs.contains(provider.id) },
+                                        set: { viewModel.updateSharedAgentMemoryProviderEnabled(provider.id, isEnabled: $0) }
+                                    )
+                                ) {
+                                    HStack(spacing: 6) {
+                                        Text(provider.title)
+                                            .font(.caption.weight(.semibold))
+                                        Text("(\(provider.pluginName), p\(provider.priority))")
+                                            .font(.caption2)
+                                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+                                    }
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
                     }
                 }
             }
