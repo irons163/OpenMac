@@ -7743,6 +7743,13 @@ final class KanbanBoardViewModel: ObservableObject {
     echo "{\\"message\\":\\"e2e-ok:${command_id}\\"}"
     """
 
+    private func readOnMain<T>(_ block: @escaping () -> T) -> T {
+        if Thread.isMainThread {
+            return block()
+        }
+        return DispatchQueue.main.sync(execute: block)
+    }
+
     private static func waitForPMExtensionCondition(
         timeoutSeconds: TimeInterval,
         pollIntervalSeconds: TimeInterval = 0.05,
@@ -8774,6 +8781,8 @@ final class KanbanBoardViewModel: ObservableObject {
         let task: WorkTask?
         let status: String
         let detail: String
+        let boardMessage: String?
+        let boardMessageSeverity: BoardMessageSeverity?
     }
 
     private enum RealArtifactIntegrityIssueCode {
@@ -8893,10 +8902,17 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func isTerminalTaskForRealArtifactVerification(_ task: WorkTask) -> Bool {
+        isTerminalTaskForRealArtifactVerification(task, within: tasks)
+    }
+
+    private func isTerminalTaskForRealArtifactVerification(
+        _ task: WorkTask,
+        within allTasks: [WorkTask]
+    ) -> Bool {
         let normalizedTitle = Self.normalizedDependencyTitle(task.title)
         guard !normalizedTitle.isEmpty else { return false }
 
-        return !tasks.contains { candidate in
+        return !allTasks.contains { candidate in
             guard candidate.id != task.id else { return false }
             let dependencies = Self.parsedDependencyReferences(from: candidate.details)
             return dependencies.contains(where: { $0.normalizedTitle == normalizedTitle })
@@ -8976,7 +8992,13 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func candidateTaskForDeferredRealArtifactVerification() -> WorkTask? {
-        let succeededStrictAppTasks = tasks
+        candidateTaskForDeferredRealArtifactVerification(within: tasks)
+    }
+
+    private func candidateTaskForDeferredRealArtifactVerification(
+        within allTasks: [WorkTask]
+    ) -> WorkTask? {
+        let succeededStrictAppTasks = allTasks
             .filter { task in
                 let contract = task.resolvedDeliveryContract
                 guard contract.gateMode == .strict, contract.outputType == .app else { return false }
@@ -8985,7 +9007,9 @@ final class KanbanBoardViewModel: ObservableObject {
             }
 
         guard !succeededStrictAppTasks.isEmpty else { return nil }
-        if let terminal = succeededStrictAppTasks.first(where: isTerminalTaskForRealArtifactVerification) {
+        if let terminal = succeededStrictAppTasks.first(where: { task in
+            isTerminalTaskForRealArtifactVerification(task, within: allTasks)
+        }) {
             return terminal
         }
 
@@ -9000,11 +9024,19 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func runDeferredRealArtifactVerificationIfNeeded() -> DeferredRealArtifactVerificationOutcome? {
-        let policy = executionRealArtifactVerificationPolicy
+        let snapshot = readOnMain { [self] in
+            (
+                policy: self.executionRealArtifactVerificationPolicy,
+                tasks: self.tasks,
+                boardScopedProjectsPath: self.resolvedBoardScopedProjectsDirectoryPath()
+            )
+        }
+
+        let policy = snapshot.policy
         guard policy.isEnabled else { return nil }
         guard policy.requireInfoPlistExecutableKey || policy.requireXcodeBuild else { return nil }
         guard policy.runVerificationOnlyOnTerminalTask else { return nil }
-        let alreadyVerified = tasks.contains { task in
+        let alreadyVerified = snapshot.tasks.contains { task in
             guard task.executionRecord?.status == .succeeded else { return false }
             let summary = task.executionRecord?.lastOutputSummary?.lowercased() ?? ""
             return summary.contains("real install verification passed")
@@ -9013,27 +9045,29 @@ final class KanbanBoardViewModel: ObservableObject {
             return DeferredRealArtifactVerificationOutcome(
                 task: nil,
                 status: "skipped",
-                detail: "Real install verification already completed during task execution"
+                detail: "Real install verification already completed during task execution",
+                boardMessage: nil,
+                boardMessageSeverity: nil
             )
         }
 
-        guard let candidate = candidateTaskForDeferredRealArtifactVerification() else {
+        guard let candidate = candidateTaskForDeferredRealArtifactVerification(within: snapshot.tasks) else {
             return DeferredRealArtifactVerificationOutcome(
                 task: nil,
                 status: "skipped",
-                detail: "No succeeded strict app task eligible for deferred verification"
+                detail: "No succeeded strict app task eligible for deferred verification",
+                boardMessage: nil,
+                boardMessageSeverity: nil
             )
         }
 
-        let verification = runRealArtifactVerification(for: candidate)
+        let verification = runRealArtifactVerification(
+            for: candidate,
+            policy: policy,
+            boardScopedProjectsPath: snapshot.boardScopedProjectsPath
+        )
         if let failureReason = verification.failureReason {
             let userMessage = message("Real install verification failed: %@", failureReason)
-            if let existing = lastBoardMessage, !existing.isEmpty {
-                lastBoardMessage = existing + "\n" + userMessage
-            } else {
-                lastBoardMessage = userMessage
-            }
-            lastBoardMessageSeverity = .warning
 
             let detail = verification.debugLog.flatMap { debug in
                 debug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : userMessage + " | " + debug
@@ -9041,26 +9075,40 @@ final class KanbanBoardViewModel: ObservableObject {
             return DeferredRealArtifactVerificationOutcome(
                 task: candidate,
                 status: "failed",
-                detail: detail
+                detail: detail,
+                boardMessage: userMessage,
+                boardMessageSeverity: .warning
             )
         }
 
         let successNote = verification.successNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !successNote.isEmpty {
-            if let existing = lastBoardMessage, !existing.isEmpty {
-                lastBoardMessage = existing + "\n" + successNote
-            } else {
-                lastBoardMessage = successNote
-            }
-        }
-        if lastBoardMessageSeverity != .warning {
-            lastBoardMessageSeverity = .info
-        }
         return DeferredRealArtifactVerificationOutcome(
             task: candidate,
             status: "passed",
-            detail: successNote.isEmpty ? "Real install verification passed" : successNote
+            detail: successNote.isEmpty ? "Real install verification passed" : successNote,
+            boardMessage: successNote.isEmpty ? "Real install verification passed" : successNote,
+            boardMessageSeverity: .info
         )
+    }
+
+    private func applyDeferredRealArtifactVerificationBoardMessage(
+        _ outcome: DeferredRealArtifactVerificationOutcome?
+    ) {
+        guard let outcome,
+              let boardMessage = outcome.boardMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !boardMessage.isEmpty else {
+            return
+        }
+        if let existing = lastBoardMessage, !existing.isEmpty {
+            lastBoardMessage = existing + "\n" + boardMessage
+        } else {
+            lastBoardMessage = boardMessage
+        }
+        if let severity = outcome.boardMessageSeverity {
+            if severity == .warning || lastBoardMessageSeverity != .warning {
+                lastBoardMessageSeverity = severity
+            }
+        }
     }
 
     private func shouldEnableSystemRealArtifactVerificationBoardHook() -> Bool {
@@ -9116,8 +9164,20 @@ final class KanbanBoardViewModel: ObservableObject {
         completedPasses: Int,
         wasCancelled: Bool
     ) {
+        guard Thread.isMainThread else {
+            runOnMain { [weak self] in
+                self?.emitBoardRunFinishedHook(
+                    flow: flow,
+                    totalStarted: totalStarted,
+                    completedPasses: completedPasses,
+                    wasCancelled: wasCancelled
+                )
+            }
+            return
+        }
         let shouldRunViaSystemHook = hasEnabledSystemRealArtifactVerificationBoardHook()
         let deferredVerification = shouldRunViaSystemHook ? nil : runDeferredRealArtifactVerificationIfNeeded()
+        applyDeferredRealArtifactVerificationBoardMessage(deferredVerification)
         var inputs: [String: String] = [
             "flow": flow,
             "totalStarted": String(totalStarted),
@@ -9136,9 +9196,25 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
-    private func runRealArtifactVerification(for _: WorkTask) -> RealArtifactVerificationResult {
-        let policy = executionRealArtifactVerificationPolicy
-        let boardScopedProjectsPath = resolvedBoardScopedProjectsDirectoryPath()
+    private func runRealArtifactVerification(for task: WorkTask) -> RealArtifactVerificationResult {
+        let context = readOnMain { [self] in
+            (
+                policy: self.executionRealArtifactVerificationPolicy,
+                boardScopedProjectsPath: self.resolvedBoardScopedProjectsDirectoryPath()
+            )
+        }
+        return runRealArtifactVerification(
+            for: task,
+            policy: context.policy,
+            boardScopedProjectsPath: context.boardScopedProjectsPath
+        )
+    }
+
+    private func runRealArtifactVerification(
+        for _: WorkTask,
+        policy: ExecutionRealArtifactVerificationPolicy,
+        boardScopedProjectsPath: String
+    ) -> RealArtifactVerificationResult {
         let boardScopedProjectsURL = URL(fileURLWithPath: boardScopedProjectsPath, isDirectory: true)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: boardScopedProjectsPath, isDirectory: &isDirectory),
