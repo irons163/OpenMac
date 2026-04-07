@@ -688,3 +688,5 @@
 "PM brainstorm failed: %@" = "Falló la lluvia de ideas PM: %@";
 "PM Brainstorm Agent" = "Agente de lluvia de ideas PM";
 "PM Brainstorm: %@" = "Lluvia de ideas PM: %@";
+"Google Stitch UI Generator" = "Google Stitch UI Generator";
+"Generate a polished UI direction and ready-to-use Stitch prompt from your project brief." = "Generate a polished UI direction and ready-to-use Stitch prompt from your project brief.";

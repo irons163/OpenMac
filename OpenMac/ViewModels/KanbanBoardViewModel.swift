@@ -5141,22 +5141,36 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     private func systemPMExtensionCommands(slot normalizedFilter: String) -> [PMExtensionCommandDescriptor] {
-        let command = PMExtensionCommandDescriptor(
-            id: "\(Self.systemExtensionPluginID).\(Self.systemRealArtifactVerifyCommandID)",
-            pluginID: Self.systemExtensionPluginID,
-            pluginName: Self.systemExtensionPluginName,
-            commandID: Self.systemRealArtifactVerifyCommandID,
-            title: "Real Artifact Verify (System)",
-            subtitle: "Run built-in install verification checks",
-            slots: [Self.extensionCommandMarketplacePanelSlot],
-            permissions: [],
-            timeoutSeconds: nil,
-            entrypoint: nil
-        )
-        if !normalizedFilter.isEmpty, !command.slots.contains(normalizedFilter) {
-            return []
+        let commands: [PMExtensionCommandDescriptor] = [
+            PMExtensionCommandDescriptor(
+                id: "\(Self.systemExtensionPluginID).\(Self.systemRealArtifactVerifyCommandID)",
+                pluginID: Self.systemExtensionPluginID,
+                pluginName: Self.systemExtensionPluginName,
+                commandID: Self.systemRealArtifactVerifyCommandID,
+                title: "Real Artifact Verify (System)",
+                subtitle: "Run built-in install verification checks",
+                slots: [Self.extensionCommandMarketplacePanelSlot],
+                permissions: [],
+                timeoutSeconds: nil,
+                entrypoint: nil
+            ),
+            PMExtensionCommandDescriptor(
+                id: "\(Self.systemExtensionPluginID).\(Self.systemGoogleStitchGenerateCommandID)",
+                pluginID: Self.systemExtensionPluginID,
+                pluginName: Self.systemExtensionPluginName,
+                commandID: Self.systemGoogleStitchGenerateCommandID,
+                title: "Generate Stitch UI Prompt",
+                subtitle: "Create a polished UI direction and Stitch-ready prompt",
+                slots: [Self.extensionCommandPlannerPanelSlot],
+                permissions: [],
+                timeoutSeconds: nil,
+                entrypoint: nil
+            )
+        ]
+        if normalizedFilter.isEmpty {
+            return commands
         }
-        return [command]
+        return commands.filter { $0.slots.contains(normalizedFilter) }
     }
 
     func pmToolbarExtensionCommands() -> [PMExtensionCommandDescriptor] {
@@ -5453,7 +5467,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private func executeSystemPMExtensionCommand(
         _ descriptor: PMExtensionCommandDescriptor,
         task: WorkTask?,
-        extensionInputs _: [String: String]
+        extensionInputs: [String: String]
     ) -> PMExtensionCommandExecutionOutcome {
         switch descriptor.commandID.lowercased() {
         case Self.systemRealArtifactVerifyCommandID:
@@ -5495,6 +5509,20 @@ final class KanbanBoardViewModel: ObservableObject {
                 detail: detail,
                 outputSummary: Self.summarizedExtensionOutput(detail),
                 error: nil
+            )
+        case Self.systemGoogleStitchGenerateCommandID:
+            let output = Self.generateGoogleStitchPrompt(from: extensionInputs)
+            let integration = Self.runGoogleStitchExternalCommandIfConfigured(
+                output: output,
+                environment: ProcessInfo.processInfo.environment
+            )
+            let detail = integration?.message ?? output.prompt
+            return PMExtensionCommandExecutionOutcome(
+                succeeded: integration?.succeeded ?? true,
+                responseMessage: detail,
+                detail: detail,
+                outputSummary: Self.summarizedExtensionOutput(detail),
+                error: integration?.succeeded == false ? detail : nil
             )
         default:
             let detail = "Unsupported system command: \(descriptor.commandID)"
@@ -6737,11 +6765,19 @@ final class KanbanBoardViewModel: ObservableObject {
         let hasBrainstormComponent = localExtensions.contains {
             Self.normalizedPMPlannerComponentType($0.componentType) == Self.pmPlannerBrainstormComponent
         }
-        if hasBrainstormComponent {
-            return localExtensions
+        let hasStitchComponent = localExtensions.contains {
+            Self.normalizedPMPlannerComponentType($0.componentType) == Self.pmPlannerStitchComponent
         }
 
-        return (localExtensions + [Self.builtInBrainstormPMPlannerExtension(slot: slot)]).sorted {
+        var combined = localExtensions
+        if !hasBrainstormComponent {
+            combined.append(Self.builtInBrainstormPMPlannerExtension(slot: slot))
+        }
+        if !hasStitchComponent {
+            combined.append(Self.builtInGoogleStitchPMPlannerExtension(slot: slot))
+        }
+
+        return combined.sorted {
             if $0.priority == $1.priority {
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
@@ -7398,11 +7434,28 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    private static func builtInGoogleStitchPMPlannerExtension(slot: String) -> PMPlannerUIExtensionDescriptor {
+        PMPlannerUIExtensionDescriptor(
+            id: "openmac.system.google-stitch",
+            pluginID: systemExtensionPluginID,
+            pluginName: systemExtensionPluginName,
+            slot: slot,
+            title: L10n.string("Google Stitch UI Generator"),
+            subtitle: L10n.string("Generate a polished UI direction and ready-to-use Stitch prompt from your project brief."),
+            componentType: pmPlannerStitchComponent,
+            priority: -95,
+            source: .builtIn,
+            uiSchema: defaultGoogleStitchPMPlannerUISchema()
+        )
+    }
+
     private static func normalizedPMPlannerComponentType(_ rawValue: String) -> String {
         let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
         case "brainstorm", "brainstorm.v1", "pm.brainstorm.v1":
             return pmPlannerBrainstormComponent
+        case "stitch", "stitch.v1", "pm.stitch.v1", "google.stitch.v1":
+            return pmPlannerStitchComponent
         case "form", "form.v1", "pm.form.v1":
             return "form.v1"
         default:
@@ -7421,6 +7474,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let systemExtensionPluginID = "openmac.system"
     private static let systemExtensionPluginName = "OpenMac System"
     private static let systemRealArtifactVerifyCommandID = "system.real-artifact-verify"
+    private static let systemGoogleStitchGenerateCommandID = "system.google-stitch.generate"
     private static let extensionE2EToolbarCommandID = "toolbar-probe"
     private static let extensionE2EHookCommandID = "hook-probe"
     private static let extensionE2EKanbanToolbarCommandID = "kanban-toolbar-probe"
@@ -7430,6 +7484,7 @@ final class KanbanBoardViewModel: ObservableObject {
     private static let extensionCommandDefaultTimeoutSeconds = 45
     private static let extensionCommandMaxTimeoutSeconds = 300
     private static let pmPlannerBrainstormComponent = "brainstorm.v1"
+    private static let pmPlannerStitchComponent = "stitch.v1"
     private static let pmPlannerUIFieldFocusInput = "focus.input"
     private static let pmPlannerUIFieldStatusText = "status.text"
     private static let pmPlannerUIFieldTranscriptOutput = "transcript.output"
@@ -8058,6 +8113,160 @@ final class KanbanBoardViewModel: ObservableObject {
         return trimmed
     }
 
+    private struct GoogleStitchPromptOutput {
+        let prompt: String
+        let summary: String
+    }
+
+    private struct GoogleStitchExternalCommandResult {
+        let succeeded: Bool
+        let message: String
+    }
+
+    private static func generateGoogleStitchPrompt(from extensionInputs: [String: String]) -> GoogleStitchPromptOutput {
+        let projectBrief = extensionInputs["projectBrief"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let productContext = extensionInputs["productContext"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let platform = extensionInputs["targetPlatform"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let visualStyle = extensionInputs["visualStyle"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let colorDirection = extensionInputs["colorDirection"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let typographyDirection = extensionInputs["typographyDirection"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let motionLevel = extensionInputs["motionLevel"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let accessibilityNotes = extensionInputs["accessibilityNotes"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let uiNotes = extensionInputs["uiNotes"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawProjectName = extensionInputs["projectName"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedProjectName = rawProjectName.lowercased()
+
+        let effectiveProjectName: String
+        if rawProjectName.isEmpty ||
+            normalizedProjectName == "openmac" ||
+            normalizedProjectName == "openmac system" {
+            effectiveProjectName = "OpenMac Project"
+        } else {
+            effectiveProjectName = rawProjectName
+        }
+        let effectivePlatform = platform.isEmpty ? "macOS + iOS + iPadOS" : platform
+        let effectiveVisualStyle = visualStyle.isEmpty
+            ? "Contemporary, confident, product-grade interface with clear hierarchy."
+            : visualStyle
+        let effectiveColorDirection = colorDirection.isEmpty
+            ? "Balanced, high-contrast palette with semantic status colors and restrained accents."
+            : colorDirection
+        let effectiveTypographyDirection = typographyDirection.isEmpty
+            ? "Readable, modern UI typography with strong headings and compact body text rhythm."
+            : typographyDirection
+        let effectiveMotionLevel = motionLevel.isEmpty
+            ? "Subtle and meaningful transitions only (state change, list updates, and panel transitions)."
+            : motionLevel
+        let effectiveAccessibility = accessibilityNotes.isEmpty
+            ? "Meet contrast requirements, keyboard navigation, and clear focus states."
+            : accessibilityNotes
+
+        let effectiveProductContext: String
+        if !productContext.isEmpty {
+            effectiveProductContext = productContext
+        } else if !projectBrief.isEmpty {
+            effectiveProductContext = projectBrief
+        } else {
+            effectiveProductContext = "A productivity-focused app with Kanban workflow, multi-agent orchestration, and execution observability."
+        }
+
+        var promptSections: [String] = []
+        promptSections.append("Design a polished app UI concept for \"\(effectiveProjectName)\".")
+        promptSections.append("Platform scope: \(effectivePlatform)")
+        promptSections.append("Product context:\n\(effectiveProductContext)")
+        promptSections.append("Visual style direction:\n\(effectiveVisualStyle)")
+        promptSections.append("Color direction:\n\(effectiveColorDirection)")
+        promptSections.append("Typography direction:\n\(effectiveTypographyDirection)")
+        promptSections.append("Motion direction:\n\(effectiveMotionLevel)")
+        promptSections.append("Accessibility bar:\n\(effectiveAccessibility)")
+        if !uiNotes.isEmpty {
+            promptSections.append("Additional UI notes:\n\(uiNotes)")
+        }
+        promptSections.append(
+            """
+            Expected output:
+            1) High-level visual concept and rationale.
+            2) Key screens (overview, primary workflow, details).
+            3) Reusable component system (buttons, cards, list items, status indicators).
+            4) Responsive behavior across supported platforms.
+            5) A concise style guide (spacing, radius, elevation, icon style, motion principles).
+            """
+        )
+        let prompt = promptSections.joined(separator: "\n\n")
+        let summary = "Generated Stitch UI prompt for \(effectiveProjectName) (\(effectivePlatform))."
+        return GoogleStitchPromptOutput(prompt: prompt, summary: summary)
+    }
+
+    private static func runGoogleStitchExternalCommandIfConfigured(
+        output: GoogleStitchPromptOutput,
+        environment: [String: String]
+    ) -> GoogleStitchExternalCommandResult? {
+        let configuredCommand = environment["OPENMAC_GOOGLE_STITCH_COMMAND"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !configuredCommand.isEmpty else { return nil }
+
+        let payload: [String: Any] = [
+            "prompt": output.prompt,
+            "summary": output.summary
+        ]
+        guard let payloadData = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
+              let payloadJSON = String(data: payloadData, encoding: .utf8) else {
+            return GoogleStitchExternalCommandResult(
+                succeeded: false,
+                message: "Failed to encode Stitch payload JSON"
+            )
+        }
+
+        let homePath = environment["HOME"] ?? NSHomeDirectory()
+        do {
+            let result = try runShellCommand(
+                configuredCommand,
+                workingDirectoryPath: homePath,
+                stdin: payloadJSON,
+                timeoutSeconds: 90,
+                environment: environment
+            )
+            if result.timedOut {
+                return GoogleStitchExternalCommandResult(
+                    succeeded: false,
+                    message: "Google Stitch command timed out in 90s"
+                )
+            }
+            if result.code != 0 {
+                let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                    : result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let failure = detail.isEmpty ? "exit \(result.code)" : detail
+                return GoogleStitchExternalCommandResult(
+                    succeeded: false,
+                    message: "Google Stitch command failed: \(failure)"
+                )
+            }
+            let stdout = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolved = decodedPMExtensionCommandResponseMessage(from: stdout)
+                ?? output.prompt
+            return GoogleStitchExternalCommandResult(
+                succeeded: true,
+                message: resolved
+            )
+        } catch {
+            return GoogleStitchExternalCommandResult(
+                succeeded: false,
+                message: "Google Stitch command failed to launch: \(error.localizedDescription)"
+            )
+        }
+    }
+
     private static func defaultBrainstormPMPlannerUISchema() -> PMPlannerUIExtensionSchema {
         PMPlannerUIExtensionSchema(
             fields: [
@@ -8111,6 +8320,84 @@ final class KanbanBoardViewModel: ObservableObject {
                     id: pmPlannerUIActionClear,
                     title: L10n.string("Clear Brainstorm"),
                     commandID: nil
+                )
+            ]
+        )
+    }
+
+    private static func defaultGoogleStitchPMPlannerUISchema() -> PMPlannerUIExtensionSchema {
+        PMPlannerUIExtensionSchema(
+            fields: [
+                PMPlannerUIExtensionField(
+                    id: "targetPlatform",
+                    type: "text.input",
+                    label: "Target Platform",
+                    placeholder: "macOS / iOS / iPadOS / web",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "visualStyle",
+                    type: "multiline.input",
+                    label: "Visual Style",
+                    placeholder: "Clean, modern, energetic, premium, playful...",
+                    minHeight: 70,
+                    maxHeight: 120
+                ),
+                PMPlannerUIExtensionField(
+                    id: "colorDirection",
+                    type: "text.input",
+                    label: "Color Direction",
+                    placeholder: "e.g. warm neutral base + vivid action accents",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "typographyDirection",
+                    type: "text.input",
+                    label: "Typography Direction",
+                    placeholder: "e.g. bold headings + compact readable body",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "motionLevel",
+                    type: "text.input",
+                    label: "Motion Level",
+                    placeholder: "subtle / medium / expressive",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "accessibilityNotes",
+                    type: "text.input",
+                    label: "Accessibility Notes",
+                    placeholder: "contrast, keyboard nav, screen reader constraints...",
+                    minHeight: nil,
+                    maxHeight: nil
+                ),
+                PMPlannerUIExtensionField(
+                    id: "uiNotes",
+                    type: "multiline.input",
+                    label: "Additional UI Notes",
+                    placeholder: "Special component ideas, layouts, and constraints...",
+                    minHeight: 90,
+                    maxHeight: 150
+                ),
+                PMPlannerUIExtensionField(
+                    id: "stitchPrompt",
+                    type: "multiline.input",
+                    label: "Generated Stitch Prompt",
+                    placeholder: "Run Generate Stitch Prompt to fill this field.",
+                    minHeight: 150,
+                    maxHeight: 240
+                )
+            ],
+            actions: [
+                PMPlannerUIExtensionAction(
+                    id: "command:\(systemGoogleStitchGenerateCommandID)",
+                    title: "Generate Stitch Prompt",
+                    commandID: systemGoogleStitchGenerateCommandID
                 )
             ]
         )

@@ -895,7 +895,14 @@ struct ContentView: View {
                 onApplyBrainstormGenerateAndCreate: applyPMBrainstormGenerateAndCreateTicketsFromSheet,
                 onClearBrainstorm: clearPMBrainstormFromSheet,
                 onRunPlannerCommand: { command, inputs in
-                    runPMExtensionCommand(command, extensionInputs: inputs)
+                    runPMExtensionCommand(command, extensionInputs: inputs) { succeeded, detail in
+                        guard succeeded else { return }
+                        applyPlannerExtensionCommandOutputIfNeeded(
+                            command: command,
+                            extensionInputs: inputs,
+                            detail: detail
+                        )
+                    }
                 },
                 onGeneratePlan: generatePMPlanFromSheet,
                 onGenerateTestPlan: generatePMTestPlanFromSheet,
@@ -2184,19 +2191,55 @@ struct ContentView: View {
     private func runPMExtensionCommand(
         _ command: PMExtensionCommandDescriptor,
         task: WorkTask? = nil,
-        extensionInputs: [String: String] = [:]
+        extensionInputs: [String: String] = [:],
+        completion: ((Bool, String?) -> Void)? = nil
     ) {
         if runningExtensionCommandIDs.contains(command.id) {
             return
         }
+        let startedAt = Date()
         runningExtensionCommandIDs.insert(command.id)
         viewModel.runPMExtensionCommandInBackground(
             command,
             task: task,
             extensionInputs: extensionInputs
-        ) { _ in
+        ) { succeeded in
             runningExtensionCommandIDs.remove(command.id)
+            completion?(succeeded, latestPMExtensionCommandDetail(command: command, startedAt: startedAt))
         }
+    }
+
+    private func latestPMExtensionCommandDetail(
+        command: PMExtensionCommandDescriptor,
+        startedAt: Date
+    ) -> String? {
+        pmExtensionActivityLog
+            .reversed()
+            .first { entry in
+                entry.pluginID.caseInsensitiveCompare(command.pluginID) == .orderedSame &&
+                    (entry.commandID ?? "").caseInsensitiveCompare(command.commandID) == .orderedSame &&
+                    entry.timestamp >= startedAt &&
+                    (entry.outcome == .succeeded || entry.outcome == .failed)
+            }?
+            .detail
+    }
+
+    private func applyPlannerExtensionCommandOutputIfNeeded(
+        command: PMExtensionCommandDescriptor,
+        extensionInputs: [String: String],
+        detail: String?
+    ) {
+        guard command.commandID.caseInsensitiveCompare("system.google-stitch.generate") == .orderedSame else {
+            return
+        }
+        let trimmedDetail = (detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDetail.isEmpty else { return }
+        guard let descriptorID = extensionInputs["_openmacExtensionDescriptorID"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !descriptorID.isEmpty else {
+            return
+        }
+        pmPlannerExtensionFieldValues["\(descriptorID)::stitchPrompt"] = trimmedDetail
     }
 
     private func applyMCPSettingsFromSheet() {
@@ -5813,6 +5856,7 @@ fileprivate enum PMPlanningEngineSource {
 
 private enum PMPlannerExtensionComponentType: String {
     case brainstormV1 = "brainstorm.v1"
+    case stitchV1 = "stitch.v1"
     case formV1 = "form.v1"
 
     static func resolve(_ rawValue: String) -> PMPlannerExtensionComponentType? {
@@ -5820,6 +5864,8 @@ private enum PMPlannerExtensionComponentType: String {
         switch normalized {
         case "brainstorm", "brainstorm.v1", "pm.brainstorm.v1":
             return .brainstormV1
+        case "stitch", "stitch.v1", "pm.stitch.v1", "google.stitch.v1":
+            return .stitchV1
         case "form", "form.v1", "pm.form.v1":
             return .formV1
         default:
@@ -5935,6 +5981,9 @@ private struct PMPlannerExtensionsHostView: View {
         if PMPlannerExtensionComponentType.resolve(descriptor.componentType) == .brainstormV1 {
             return Self.defaultBrainstormSchema
         }
+        if PMPlannerExtensionComponentType.resolve(descriptor.componentType) == .stitchV1 {
+            return Self.defaultStitchSchema
+        }
         return nil
     }
 
@@ -5980,6 +6029,50 @@ private struct PMPlannerExtensionsHostView: View {
                 id: PMPlannerExtensionActionID.clear.rawValue,
                 title: L10n.string("Clear Brainstorm"),
                 commandID: nil
+            )
+        ]
+    )
+
+    private static let defaultStitchSchema = PMPlannerUIExtensionSchema(
+        fields: [
+            PMPlannerUIExtensionField(
+                id: "targetPlatform",
+                type: PMPlannerExtensionFieldType.textInput.rawValue,
+                label: "Target Platform",
+                placeholder: "macOS / iOS / iPadOS / web",
+                minHeight: nil,
+                maxHeight: nil
+            ),
+            PMPlannerUIExtensionField(
+                id: "visualStyle",
+                type: PMPlannerExtensionFieldType.multilineInput.rawValue,
+                label: "Visual Style",
+                placeholder: "Clean, modern, energetic, premium, playful...",
+                minHeight: 70,
+                maxHeight: 120
+            ),
+            PMPlannerUIExtensionField(
+                id: "uiNotes",
+                type: PMPlannerExtensionFieldType.multilineInput.rawValue,
+                label: "Additional UI Notes",
+                placeholder: "Special component ideas, layouts, and constraints...",
+                minHeight: 90,
+                maxHeight: 150
+            ),
+            PMPlannerUIExtensionField(
+                id: "stitchPrompt",
+                type: PMPlannerExtensionFieldType.multilineInput.rawValue,
+                label: "Generated Stitch Prompt",
+                placeholder: "Run Generate Stitch Prompt to fill this field.",
+                minHeight: 150,
+                maxHeight: 240
+            )
+        ],
+        actions: [
+            PMPlannerUIExtensionAction(
+                id: "command:system.google-stitch.generate",
+                title: "Generate Stitch Prompt",
+                commandID: "system.google-stitch.generate"
             )
         ]
     )
@@ -6173,6 +6266,9 @@ private struct PMPlannerManifestExtensionCard: View {
         }
         payload["projectBrief"] = projectBrief
         payload["projectName"] = descriptor.pluginName
+        payload["_openmacExtensionDescriptorID"] = descriptor.id
+        payload["_openmacExtensionPluginID"] = descriptor.pluginID
+        payload["_openmacExtensionComponentType"] = descriptor.componentType
         return payload
     }
 

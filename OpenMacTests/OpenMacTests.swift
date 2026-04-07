@@ -3131,6 +3131,27 @@ struct KanbanFlowTests {
         #expect(!details.contains("Source brief: line1\nline2"))
     }
 
+    @Test("pm planner deduplicates source brief across generated tickets")
+    func pmPlannerDeduplicatesSourceBriefAcrossTickets() {
+        let planner = RuleBasedProjectPlanner()
+
+        guard let plan = planner.generatePlan(
+            projectName: "Repeat Brief",
+            projectBrief: """
+            Build a cross-platform memo app with fast capture, search, and sync.
+            Ensure release checklist and testing discipline are included.
+            """,
+            availableAgents: []
+        ) else {
+            Issue.record("Expected planner to return a plan")
+            return
+        }
+
+        let sourceBriefTickets = plan.tickets.filter { $0.details.contains("Source brief:") }
+        #expect(sourceBriefTickets.count == 1)
+        #expect(plan.tickets.dropFirst().contains { $0.details.contains("Brief ref: see ") })
+    }
+
     @Test("pm planner adds risk spike ticket for high complexity briefs")
     func pmPlannerAddsRiskSpikeForHighComplexity() {
         let planner = RuleBasedProjectPlanner()
@@ -4685,6 +4706,73 @@ struct KanbanSupportTypeTests {
         #expect(plan?.summary.contains("Planning engine: Demo Plugin") == true)
     }
 
+    @Test("extensible planner compacts repeated source brief lines from plugin output")
+    func extensiblePlannerCompactsRepeatedSourceBriefInPluginTickets() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let pluginDir = root.appendingPathComponent("demo-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+
+        let manifest = """
+        {
+          "id": "com.example.demo.compact",
+          "name": "Compact Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """
+        try manifest.data(using: .utf8)?.write(to: pluginDir.appendingPathComponent("plugin.json"))
+
+        let repeatedSourceBrief = "Source brief: Build memo app with capture, search, sync, release, and testing."
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (
+                    0,
+                    """
+                    {
+                      "projectName": "Plugin Plan",
+                      "summary": "Plugin summary",
+                      "tickets": [
+                        {
+                          "title": "Plugin Plan · Scope",
+                          "details": "Clarify scope.\\n\(repeatedSourceBrief)\\nAcceptance:\\nDepends on: none",
+                          "requiredSkills": ["planning"],
+                          "storyPoints": 2
+                        },
+                        {
+                          "title": "Plugin Plan · Build",
+                          "details": "Build features.\\n\(repeatedSourceBrief)\\nAcceptance:\\nDepends on: Plugin Plan · Scope",
+                          "requiredSkills": ["swiftui"],
+                          "storyPoints": 3
+                        }
+                      ]
+                    }
+                    """,
+                    ""
+                )
+            }
+        )
+
+        let plan = planner.generatePlan(
+            projectName: "Ignored",
+            projectBrief: "brief",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(
+                autoDiscoverLocalPlugins: true,
+                pluginsDirectoryPath: root.path
+            )
+        )
+
+        #expect(plan?.tickets.filter { $0.details.contains("Source brief:") }.count == 1)
+        #expect(plan?.tickets.contains { $0.details.contains("Brief ref: see Plugin Plan · Scope") } == true)
+    }
+
     @Test("extensible planner discovers plugin when policy path points to plugin folder directly")
     func extensiblePlannerDiscoversPluginAtRootPath() throws {
         let fileManager = FileManager.default
@@ -4892,6 +4980,62 @@ struct KanbanSupportTypeTests {
         let extensions = viewModel.pmPlannerExtensions()
         #expect(extensions.contains(where: { $0.id == "com.example.brainstorm.brainstorm" }))
         #expect(!extensions.contains(where: { $0.source == .builtIn && $0.componentType == "brainstorm.v1" }))
+        #expect(extensions.contains(where: { $0.source == .builtIn && $0.componentType == "stitch.v1" }))
+    }
+
+    @Test("PM planner extensions include built-in Stitch fallback")
+    func pmPlannerExtensionsIncludeBuiltInStitchFallback() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let extensions = viewModel.pmPlannerExtensions()
+        let hasBuiltInStitch = extensions.contains(where: {
+            $0.source == .builtIn && $0.componentType == "stitch.v1"
+        })
+        let hasStitchCommandAction = extensions
+            .first(where: { $0.source == .builtIn && $0.componentType == "stitch.v1" })?
+            .uiSchema?
+            .actions
+            .contains(where: { $0.commandID == "system.google-stitch.generate" }) == true
+        #expect(hasBuiltInStitch)
+        #expect(hasStitchCommandAction)
+    }
+
+    @Test("PM planner extensions hide built-in Stitch when plugin provides stitch component")
+    func pmPlannerExtensionsPreferPluginStitchWhenAvailable() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("stitch-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.stitch",
+          "name": "Plugin Stitch",
+          "enabled": true,
+          "uiExtensions": [
+            {
+              "id": "stitch",
+              "slot": "pm.planner",
+              "title": "Plugin Stitch",
+              "component": "stitch.v1",
+              "priority": 90,
+              "enabled": true
+            }
+          ]
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+
+        let extensions = viewModel.pmPlannerExtensions()
+        #expect(extensions.contains(where: { $0.id == "com.example.stitch.stitch" }))
+        #expect(!extensions.contains(where: { $0.source == .builtIn && $0.componentType == "stitch.v1" }))
     }
 
     @Test("PM planner extension UI schema is parsed from plugin manifest")
@@ -5479,6 +5623,50 @@ struct KanbanSupportTypeTests {
                 entry.outcome == .succeeded
         })
         #expect(hasSucceededSystemHook)
+    }
+
+    @Test("system Google Stitch command is available in PM planner panel")
+    func systemGoogleStitchCommandAppearsInPlannerPanel() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannerCommands = viewModel.pmPlannerPanelExtensionCommands()
+        #expect(plannerCommands.contains(where: {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.google-stitch.generate"
+        }))
+    }
+
+    @Test("system Google Stitch command generates prompt output")
+    func systemGoogleStitchCommandGeneratesPromptOutput() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        guard let stitchCommand = viewModel.pmPlannerPanelExtensionCommands().first(where: {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.google-stitch.generate"
+        }) else {
+            #expect(Bool(false), "Missing system Google Stitch command")
+            return
+        }
+
+        let succeeded = viewModel.runPMExtensionCommand(
+            stitchCommand,
+            extensionInputs: [
+                "projectBrief": "YouBike app for bike station map and unlock flow",
+                "targetPlatform": "iOS + iPadOS",
+                "visualStyle": "Friendly mobility-first design"
+            ]
+        )
+        #expect(succeeded)
+        #expect(viewModel.lastBoardMessage?.contains("Design a polished app UI concept") == true)
+        let hasSucceededActivity = viewModel.pmExtensionActivityLog.contains(where: {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.google-stitch.generate" &&
+                $0.outcome == .succeeded
+        })
+        #expect(hasSucceededActivity)
     }
 
     @Test("Update all marketplace sources installs each source")

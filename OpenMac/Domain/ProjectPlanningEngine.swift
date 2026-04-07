@@ -60,6 +60,106 @@ struct PMProjectBlueprint: Equatable, Codable {
     var tickets: [PMPlannedTicket]
 }
 
+private enum PMSourceBriefSanitizer {
+    private static let sourceBriefPrefix = "source brief:"
+    private static let maxSourceBriefLength = 220
+
+    static func compact(plan: PMProjectPlan) -> PMProjectPlan {
+        guard !plan.tickets.isEmpty else { return plan }
+        var normalizedPlan = plan
+        var sourceBriefKeyByTicketIndex: [Int: String] = [:]
+
+        for index in normalizedPlan.tickets.indices {
+            let normalized = normalizedDetailsWithCompactSourceBrief(
+                normalizedPlan.tickets[index].details
+            )
+            normalizedPlan.tickets[index].details = normalized.details
+            if let key = normalized.sourceBriefKey {
+                sourceBriefKeyByTicketIndex[index] = key
+            }
+        }
+
+        let groupedBySourceBrief = Dictionary(grouping: sourceBriefKeyByTicketIndex.keys) { index in
+            sourceBriefKeyByTicketIndex[index] ?? ""
+        }
+
+        for (_, indexes) in groupedBySourceBrief where indexes.count > 1 {
+            let sortedIndexes = indexes.sorted()
+            guard let keeperIndex = sortedIndexes.first else { continue }
+            let referenceTitle = normalizedPlan.tickets[keeperIndex]
+                .title
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !referenceTitle.isEmpty else { continue }
+
+            for index in sortedIndexes.dropFirst() {
+                normalizedPlan.tickets[index].details = replacingFirstSourceBriefLine(
+                    in: normalizedPlan.tickets[index].details,
+                    with: "Brief ref: see \(referenceTitle)"
+                )
+            }
+        }
+
+        return normalizedPlan
+    }
+
+    private static func normalizedDetailsWithCompactSourceBrief(_ details: String) -> (details: String, sourceBriefKey: String?) {
+        let lines = details.components(separatedBy: "\n")
+        guard !lines.isEmpty else { return (details, nil) }
+        var normalizedLines = lines
+        var normalizedSourceBriefKey: String?
+
+        for (lineIndex, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(sourceBriefPrefix) else { continue }
+            let sourceBriefValue = sourceBriefValueFromLine(trimmed)
+            guard !sourceBriefValue.isEmpty else { break }
+
+            let compactedValue = compactWhitespace(sourceBriefValue)
+            let truncatedValue = truncated(compactedValue, limit: maxSourceBriefLength)
+            let indentation = String(line.prefix { $0 == " " || $0 == "\t" })
+            normalizedLines[lineIndex] = "\(indentation)Source brief: \(truncatedValue)"
+            normalizedSourceBriefKey = compactedValue.lowercased()
+            break
+        }
+
+        return (normalizedLines.joined(separator: "\n"), normalizedSourceBriefKey)
+    }
+
+    private static func sourceBriefValueFromLine(_ line: String) -> String {
+        guard let separatorRange = line.range(of: ":", options: .caseInsensitive) else { return "" }
+        let suffix = line[separatorRange.upperBound...]
+        return String(suffix).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func replacingFirstSourceBriefLine(in details: String, with replacement: String) -> String {
+        let lines = details.components(separatedBy: "\n")
+        guard !lines.isEmpty else { return details }
+        var updated = lines
+
+        for (lineIndex, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(sourceBriefPrefix) else { continue }
+            let indentation = String(line.prefix { $0 == " " || $0 == "\t" })
+            updated[lineIndex] = "\(indentation)\(replacement)"
+            return updated.joined(separator: "\n")
+        }
+        return details
+    }
+
+    private static func compactWhitespace(_ text: String) -> String {
+        text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func truncated(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let index = text.index(text.startIndex, offsetBy: max(0, limit))
+        return String(text[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+}
+
 protocol ProjectPlanning {
     func generatePlan(
         projectName: String,
@@ -213,10 +313,12 @@ struct RuleBasedProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning {
         Focus: scope, architecture, implementation, quality, and release.
         """
 
-        return PMProjectPlan(
+        return PMSourceBriefSanitizer.compact(
+            plan: PMProjectPlan(
             projectName: resolvedProjectName,
             summary: summary,
             tickets: tickets
+            )
         )
     }
 
@@ -523,11 +625,14 @@ struct ExtensibleProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning, Conf
         projectBrief: String,
         availableAgents: [AgentProfile]
     ) -> PMProjectPlan? {
-        fallbackPlanner.generatePlan(
+        guard let plan = fallbackPlanner.generatePlan(
             projectName: projectName,
             projectBrief: projectBrief,
             availableAgents: availableAgents
-        )
+        ) else {
+            return nil
+        }
+        return PMSourceBriefSanitizer.compact(plan: plan)
     }
 
     func generateBlueprint(
@@ -551,11 +656,14 @@ struct ExtensibleProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning, Conf
     ) -> PMProjectPlan? {
         switch mode {
         case .builtIn:
-            return fallbackPlanner.generatePlan(
+            guard let plan = fallbackPlanner.generatePlan(
                 projectName: projectName,
                 projectBrief: projectBrief,
                 availableAgents: availableAgents
-            )
+            ) else {
+                return nil
+            }
+            return PMSourceBriefSanitizer.compact(plan: plan)
         case .brainstormPluginPreferred:
             if let pluginPlan = runLocalBrainstormPlugin(
                 projectName: projectName,
@@ -563,7 +671,7 @@ struct ExtensibleProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning, Conf
                 availableAgents: availableAgents,
                 pluginPolicy: pluginPolicy
             ) {
-                return pluginPlan
+                return PMSourceBriefSanitizer.compact(plan: pluginPlan)
             }
 
             guard let basePlan = fallbackPlanner.generatePlan(
@@ -573,9 +681,11 @@ struct ExtensibleProjectPlanner: ProjectPlanning, ProjectBlueprintPlanning, Conf
             ) else {
                 return nil
             }
-            return builtInBrainstormPlan(
-                basePlan: basePlan,
-                projectBrief: projectBrief
+            return PMSourceBriefSanitizer.compact(
+                plan: builtInBrainstormPlan(
+                    basePlan: basePlan,
+                    projectBrief: projectBrief
+                )
             )
         }
     }

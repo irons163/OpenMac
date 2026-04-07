@@ -97,7 +97,7 @@ Optional:
 - `title` (string, optional): card title.
 - `subtitle` (string, optional): helper text under title.
 - `component` (string, required): UI component type.
-  - Current supported values: `brainstorm.v1`, `form.v1`
+  - Current supported values: `brainstorm.v1`, `stitch.v1`, `form.v1`
 - `ui` (object, optional): manifest-driven UI schema for this card.
   - `fields` (array, optional):
     - `id` (string, optional)
@@ -115,6 +115,7 @@ Optional:
 - `enabled` (boolean, optional, default `true`).
 
 If no local `brainstorm.v1` extension is found, OpenMac inserts a built-in brainstorm extension as fallback.
+If no local `stitch.v1` extension is found, OpenMac inserts a built-in Google Stitch prompt generator as fallback.
 
 ## `commands` fields
 

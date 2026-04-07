@@ -69,6 +69,14 @@ Default extension folder:
 
 Alias values are normalized by OpenMac (for compatibility), but use the canonical values above.
 
+## PM Planner Component Types
+
+- `brainstorm.v1`: built-in brainstorm style card fields/actions.
+- `stitch.v1`: Google Stitch-style prompt workflow card for UI direction generation.
+- `form.v1`: generic manifest-driven planner form card.
+
+If no local `brainstorm.v1` or `stitch.v1` extension is detected, OpenMac injects built-in fallback cards.
+
 ## Runtime Safety Rules
 
 - Commands support timeout (`timeoutSeconds`, max enforced by app).

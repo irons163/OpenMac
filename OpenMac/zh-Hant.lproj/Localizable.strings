@@ -687,3 +687,5 @@
 "PM brainstorm failed: %@" = "PM 腦力激盪失敗：%@";
 "PM Brainstorm Agent" = "PM 腦力激盪代理";
 "PM Brainstorm: %@" = "PM 腦力激盪：%@";
+"Google Stitch UI Generator" = "Google Stitch 介面產生器";
+"Generate a polished UI direction and ready-to-use Stitch prompt from your project brief." = "從你的專案說明產生精緻 UI 方向與可直接使用的 Stitch 提示詞。";
