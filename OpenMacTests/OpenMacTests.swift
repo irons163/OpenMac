@@ -1982,6 +1982,28 @@ struct AgentTaskExecutorTests {
         #expect(failure.output.contains("err-output"))
     }
 
+    @Test("shell command helper enforces timeout for long-running process")
+    func runShellCommandTimeoutTerminatesLongRunningProcess() throws {
+        let timedOut = try KanbanBoardViewModelTestHooks.runShellCommand(
+            command: "echo start-line; sleep 2; echo end-line",
+            timeoutSeconds: 1,
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+        #expect(timedOut.timedOut)
+        #expect(timedOut.code == -9)
+        #expect(timedOut.output.contains("start-line"))
+        #expect(!timedOut.output.contains("end-line"))
+
+        let completed = try KanbanBoardViewModelTestHooks.runShellCommand(
+            command: "echo quick-line",
+            timeoutSeconds: 2,
+            environment: ["PATH": "/usr/bin:/bin"]
+        )
+        #expect(!completed.timedOut)
+        #expect(completed.code == 0)
+        #expect(completed.output.contains("quick-line"))
+    }
+
     @Test("default initializer keeps sensible executor defaults")
     func defaultExecutorInitializerDefaults() {
         let executor = DefaultAgentTaskExecutor()

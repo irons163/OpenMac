@@ -9036,26 +9036,148 @@ final class KanbanBoardViewModel: ObservableObject {
         return orderedPaths.joined(separator: ":")
     }
 
+    private struct ShellCommandExecutionResult {
+        let code: Int32
+        let stdout: String
+        let stderr: String
+        let timedOut: Bool
+    }
+
+    private static func mergedShellOutput(stdout: String, stderr: String, trim: Bool = true) -> String {
+        let merged = [stdout, stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        if trim {
+            return merged.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return merged
+    }
+
+    private static func executeShellCommand(
+        _ command: String,
+        workingDirectoryPath: String? = nil,
+        stdin: String? = nil,
+        timeoutSeconds: Int? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> ShellCommandExecutionResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        if let workingDirectoryPath {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectoryPath, isDirectory: true)
+        }
+        process.environment = shellCommandEnvironment(environment)
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        let dataLock = NSLock()
+        var stdoutData = Data()
+        var stderrData = Data()
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            dataLock.lock()
+            stdoutData.append(chunk)
+            dataLock.unlock()
+        }
+
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            dataLock.lock()
+            stderrData.append(chunk)
+            dataLock.unlock()
+        }
+
+        let waitGroup = DispatchGroup()
+        waitGroup.enter()
+        process.terminationHandler = { _ in
+            waitGroup.leave()
+        }
+
+        try process.run()
+        if let stdinData = stdin?.data(using: .utf8), !stdinData.isEmpty {
+            stdinPipe.fileHandleForWriting.write(stdinData)
+        }
+        stdinPipe.fileHandleForWriting.closeFile()
+
+        let timedOut: Bool
+        if let timeoutSeconds {
+            let resolvedTimeout = max(1, timeoutSeconds)
+            timedOut = waitGroup.wait(timeout: .now() + .seconds(resolvedTimeout)) == .timedOut
+        } else {
+            waitGroup.wait()
+            timedOut = false
+        }
+
+        if timedOut {
+            process.terminate()
+            _ = waitGroup.wait(timeout: .now() + .seconds(2))
+        }
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        let stdoutRemainder = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrRemainder = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        dataLock.lock()
+        stdoutData.append(stdoutRemainder)
+        stderrData.append(stderrRemainder)
+        dataLock.unlock()
+
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        let code = timedOut ? -9 : process.terminationStatus
+        return ShellCommandExecutionResult(
+            code: code,
+            stdout: stdout,
+            stderr: stderr,
+            timedOut: timedOut
+        )
+    }
+
     private static func runShellCommand(
         _ command: String,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> (code: Int32, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        process.environment = shellCommandEnvironment(environment)
+        let result = try executeShellCommand(
+            command,
+            timeoutSeconds: nil,
+            environment: environment
+        )
+        return (
+            result.code,
+            mergedShellOutput(stdout: result.stdout, stderr: result.stderr)
+        )
+    }
 
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (process.terminationStatus, output)
+    private static func runShellCommand(
+        _ command: String,
+        timeoutSeconds: Int,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> (code: Int32, output: String, timedOut: Bool) {
+        let result = try executeShellCommand(
+            command,
+            timeoutSeconds: timeoutSeconds,
+            environment: environment
+        )
+        return (
+            result.code,
+            mergedShellOutput(stdout: result.stdout, stderr: result.stderr),
+            result.timedOut
+        )
     }
 
     private static func runShellCommand(
@@ -9065,43 +9187,14 @@ final class KanbanBoardViewModel: ObservableObject {
         timeoutSeconds: Int,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> (code: Int32, stdout: String, stderr: String, timedOut: Bool) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectoryPath, isDirectory: true)
-        process.environment = shellCommandEnvironment(environment)
-
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        let waitGroup = DispatchGroup()
-        waitGroup.enter()
-        process.terminationHandler = { _ in
-            waitGroup.leave()
-        }
-
-        try process.run()
-        if let inputData = stdin.data(using: .utf8) {
-            inputPipe.fileHandleForWriting.write(inputData)
-        }
-        inputPipe.fileHandleForWriting.closeFile()
-
-        let resolvedTimeout = max(1, timeoutSeconds)
-        let timedOut = waitGroup.wait(timeout: .now() + .seconds(resolvedTimeout)) == .timedOut
-        if timedOut {
-            process.terminate()
-            _ = waitGroup.wait(timeout: .now() + .seconds(2))
-        }
-
-        let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-        return (timedOut ? -9 : process.terminationStatus, stdout, stderr, timedOut)
+        let result = try executeShellCommand(
+            command,
+            workingDirectoryPath: workingDirectoryPath,
+            stdin: stdin,
+            timeoutSeconds: timeoutSeconds,
+            environment: environment
+        )
+        return (result.code, result.stdout, result.stderr, result.timedOut)
     }
 
     private func executeWithAutoRetry(
@@ -9243,6 +9336,10 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         }
     }
+
+    private static let realArtifactXcodeListTimeoutSeconds = 45
+    private static let realArtifactBuildSettingsTimeoutSeconds = 45
+    private static let realArtifactBuildTimeoutSeconds = 240
 
     private func enforceRealArtifactVerificationIfNeeded(
         task: WorkTask,
@@ -9693,11 +9790,25 @@ final class KanbanBoardViewModel: ObservableObject {
 
         if policy.requireXcodeBuild {
             let listCommand = "xcodebuild -list \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path))"
-            let listResult: (code: Int32, output: String)
+            let listResult: (code: Int32, output: String, timedOut: Bool)
             do {
-                listResult = try Self.runShellCommand(listCommand)
+                listResult = try Self.runShellCommand(
+                    listCommand,
+                    timeoutSeconds: Self.realArtifactXcodeListTimeoutSeconds
+                )
             } catch {
                 return .failed(reason: "xcodebuild -list failed for \(projectName)", debugLog: String(describing: error))
+            }
+            if listResult.timedOut {
+                let debugLog = DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                    listResult.output,
+                    maxLines: 32,
+                    maxCharacters: 5000
+                )
+                return .failed(
+                    reason: "xcodebuild -list timed out for \(projectName) after \(Self.realArtifactXcodeListTimeoutSeconds)s",
+                    debugLog: debugLog.isEmpty ? nil : debugLog
+                )
             }
             guard listResult.code == 0 else {
                 return .failed(
@@ -9718,9 +9829,14 @@ final class KanbanBoardViewModel: ObservableObject {
             let buildSettingsCommand = """
             xcodebuild \(container.xcodebuildListArgument) \(Self.shellQuoted(container.url.path)) -scheme \(Self.shellQuoted(scheme)) -showBuildSettings
             """
-            let buildSettingsResult = try? Self.runShellCommand(buildSettingsCommand)
+            let buildSettingsResult = try? Self.runShellCommand(
+                buildSettingsCommand,
+                timeoutSeconds: Self.realArtifactBuildSettingsTimeoutSeconds
+            )
             let sdkRoot: String?
-            if let buildSettingsResult, buildSettingsResult.code == 0 {
+            if let buildSettingsResult,
+               !buildSettingsResult.timedOut,
+               buildSettingsResult.code == 0 {
                 sdkRoot = Self.parseXcodeBuildSettingValue("SDKROOT", from: buildSettingsResult.output)
             } else {
                 sdkRoot = nil
@@ -9734,11 +9850,25 @@ final class KanbanBoardViewModel: ObservableObject {
                 buildCommand += " -destination \(Self.shellQuoted(destination))"
             }
             buildCommand += " build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM="
-            let buildResult: (code: Int32, output: String)
+            let buildResult: (code: Int32, output: String, timedOut: Bool)
             do {
-                buildResult = try Self.runShellCommand(buildCommand)
+                buildResult = try Self.runShellCommand(
+                    buildCommand,
+                    timeoutSeconds: Self.realArtifactBuildTimeoutSeconds
+                )
             } catch {
                 return .failed(reason: "xcodebuild build failed for \(scheme)", debugLog: String(describing: error))
+            }
+            if buildResult.timedOut {
+                let debugLog = DefaultAgentTaskExecutor.summarizeCommandOutputForConsole(
+                    buildResult.output,
+                    maxLines: 48,
+                    maxCharacters: 7000
+                )
+                return .failed(
+                    reason: "xcodebuild build timed out for \(scheme) after \(Self.realArtifactBuildTimeoutSeconds)s",
+                    debugLog: debugLog.isEmpty ? nil : debugLog
+                )
             }
             guard buildResult.code == 0 else {
                 return .failed(
@@ -12971,6 +13101,20 @@ private extension DefaultAgentTaskExecutor {
     }
 }
 
+private extension KanbanBoardViewModel {
+    static func testRunShellCommand(
+        command: String,
+        timeoutSeconds: Int,
+        environment: [String: String]
+    ) throws -> (code: Int32, output: String, timedOut: Bool) {
+        try runShellCommand(
+            command,
+            timeoutSeconds: timeoutSeconds,
+            environment: environment
+        )
+    }
+}
+
 enum KanbanBoardViewModelTestHooks {
     static func codexPrompt(
         languageOverrideRawValue: String?,
@@ -13085,6 +13229,18 @@ enum KanbanBoardViewModelTestHooks {
         try DefaultAgentTaskExecutor.testRunSystemCommand(
             executablePath: executablePath,
             arguments: arguments,
+            environment: environment
+        )
+    }
+
+    static func runShellCommand(
+        command: String,
+        timeoutSeconds: Int,
+        environment: [String: String]
+    ) throws -> (code: Int32, output: String, timedOut: Bool) {
+        try KanbanBoardViewModel.testRunShellCommand(
+            command: command,
+            timeoutSeconds: timeoutSeconds,
             environment: environment
         )
     }
