@@ -13350,7 +13350,46 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
-    @Test("run task execution failure writes failed record and keeps task in progress")
+    @Test("batch run excludes failed tasks until user retries")
+    func batchRunAssignedExecutionsSkipsFailedTasks() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let failedTask = WorkTask(
+            title: "Failed task",
+            details: "Needs manual retry",
+            requiredSkills: ["swiftui"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(status: .failed, runCount: 1, lastError: "Install failed")
+        )
+        let runnableTask = WorkTask(
+            title: "Runnable task",
+            details: "Can proceed",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [runnableTask.id: .success(summary: "Done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [failedTask, runnableTask],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let started = viewModel.runAssignedTaskExecutions()
+        let failedTaskAfterRun = viewModel.tasks.first(where: { $0.id == failedTask.id })
+        let runnableTaskAfterRun = viewModel.tasks.first(where: { $0.id == runnableTask.id })
+
+        #expect(started == 1)
+        #expect(failedTaskAfterRun?.executionRecord?.status == .failed)
+        #expect(failedTaskAfterRun?.status == .todo)
+        #expect(runnableTaskAfterRun?.executionRecord?.status == .succeeded)
+    }
+
+    @Test("run task execution failure writes failed record and moves task back to todo")
     func runTaskExecutionFailureWritesRecord() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
         let task = WorkTask(
@@ -13378,7 +13417,7 @@ struct KanbanPersistenceTests {
         let agentEvents = viewModel.executionEvents(for: agent.id)
 
         #expect(executed)
-        #expect(updatedTask?.status == .inProgress)
+        #expect(updatedTask?.status == .todo)
         #expect(record?.status == .failed)
         #expect(record?.runCount == 1)
         #expect(record?.lastError == "Tool timeout")
@@ -13679,7 +13718,7 @@ struct KanbanPersistenceTests {
         let record = updatedTask?.executionRecord
 
         #expect(executed)
-        #expect(updatedTask?.status == .inProgress)
+        #expect(updatedTask?.status == .todo)
         #expect(record?.status == .failed)
         #expect(record?.lastOutputSummary == summary)
         #expect(record?.lastError == "Execution blocked: missing task details or acceptance criteria")

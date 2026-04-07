@@ -3442,6 +3442,9 @@ struct ContentView: View {
 
     private var sharedAgentMemoryEntries: [SharedAgentMemoryEntry] {
         viewModel.sharedAgentMemory
+            .sorted { lhs, rhs in
+                lhs.createdAt > rhs.createdAt
+            }
     }
 
     private var sharedMemoryProviders: [SharedAgentMemoryProviderDescriptor] {
@@ -3489,7 +3492,9 @@ struct ContentView: View {
     private func shortDateTimeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
-        formatter.timeStyle = .short
+        formatter.timeStyle = .medium
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
         return formatter.string(from: date)
     }
 
@@ -5260,6 +5265,24 @@ private struct TaskCardView: View {
                         Label(L10n.string("Extensions"), systemImage: "puzzlepiece.extension")
                     }
                     .menuStyle(.borderlessButton)
+                    .controlSize(.small)
+                }
+
+                if canRetryAgent {
+                    Button {
+                        onRetryAgent()
+                    } label: {
+                        Label(L10n.string("Retry Last Run"), systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else if canRunAgent {
+                    Button {
+                        onRunAgent()
+                    } label: {
+                        Label(L10n.string("Run Agent"), systemImage: "play.fill")
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
 

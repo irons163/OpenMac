@@ -10694,6 +10694,7 @@ final class KanbanBoardViewModel: ObservableObject {
             .filter { task in
                 (task.status == .todo || task.status == .inProgress) &&
                     task.assignedAgentID != nil &&
+                    task.executionRecord?.status != .failed &&
                     !attemptedTaskIDs.contains(task.id)
             }
             .sorted { lhs, rhs in
@@ -11909,6 +11910,13 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
+    private func moveTaskBackToTodoAfterFailureIfNeeded(taskIndex: Int) {
+        guard tasks.indices.contains(taskIndex) else { return }
+        if tasks[taskIndex].status == .inProgress {
+            tasks[taskIndex].status = .todo
+        }
+    }
+
     private func finalizeTaskExecution(_ prepared: PreparedTaskExecution, outcome: AgentTaskExecutionOutcome) {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == prepared.taskID }) else { return }
         let baselineRecord = tasks[taskIndex].executionRecord ?? TaskExecutionRecord(status: .running)
@@ -11926,6 +11934,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 blockedRecord.lastDebugOutput = nil
                 blockedRecord.lastAgentID = prepared.agent.id
                 tasks[taskIndex].executionRecord = blockedRecord
+                moveTaskBackToTodoAfterFailureIfNeeded(taskIndex: taskIndex)
                 lastExecutionDebugLog = nil
                 lastCodexLoginCommand = nil
                 lastBoardMessage = blockerMessage
@@ -11961,6 +11970,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 blockedRecord.lastDebugOutput = nil
                 blockedRecord.lastAgentID = prepared.agent.id
                 tasks[taskIndex].executionRecord = blockedRecord
+                moveTaskBackToTodoAfterFailureIfNeeded(taskIndex: taskIndex)
                 lastExecutionDebugLog = nil
                 lastCodexLoginCommand = nil
                 lastBoardMessage = blockerMessage
@@ -12046,6 +12056,7 @@ final class KanbanBoardViewModel: ObservableObject {
             failedRecord.lastDebugOutput = normalizeExecutionText(parsedFailure.debugLog)
             failedRecord.lastAgentID = prepared.agent.id
             tasks[taskIndex].executionRecord = failedRecord
+            moveTaskBackToTodoAfterFailureIfNeeded(taskIndex: taskIndex)
             lastExecutionDebugLog = failedRecord.lastDebugOutput
             lastCodexLoginCommand = extractCodexLoginCommand(
                 from: failedRecord.lastError,
@@ -12240,6 +12251,9 @@ final class KanbanBoardViewModel: ObservableObject {
                 record.lastError = message("Execution interrupted by app restart. Resume interrupted run to continue.")
             }
             tasks[taskIndex].executionRecord = record
+            if tasks[taskIndex].status == .inProgress {
+                tasks[taskIndex].status = .todo
+            }
 
             if let agentID = record.lastAgentID ?? tasks[taskIndex].assignedAgentID {
                 appendAgentExecutionEvent(
