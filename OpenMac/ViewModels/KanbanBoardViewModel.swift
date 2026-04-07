@@ -10839,7 +10839,10 @@ final class KanbanBoardViewModel: ObservableObject {
         )
     }
 
-    func runAssignedTaskExecutionsInBackground(completion: @escaping (Int) -> Void) {
+    func runAssignedTaskExecutionsInBackground(
+        emitBoardRunFinishedHook: Bool = true,
+        completion: @escaping (Int) -> Void
+    ) {
         updateExecutionCheckpoint(
             ExecutionCheckpointUseCase.makeAssignedBatchCheckpoint(boardID: selectedBoardID)
         )
@@ -10871,12 +10874,14 @@ final class KanbanBoardViewModel: ObservableObject {
                     qualitySafetyBlockedCount: preparation.qualitySafetyBlockedCount
                 )
                 self.lastBoardMessageSeverity = ExecutionSeverityPolicy.noRunnableAssignedBatch
-                self.emitBoardRunFinishedHook(
-                    flow: "assigned.batch",
-                    totalStarted: 0,
-                    completedPasses: 0,
-                    wasCancelled: false
-                )
+                if emitBoardRunFinishedHook {
+                    self.emitBoardRunFinishedHook(
+                        flow: "assigned.batch",
+                        totalStarted: 0,
+                        completedPasses: 0,
+                        wasCancelled: false
+                    )
+                }
             },
             handleFinished: { state in
                 self.updateExecutionCheckpoint(nil)
@@ -10904,12 +10909,14 @@ final class KanbanBoardViewModel: ObservableObject {
                     quotaBlockedCount: quotaBlockedCount,
                     qualitySafetyBlockedCount: qualitySafetyBlockedCount
                 )
-                self.emitBoardRunFinishedHook(
-                    flow: "assigned.batch",
-                    totalStarted: counters.startedCount,
-                    completedPasses: 1,
-                    wasCancelled: state.wasCancelled
-                )
+                if emitBoardRunFinishedHook {
+                    self.emitBoardRunFinishedHook(
+                        flow: "assigned.batch",
+                        totalStarted: counters.startedCount,
+                        completedPasses: 1,
+                        wasCancelled: state.wasCancelled
+                    )
+                }
             },
             completion: completion
         )
@@ -10948,7 +10955,7 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.autoAssignTasks(allowFallbackWithoutSkillMatch: resolvedAutoAssignFallback)
             },
             runAssignedTaskExecutionsInBackground: { completion in
-                self.runAssignedTaskExecutionsInBackground { started in
+                self.runAssignedTaskExecutionsInBackground(emitBoardRunFinishedHook: false) { started in
                     guard started == 0, resolvedAutoRelaxWIPLimits else {
                         completion(started)
                         return
@@ -10958,7 +10965,10 @@ final class KanbanBoardViewModel: ObservableObject {
                         completion(started)
                         return
                     }
-                    self.runAssignedTaskExecutionsInBackground(completion: completion)
+                    self.runAssignedTaskExecutionsInBackground(
+                        emitBoardRunFinishedHook: false,
+                        completion: completion
+                    )
                 }
             },
             boardMessageSeverity: { self.lastBoardMessageSeverity },

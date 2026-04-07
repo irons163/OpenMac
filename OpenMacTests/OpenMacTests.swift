@@ -15048,6 +15048,88 @@ struct KanbanPersistenceTests {
         #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
+    @Test("auto cycle emits board.run.finished hook only once per full cycle")
+    func runAutoDispatchCycleEmitsBoardFinishedHookOnce() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let plugin = root.appendingPathComponent("cycle-hook-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try """
+        {
+          "id": "com.example.cyclehook",
+          "name": "Cycle Hook Plugin",
+          "entrypoint": "./run.sh",
+          "commands": [
+            { "id": "on-finished", "title": "On Finished", "slots": ["app.toolbar"], "permissions": ["command.execute"], "enabled": true }
+          ],
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: plugin.appendingPathComponent("plugin.json"))
+
+        let scriptURL = plugin.appendingPathComponent("run.sh")
+        try """
+        #!/bin/zsh
+        echo '{"message":"board-finished-hook"}'
+        """.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Auto cycle task",
+            details: "Run end to end",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = StubTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "ok")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor,
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        viewModel.updatePMPlanningPluginPolicy(
+            autoDiscoverLocalPlugins: true,
+            pluginsDirectoryPath: root.path,
+            announce: false
+        )
+        guard let command = viewModel.pmExtensionCommands().first(where: {
+            $0.pluginID == "com.example.cyclehook" && $0.commandID == "on-finished"
+        }) else {
+            #expect(Bool(false), "Missing cycle hook command")
+            return
+        }
+        #expect(viewModel.addPMBoardExtensionHook(
+            eventRawValue: PMExtensionHookEvent.boardRunFinished.rawValue,
+            commandDescriptorID: command.id
+        ))
+
+        var totalStarted: Int?
+        var passes: Int?
+        viewModel.runAutoDispatchCycleInBackground { started, completedPasses in
+            totalStarted = started
+            passes = completedPasses
+        }
+
+        #expect(waitForMainQueue(timeout: 15.0) { totalStarted != nil && passes != nil })
+        #expect(totalStarted == 1)
+        #expect(passes == 2)
+
+        let succeededHookRuns = viewModel.pmExtensionActivityLog.filter {
+            $0.pluginID == "com.example.cyclehook" &&
+                $0.commandID == "on-finished" &&
+                $0.outcome == .succeeded
+        }
+        #expect(succeededHookRuns.count == 1)
+    }
+
     @Test("auto cycle summary reports remaining dependency blockers after execution")
     func runAutoDispatchCycleInBackgroundSummaryIncludesDependencyBlockers() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
