@@ -689,3 +689,10 @@
 "PM Brainstorm: %@" = "PM 头脑风暴：%@";
 "Google Stitch UI Generator" = "Google Stitch 界面生成器";
 "Generate a polished UI direction and ready-to-use Stitch prompt from your project brief." = "从你的项目说明生成精致 UI 方向与可直接使用的 Stitch 提示词。";
+
+"Cancel Run" = "Cancel Run";
+"Task execution is already running" = "Task execution is already running";
+"Task is not currently running" = "Task is not currently running";
+"Cancellation requested for \"%@\"" = "Cancellation requested for \"%@\"";
+"Cancellation requested for %d running task(s)" = "Cancellation requested for %d running task(s)";
+"Execution cancelled by user" = "Execution cancelled by user";

@@ -167,6 +167,9 @@ protocol AgentTaskExecuting {
         agent: AgentProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome
+    func requestCancellation(taskID: UUID)
+    func requestCancellation(taskIDs: [UUID])
+    func clearCancellation(taskID: UUID)
 }
 
 extension AgentTaskExecuting {
@@ -177,12 +180,85 @@ extension AgentTaskExecuting {
     ) -> AgentTaskExecutionOutcome {
         execute(task: task, agent: agent)
     }
+
+    func requestCancellation(taskID: UUID) {
+        _ = taskID
+    }
+
+    func requestCancellation(taskIDs: [UUID]) {
+        let uniqueTaskIDs = Set(taskIDs)
+        for taskID in uniqueTaskIDs {
+            requestCancellation(taskID: taskID)
+        }
+    }
+
+    func clearCancellation(taskID: UUID) {
+        _ = taskID
+    }
 }
 
 struct DefaultAgentTaskExecutor: AgentTaskExecuting {
     static let debugLogDelimiter = "\n\n--- debug ---\n"
 
+    private final class CancellationRegistry {
+        private let lock = NSLock()
+        private var runningProcessByTaskID: [UUID: Process] = [:]
+        private var cancelledTaskIDs: Set<UUID> = []
+
+        func register(process: Process, for taskID: UUID) {
+            let shouldTerminate: Bool
+            lock.lock()
+            runningProcessByTaskID[taskID] = process
+            shouldTerminate = cancelledTaskIDs.contains(taskID)
+            lock.unlock()
+
+            guard shouldTerminate else { return }
+            terminate(process)
+        }
+
+        func unregister(taskID: UUID, process: Process) {
+            lock.lock()
+            if let running = runningProcessByTaskID[taskID], running === process {
+                runningProcessByTaskID.removeValue(forKey: taskID)
+            }
+            lock.unlock()
+        }
+
+        func requestCancellation(for taskID: UUID) {
+            let process: Process?
+            lock.lock()
+            cancelledTaskIDs.insert(taskID)
+            process = runningProcessByTaskID[taskID]
+            lock.unlock()
+
+            guard let process else { return }
+            terminate(process)
+        }
+
+        func clearCancellation(for taskID: UUID) {
+            lock.lock()
+            cancelledTaskIDs.remove(taskID)
+            lock.unlock()
+        }
+
+        func isCancellationRequested(for taskID: UUID) -> Bool {
+            lock.lock()
+            let isRequested = cancelledTaskIDs.contains(taskID)
+            lock.unlock()
+            return isRequested
+        }
+
+        private func terminate(_ process: Process) {
+            guard process.isRunning else { return }
+            process.interrupt()
+            process.terminate()
+        }
+    }
+
+    private static let cancellationRegistry = CancellationRegistry()
+
     struct CodexBridgeRequest: Equatable {
+        let taskID: UUID
         let prompt: String
         let model: String
         let profile: String?
@@ -264,6 +340,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         agent: AgentProfile,
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
+        if Self.cancellationRegistry.isCancellationRequested(for: task.id) {
+            return .failure(message: L10n.string("Execution cancelled by user"))
+        }
         let runtimeProfile = agent.runtimeProfile ?? .defaultCodexBridge
         let provider = runtimeProfile.provider
         switch provider {
@@ -278,6 +357,21 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                 onProgress: onProgress
             )
         }
+    }
+
+    func requestCancellation(taskID: UUID) {
+        Self.cancellationRegistry.requestCancellation(for: taskID)
+    }
+
+    func requestCancellation(taskIDs: [UUID]) {
+        let uniqueTaskIDs = Set(taskIDs)
+        for taskID in uniqueTaskIDs {
+            Self.cancellationRegistry.requestCancellation(for: taskID)
+        }
+    }
+
+    func clearCancellation(taskID: UUID) {
+        Self.cancellationRegistry.clearCancellation(for: taskID)
     }
 
     private func runOpenAICompatible(
@@ -362,6 +456,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             environment: environmentProvider()
         )
         let request = CodexBridgeRequest(
+            taskID: task.id,
             prompt: prompt,
             model: runtimeProfile.model,
             profile: runtimeProfile.codexProfile,
@@ -406,6 +501,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             if !trimmedModel.isEmpty,
                Self.isCodexChatGPTModelUnsupported(initialRawFailure) {
                 let fallbackRequest = CodexBridgeRequest(
+                    taskID: task.id,
                     prompt: prompt,
                     model: "",
                     profile: runtimeProfile.codexProfile,
@@ -880,6 +976,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         onProgress: @escaping (_ update: String) -> Void,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
+        if cancellationRegistry.isCancellationRequested(for: request.taskID) {
+            throw ExecutorError.codexBridgeFailed(L10n.string("Execution cancelled by user"))
+        }
         guard let codexExecutable = resolvedCodexExecutableURL(environment: environment) else {
             throw ExecutorError.codexBridgeFailed(
                 L10n.string("Codex CLI not found. Install Codex CLI (or Codex app), then retry. You can also switch OpenAI Auth to API Key.")
@@ -1002,6 +1101,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
 
         try process.run()
+        cancellationRegistry.register(process: process, for: request.taskID)
+        defer {
+            cancellationRegistry.unregister(taskID: request.taskID, process: process)
+        }
         process.waitUntilExit()
         outputHandle.readabilityHandler = nil
 
@@ -1023,6 +1126,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             rawOutputLines.joined(separator: "\n")
         }
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if cancellationRegistry.isCancellationRequested(for: request.taskID) {
+            throw ExecutorError.codexBridgeFailed(L10n.string("Execution cancelled by user"))
+        }
 
         guard process.terminationStatus == 0 else {
             let message = rawOutput.isEmpty ? L10n.format("codex exited with code %d", process.terminationStatus) : rawOutput
@@ -11157,11 +11264,44 @@ final class KanbanBoardViewModel: ObservableObject {
 
     func requestCancelAssignedTaskExecutions() {
         isBatchRunCancelRequested = true
+        let runningTaskIDs = tasks
+            .filter { $0.executionRecord?.status == .running }
+            .map(\.id)
+        taskExecutor.requestCancellation(taskIDs: runningTaskIDs)
+        if !runningTaskIDs.isEmpty {
+            lastBoardMessage = message("Cancellation requested for %d running task(s)", runningTaskIDs.count)
+            lastBoardMessageSeverity = .warning
+        }
     }
 
     func requestCancelAutoDispatchCycle() {
         isAutoCycleCancelRequested = true
         requestCancelAssignedTaskExecutions()
+    }
+
+    @discardableResult
+    func requestCancelTaskExecution(_ taskID: UUID) -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }),
+              tasks[taskIndex].executionRecord?.status == .running else {
+            lastBoardMessage = message("Task is not currently running")
+            lastBoardMessageSeverity = .warning
+            return false
+        }
+
+        taskExecutor.requestCancellation(taskID: taskID)
+        if let agentID = tasks[taskIndex].assignedAgentID ?? tasks[taskIndex].executionRecord?.lastAgentID {
+            appendAgentExecutionEvent(
+                agentID: agentID,
+                taskID: tasks[taskIndex].id,
+                taskTitle: tasks[taskIndex].title,
+                status: .running,
+                phase: .system,
+                message: message("Cancellation requested for \"%@\"", tasks[taskIndex].title)
+            )
+        }
+        lastBoardMessage = message("Cancellation requested for \"%@\"", tasks[taskIndex].title)
+        lastBoardMessageSeverity = .warning
+        return true
     }
 
     private func preparePMAutopilot(
@@ -11807,6 +11947,11 @@ final class KanbanBoardViewModel: ObservableObject {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return nil }
         lastExecutionDebugLog = nil
         lastCodexLoginCommand = nil
+        if tasks[taskIndex].executionRecord?.status == .running {
+            lastBoardMessage = message("Task execution is already running")
+            lastBoardMessageSeverity = .warning
+            return nil
+        }
         guard tasks[taskIndex].status != .done else {
             lastBoardMessage = message("Done tasks cannot be executed")
             lastBoardMessageSeverity = .warning
@@ -11890,6 +12035,7 @@ final class KanbanBoardViewModel: ObservableObject {
         record.lastDebugOutput = nil
         record.lastAgentID = agent.id
         tasks[taskIndex].executionRecord = record
+        taskExecutor.clearCancellation(taskID: taskID)
         taskExecutionApprovalsByTaskID[taskID] = nil
         consumeExecutionQuota(for: tasks[taskIndex])
         appendAgentExecutionEvent(

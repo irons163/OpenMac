@@ -3241,6 +3241,13 @@ struct ContentView: View {
         }
     }
 
+    private func cancelTaskExecution(_ taskID: UUID) {
+        _ = Self.handleBoolResult(
+            viewModel.requestCancelTaskExecution(taskID),
+            onChanged: refreshTriageSelections
+        )
+    }
+
     private func copyTaskExecutionTimeline(_ taskID: UUID) {
         guard let timeline = viewModel.replayExecutionTimeline(for: taskID) else { return }
         copyToPasteboard(timeline)
@@ -4221,6 +4228,7 @@ struct ContentView: View {
             onAutoAssignTask: autoAssignTask,
             onRunTaskExecution: runTaskExecution,
             onRetryTaskExecution: retryTaskExecution,
+            onCancelTaskExecution: cancelTaskExecution,
             assignableAgents: { task in
                 viewModel.assignableAgents(for: task.id)
             },
@@ -4981,6 +4989,7 @@ private struct KanbanColumnView: View {
     let onAutoAssignTask: (UUID) -> Void
     let onRunTaskExecution: (UUID) -> Void
     let onRetryTaskExecution: (UUID) -> Void
+    let onCancelTaskExecution: (UUID) -> Void
     let assignableAgents: (WorkTask) -> [AgentProfile]
     let reassignableAgents: (WorkTask) -> [AgentProfile]
     let onManualAssignTask: (UUID, UUID) -> Void
@@ -5065,8 +5074,9 @@ private struct KanbanColumnView: View {
             canMoveForward: status.next != nil,
             canUnassign: task.assignedAgentID != nil && task.status != .done,
             canAutoAssign: task.status == .todo && task.assignedAgentID == nil,
-            canRunAgent: task.assignedAgentID != nil && task.status != .done && blockedReason == nil,
+            canRunAgent: task.assignedAgentID != nil && task.status != .done && blockedReason == nil && task.executionRecord?.status != .running,
             canRetryAgent: task.assignedAgentID != nil && task.executionRecord?.status == .failed && task.status != .done,
+            canCancelAgent: task.assignedAgentID != nil && task.executionRecord?.status == .running && task.status != .done,
             executionRecord: task.executionRecord,
             manualAssignableAgents: assignableAgents(task),
             reassignableAgents: reassignableAgents(task),
@@ -5075,6 +5085,7 @@ private struct KanbanColumnView: View {
             onAutoAssign: { onAutoAssignTask(task.id) },
             onRunAgent: { onRunTaskExecution(task.id) },
             onRetryAgent: { onRetryTaskExecution(task.id) },
+            onCancelAgent: { onCancelTaskExecution(task.id) },
             onManualAssign: { agentID in
                 onManualAssignTask(task.id, agentID)
             },
@@ -5136,6 +5147,7 @@ private struct TaskCardView: View {
     let canAutoAssign: Bool
     let canRunAgent: Bool
     let canRetryAgent: Bool
+    let canCancelAgent: Bool
     let executionRecord: TaskExecutionRecord?
     let manualAssignableAgents: [AgentProfile]
     let reassignableAgents: [AgentProfile]
@@ -5144,6 +5156,7 @@ private struct TaskCardView: View {
     let onAutoAssign: () -> Void
     let onRunAgent: () -> Void
     let onRetryAgent: () -> Void
+    let onCancelAgent: () -> Void
     let onManualAssign: (UUID) -> Void
     let onReassign: (UUID) -> Void
     let onUnassign: () -> Void
@@ -5268,7 +5281,15 @@ private struct TaskCardView: View {
                     .controlSize(.small)
                 }
 
-                if canRetryAgent {
+                if canCancelAgent {
+                    Button {
+                        onCancelAgent()
+                    } label: {
+                        Label(L10n.string("Cancel Run"), systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else if canRetryAgent {
                     Button {
                         onRetryAgent()
                     } label: {
@@ -5320,6 +5341,9 @@ private struct TaskCardView: View {
             }
             if canRunAgent {
                 Button(L10n.string("Run Agent"), action: onRunAgent)
+            }
+            if canCancelAgent {
+                Button(L10n.string("Cancel Run"), action: onCancelAgent)
             }
             if canRetryAgent {
                 Button(L10n.string("Retry Last Run"), action: onRetryAgent)
@@ -9793,6 +9817,7 @@ enum ContentViewTestHooks {
             canAutoAssign: true,
             canRunAgent: false,
             canRetryAgent: false,
+            canCancelAgent: false,
             executionRecord: nil,
             manualAssignableAgents: [],
             reassignableAgents: [],
@@ -9801,6 +9826,7 @@ enum ContentViewTestHooks {
             onAutoAssign: {},
             onRunAgent: {},
             onRetryAgent: {},
+            onCancelAgent: {},
             onManualAssign: { _ in },
             onReassign: { _ in },
             onUnassign: {},
@@ -9843,6 +9869,7 @@ enum ContentViewTestHooks {
             canAutoAssign: true,
             canRunAgent: false,
             canRetryAgent: false,
+            canCancelAgent: false,
             executionRecord: nil,
             manualAssignableAgents: [],
             reassignableAgents: [],
@@ -9851,6 +9878,7 @@ enum ContentViewTestHooks {
             onAutoAssign: {},
             onRunAgent: {},
             onRetryAgent: {},
+            onCancelAgent: {},
             onManualAssign: { _ in },
             onReassign: { _ in },
             onUnassign: {},
@@ -10609,6 +10637,7 @@ enum ContentViewTestHooks {
             onAutoAssignTask: { _ in },
             onRunTaskExecution: { _ in },
             onRetryTaskExecution: { _ in },
+            onCancelTaskExecution: { _ in },
             assignableAgents: { _ in [agentA] },
             reassignableAgents: { _ in [agentB] },
             onManualAssignTask: { _, _ in },
@@ -10640,6 +10669,7 @@ enum ContentViewTestHooks {
             onAutoAssignTask: { _ in },
             onRunTaskExecution: { _ in },
             onRetryTaskExecution: { _ in },
+            onCancelTaskExecution: { _ in },
             assignableAgents: { _ in [agentA] },
             reassignableAgents: { _ in [agentA] },
             onManualAssignTask: { _, _ in },
@@ -10667,6 +10697,7 @@ enum ContentViewTestHooks {
             canAutoAssign: false,
             canRunAgent: true,
             canRetryAgent: false,
+            canCancelAgent: false,
             executionRecord: successRecord,
             manualAssignableAgents: [agentB],
             reassignableAgents: [agentB],
@@ -10675,6 +10706,7 @@ enum ContentViewTestHooks {
             onAutoAssign: {},
             onRunAgent: {},
             onRetryAgent: {},
+            onCancelAgent: {},
             onManualAssign: { _ in },
             onReassign: { _ in },
             onUnassign: {},
@@ -10702,6 +10734,7 @@ enum ContentViewTestHooks {
             canAutoAssign: false,
             canRunAgent: true,
             canRetryAgent: true,
+            canCancelAgent: false,
             executionRecord: failedRecord,
             manualAssignableAgents: [agentA],
             reassignableAgents: [agentA],
@@ -10710,6 +10743,7 @@ enum ContentViewTestHooks {
             onAutoAssign: {},
             onRunAgent: {},
             onRetryAgent: {},
+            onCancelAgent: {},
             onManualAssign: { _ in },
             onReassign: { _ in },
             onUnassign: {},

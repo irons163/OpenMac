@@ -1683,6 +1683,7 @@ struct AgentTaskExecutorTests {
         )
 
         let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
             profile: "test",
@@ -1725,6 +1726,7 @@ struct AgentTaskExecutorTests {
         )
 
         let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
             profile: nil,
@@ -1761,6 +1763,7 @@ struct AgentTaskExecutorTests {
         )
 
         let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
             profile: nil,
@@ -1799,6 +1802,7 @@ struct AgentTaskExecutorTests {
         )
 
         let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
             profile: nil,
@@ -1838,6 +1842,7 @@ struct AgentTaskExecutorTests {
         )
 
         let request = DefaultAgentTaskExecutor.CodexBridgeRequest(
+            taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
             profile: nil,
@@ -11980,6 +11985,123 @@ struct KanbanPersistenceTests {
         #expect(store.savedSnapshots.isEmpty)
     }
 
+    @Test("run task execution rejects when the same task is already running")
+    func runTaskExecutionRejectsWhenTaskAlreadyRunning() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Already running",
+            details: "In progress task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .running,
+                runCount: 1,
+                lastStartedAt: Date(),
+                lastFinishedAt: nil,
+                lastOutputSummary: nil,
+                lastError: nil,
+                lastDebugOutput: nil,
+                lastAgentID: agent.id
+            )
+        )
+        let executor = CancellationProbeTaskExecutor()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let executed = viewModel.runTaskExecution(task.id)
+
+        #expect(!executed)
+        #expect(viewModel.lastBoardMessage == "Task execution is already running")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(executor.executedTaskIDs.isEmpty)
+        #expect(executor.clearedTaskIDs.isEmpty)
+    }
+
+    @Test("requesting cancel for a running task forwards cancellation to executor")
+    func requestCancelTaskExecutionCancelsSingleRunningTask() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let task = WorkTask(
+            title: "Running Task",
+            details: "In progress task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .running,
+                runCount: 1,
+                lastStartedAt: Date(),
+                lastFinishedAt: nil,
+                lastOutputSummary: nil,
+                lastError: nil,
+                lastDebugOutput: nil,
+                lastAgentID: agent.id
+            )
+        )
+        let executor = CancellationProbeTaskExecutor()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        let requested = viewModel.requestCancelTaskExecution(task.id)
+
+        #expect(requested)
+        #expect(executor.cancelledTaskIDs == [task.id])
+        #expect(viewModel.lastBoardMessage == "Cancellation requested for \"Running Task\"")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
+    @Test("requesting cancel for assigned run cancels all running tasks")
+    func requestCancelAssignedTaskExecutionsCancelsRunningTaskSet() {
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 3)
+        let running = WorkTask(
+            title: "Running",
+            details: "In progress task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .inProgress,
+            assignedAgentID: agent.id,
+            executionRecord: TaskExecutionRecord(
+                status: .running,
+                runCount: 1,
+                lastStartedAt: Date(),
+                lastFinishedAt: nil,
+                lastOutputSummary: nil,
+                lastError: nil,
+                lastDebugOutput: nil,
+                lastAgentID: agent.id
+            )
+        )
+        let idle = WorkTask(
+            title: "Idle",
+            details: "Todo task",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = CancellationProbeTaskExecutor()
+        let viewModel = KanbanBoardViewModel(
+            tasks: [running, idle],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        viewModel.requestCancelAssignedTaskExecutions()
+
+        #expect(viewModel.isBatchRunCancelRequested)
+        #expect(executor.cancelledTaskIDs == [running.id])
+        #expect(viewModel.lastBoardMessage == "Cancellation requested for 1 running task(s)")
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+    }
+
     @Test("run task execution enforces strict delivery gate evidence")
     func runTaskExecutionEnforcesStrictDeliveryGateEvidence() {
         let agent = AgentProfile(name: "Executor", skills: ["swiftui"], maxConcurrentTasks: 2)
@@ -16761,6 +16883,42 @@ private struct StubTaskExecutor: AgentTaskExecuting {
             onProgress(update)
         }
         return execute(task: task, agent: agent)
+    }
+}
+
+private final class CancellationProbeTaskExecutor: AgentTaskExecuting {
+    private(set) var executedTaskIDs: [UUID] = []
+    private(set) var cancelledTaskIDs: [UUID] = []
+    private(set) var clearedTaskIDs: [UUID] = []
+    private let fallbackOutcome: AgentTaskExecutionOutcome
+
+    init(fallbackOutcome: AgentTaskExecutionOutcome = .success(summary: "ok")) {
+        self.fallbackOutcome = fallbackOutcome
+    }
+
+    func execute(task: WorkTask, agent _: AgentProfile) -> AgentTaskExecutionOutcome {
+        executedTaskIDs.append(task.id)
+        return fallbackOutcome
+    }
+
+    func execute(
+        task: WorkTask,
+        agent: AgentProfile,
+        onProgress _: @escaping (_ update: String) -> Void
+    ) -> AgentTaskExecutionOutcome {
+        execute(task: task, agent: agent)
+    }
+
+    func requestCancellation(taskID: UUID) {
+        cancelledTaskIDs.append(taskID)
+    }
+
+    func requestCancellation(taskIDs: [UUID]) {
+        cancelledTaskIDs.append(contentsOf: taskIDs)
+    }
+
+    func clearCancellation(taskID: UUID) {
+        clearedTaskIDs.append(taskID)
     }
 }
 
