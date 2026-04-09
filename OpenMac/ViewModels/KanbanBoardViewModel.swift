@@ -3813,7 +3813,8 @@ final class KanbanBoardViewModel: ObservableObject {
     func createMissingAgentsForPlannedTickets(
         _ plannedTickets: [PMPlannedTicket],
         maxSkillsPerAgent: Int = 3,
-        defaultMaxConcurrentTasks: Int = 3
+        defaultMaxConcurrentTasks: Int = 3,
+        availableCodexSkillNames: [String]? = nil
     ) -> Int {
         let requiredSkills = Set(
             plannedTickets
@@ -3839,6 +3840,9 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let chunkSize = max(1, maxSkillsPerAgent)
         let maxTasks = max(1, defaultMaxConcurrentTasks)
+        let discoveredCodexSkillNames = (availableCodexSkillNames ?? Self.discoverLocalCodexSkillNamesForPMBootstrap())
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         var createdCount = 0
         var existingAgentNames = Set(agents.map { $0.name.lowercased() })
         var nextAutoIndex = 1
@@ -3853,10 +3857,20 @@ final class KanbanBoardViewModel: ObservableObject {
                 self.message("Auto Agent %d", index)
             }
 
+            let codexToolTokens = Self.recommendedCodexSkillToolTokens(
+                forRequiredSkills: skillsChunk,
+                availableCodexSkillNames: discoveredCodexSkillNames
+            )
+            var runtimeProfile = AgentRuntimeProfile.defaultCodexBridge
+            if !codexToolTokens.isEmpty {
+                runtimeProfile.tools = Set(codexToolTokens)
+            }
+
             let created = addAgent(
                 name: agentName,
                 skillsText: skillsChunk.joined(separator: ", "),
-                maxConcurrentTasks: maxTasks
+                maxConcurrentTasks: maxTasks,
+                runtimeProfile: runtimeProfile
             )
             if created {
                 createdCount += 1
@@ -3891,6 +3905,114 @@ final class KanbanBoardViewModel: ObservableObject {
             }
         }
     }
+
+    private static func discoverLocalCodexSkillNamesForPMBootstrap(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String] {
+        CodexSkillCatalog.discoverSkillNames(
+            environment: environment,
+            fallbackHomeDirectoryPath: NSHomeDirectory()
+        )
+    }
+
+    private static func recommendedCodexSkillToolTokens(
+        forRequiredSkills requiredSkills: [String],
+        availableCodexSkillNames: [String]
+    ) -> [String] {
+        guard !requiredSkills.isEmpty else { return [] }
+        guard !availableCodexSkillNames.isEmpty else { return [] }
+
+        let indexed = availableCodexSkillNames.map { name in
+            (
+                name: name,
+                normalizedName: name.lowercased(),
+                tokens: codexSkillSearchTokens(for: name)
+            )
+        }
+
+        var selected = Set<String>()
+        for rawSkill in requiredSkills {
+            let normalizedRequired = rawSkill
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalizedRequired.isEmpty else { continue }
+
+            if let exactMatch = indexed.first(where: { $0.tokens.contains(normalizedRequired) }) {
+                selected.insert(exactMatch.normalizedName)
+                continue
+            }
+
+            let keywordHints = codexSkillKeywordHints(for: normalizedRequired)
+            guard !keywordHints.isEmpty else { continue }
+
+            if let fuzzyMatch = indexed.first(where: { !$0.tokens.isDisjoint(with: keywordHints) }) {
+                selected.insert(fuzzyMatch.normalizedName)
+            }
+        }
+
+        return selected.sorted().map { "skill:\($0)" }
+    }
+
+    private static func codexSkillSearchTokens(for rawSkillName: String) -> Set<String> {
+        let normalized = rawSkillName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return [] }
+
+        var tokens = Set<String>()
+        tokens.insert(normalized)
+
+        for token in normalized.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
+            let fragment = String(token).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !fragment.isEmpty else { continue }
+            tokens.insert(fragment)
+        }
+
+        if let separator = normalized.firstIndex(of: ":") {
+            let trailing = String(normalized[normalized.index(after: separator)...])
+            for token in trailing.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
+                let fragment = String(token).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !fragment.isEmpty else { continue }
+                tokens.insert(fragment)
+            }
+        }
+
+        return tokens
+    }
+
+    private static func codexSkillKeywordHints(for requiredSkill: String) -> Set<String> {
+        let builtInHints = pmRequiredSkillToCodexHintMap[requiredSkill] ?? []
+        let merged = Set(builtInHints + [requiredSkill])
+        return Set(merged.filter { !$0.isEmpty })
+    }
+
+    private static let pmRequiredSkillToCodexHintMap: [String: [String]] = [
+        "android": ["android", "mobile"],
+        "api": ["api", "backend", "integration", "network"],
+        "app": ["app", "ios", "swiftui"],
+        "architecture": ["architecture", "refactor", "plan", "planning"],
+        "backend": ["backend", "api", "integration", "database"],
+        "build": ["build", "xcode", "ios"],
+        "database": ["database", "data", "storage"],
+        "design": ["design", "ui", "ux", "stitch"],
+        "documentation": ["docs", "documentation", "readme"],
+        "i18n": ["i18n", "localization", "l10n"],
+        "integration": ["integration", "api", "backend"],
+        "ios": ["ios", "xcode", "swiftui"],
+        "macos": ["macos", "swiftui", "xcode"],
+        "planning": ["planning", "plan", "brainstorm"],
+        "qa": ["qa", "testing", "test", "audit"],
+        "release": ["release", "deploy", "build"],
+        "security": ["security", "compliance"],
+        "swift": ["swift", "ios", "swiftui"],
+        "swiftui": ["swiftui", "ui", "ios"],
+        "tdd": ["tdd", "testing", "test"],
+        "test": ["test", "testing", "qa", "audit"],
+        "testing": ["testing", "test", "qa", "audit"],
+        "ui": ["ui", "ux", "swiftui", "stitch"],
+        "ux": ["ux", "ui", "design", "stitch"],
+        "xcode": ["xcode", "ios", "build"]
+    ]
 
     @discardableResult
     func updateTask(

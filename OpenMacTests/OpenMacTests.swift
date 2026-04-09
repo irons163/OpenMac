@@ -3861,6 +3861,60 @@ struct KanbanFlowTests {
         #expect(viewModel.lastBoardMessageSeverity == .warning)
     }
 
+    @Test("pm planner bootstrap maps required skills to codex skill tools for auto-created agents")
+    func pmPlannerBootstrapMapsCodexSkillsForAutoCreatedAgents() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Core Build",
+                details: "Ship ios UI and release checks",
+                requiredSkills: ["swiftui", "xcode", "testing"],
+                storyPoints: 5
+            )
+        ]
+        let availableCodexSkills = [
+            "build-ios-apps:ios-debugger-agent",
+            "build-ios-apps:swiftui-ui-patterns",
+            "build-ios-apps:swiftui-performance-audit",
+            "google-stitch"
+        ]
+
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(
+            plannedTickets,
+            availableCodexSkillNames: availableCodexSkills
+        )
+
+        #expect(createdCount == 1)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents[0].runtimeProfile?.provider == .openAICompatible)
+        #expect(viewModel.agents[0].runtimeProfile?.openAIAuthMode == .codexBridge)
+        #expect(viewModel.agents[0].runtimeProfile?.tools.contains("skill:build-ios-apps:ios-debugger-agent") == true)
+        #expect(viewModel.agents[0].runtimeProfile?.tools.contains("skill:build-ios-apps:swiftui-ui-patterns") == true)
+        #expect(viewModel.agents[0].runtimeProfile?.tools.contains("skill:build-ios-apps:swiftui-performance-audit") == true)
+    }
+
+    @Test("pm planner bootstrap leaves codex tools empty when no available codex skill matches")
+    func pmPlannerBootstrapLeavesCodexToolsEmptyWhenNoMatch() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        let plannedTickets = [
+            PMPlannedTicket(
+                title: "Risk",
+                details: "Analyze compliance baseline",
+                requiredSkills: ["security"],
+                storyPoints: 2
+            )
+        ]
+
+        let createdCount = viewModel.createMissingAgentsForPlannedTickets(
+            plannedTickets,
+            availableCodexSkillNames: ["google-stitch"]
+        )
+
+        #expect(createdCount == 1)
+        #expect(viewModel.agents.count == 1)
+        #expect(viewModel.agents[0].runtimeProfile?.tools.isEmpty == true)
+    }
+
     @Test("reports perfect health score for stable board")
     func reportsPerfectHealthScoreForStableBoard() {
         let agent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 3)
