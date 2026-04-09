@@ -118,6 +118,11 @@
 "Medium" = "중간";
 "High" = "높음";
 "XHigh" = "최고";
+"Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)." = "팁: 도구 항목에 `skill:<name>` 를 추가하면 Codex Skill을 로드할 수 있습니다(예: `skill:google-stitch`).";
+"Codex Skills" = "Codex 스킬";
+"Add Codex Skill" = "Codex 스킬 추가";
+"Selected Codex Skills: %@" = "선택된 Codex 스킬: %@";
+"No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`." = "로컬 Codex 스킬을 찾지 못했습니다. `~/.codex/skills` 또는 `$CODEX_HOME/skills` 아래에 스킬을 설치하세요.";
 "Use Folder" = "폴더 사용";
 "%@ (%@)" = "%@ (%@)";
 "%d %@" = "%d %@";
@@ -705,3 +710,5 @@
 "Cancellation requested for \"%@\"" = "Cancellation requested for \"%@\"";
 "Cancellation requested for %d running task(s)" = "Cancellation requested for %d running task(s)";
 "Execution cancelled by user" = "Execution cancelled by user";
+
+"Allow partial skill match" = "부분 스킬 일치 허용";

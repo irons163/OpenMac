@@ -1444,6 +1444,128 @@ struct AgentTaskExecutorTests {
         }
     }
 
+    @Test("codex prompt injects resolved codex skill documents from runtime tools")
+    func codexPromptInjectsResolvedCodexSkills() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-skill-\(UUID().uuidString)")
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let skillDirectory = codexHome
+            .appendingPathComponent("skills", isDirectory: true)
+            .appendingPathComponent("google-stitch", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        let skillFile = skillDirectory.appendingPathComponent("SKILL.md", isDirectory: false)
+        try Data("# skill".utf8).write(to: skillFile)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let task = WorkTask(
+            title: "Design UI",
+            details: "Use stitch workflow",
+            requiredSkills: ["ui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let runtimeProfile = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5",
+            tools: ["skill:google-stitch", "git"],
+            openAIAuthMode: .codexBridge
+        )
+        let agent = AgentProfile(
+            name: "Designer",
+            skills: ["ui"],
+            maxConcurrentTasks: 1,
+            runtimeProfile: runtimeProfile
+        )
+
+        let prompt = KanbanBoardViewModelTestHooks.codexPrompt(
+            languageOverrideRawValue: AppLanguage.english.rawValue,
+            task: task,
+            agent: agent,
+            environment: ["CODEX_HOME": codexHome.path]
+        )
+
+        #expect(prompt.contains("Codex skills for this run"))
+        #expect(prompt.contains("- [$google-stitch](\(skillFile.path))"))
+        #expect(prompt.contains("Task required skills hint: ui"))
+    }
+
+    @Test("codex prompt keeps unresolved codex skill names as hints")
+    func codexPromptKeepsUnresolvedSkillHints() {
+        let task = WorkTask(
+            title: "Implement",
+            details: "Use requested workflow",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let runtimeProfile = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5",
+            tools: ["skill:unknown-skill"],
+            openAIAuthMode: .codexBridge
+        )
+        let agent = AgentProfile(
+            name: "Executor",
+            skills: ["automation"],
+            maxConcurrentTasks: 1,
+            runtimeProfile: runtimeProfile
+        )
+
+        let prompt = KanbanBoardViewModelTestHooks.codexPrompt(
+            languageOverrideRawValue: AppLanguage.english.rawValue,
+            task: task,
+            agent: agent
+        )
+
+        #expect(prompt.contains("Codex skills for this run"))
+        #expect(prompt.contains("- $unknown-skill"))
+        #expect(!prompt.contains("[$unknown-skill]("))
+    }
+
+    @Test("codex prompt resolves namespaced plugin cache skills")
+    func codexPromptResolvesNamespacedPluginCacheSkills() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("openmac-codex-plugin-skill-\(UUID().uuidString)")
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let skillDirectory = codexHome
+            .appendingPathComponent("plugins/cache/openai-curated/build-ios-apps/abcdef1234567890/skills", isDirectory: true)
+            .appendingPathComponent("ios-debugger-agent", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        let skillFile = skillDirectory.appendingPathComponent("SKILL.md", isDirectory: false)
+        try Data("# namespaced skill".utf8).write(to: skillFile)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let task = WorkTask(
+            title: "Run iOS app",
+            details: "debug simulator behavior",
+            requiredSkills: ["ios"],
+            storyPoints: 3,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let runtimeProfile = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5",
+            tools: ["skill:build-ios-apps:ios-debugger-agent"],
+            openAIAuthMode: .codexBridge
+        )
+        let agent = AgentProfile(
+            name: "iOS Agent",
+            skills: ["ios"],
+            maxConcurrentTasks: 1,
+            runtimeProfile: runtimeProfile
+        )
+
+        let prompt = KanbanBoardViewModelTestHooks.codexPrompt(
+            languageOverrideRawValue: AppLanguage.english.rawValue,
+            task: task,
+            agent: agent,
+            environment: ["CODEX_HOME": codexHome.path]
+        )
+
+        #expect(prompt.contains("- [$build-ios-apps:ios-debugger-agent](\(skillFile.path))"))
+    }
+
     @Test("endpoint resolution normalizes configured and environment base URLs")
     func endpointResolutionNormalizationRules() {
         #expect(
@@ -7192,6 +7314,24 @@ struct ContentViewLogicTests {
         #expect(normalized == ["backend", "qa", "swiftui"])
     }
 
+    @Test("codex skill mapping builds capability labels and template previews")
+    func codexSkillMappingCoverage() {
+        let labels = ContentViewTestHooks.codexCapabilityLabels(for: "build-ios-apps:swiftui-ui-patterns")
+        #expect(labels.contains("swiftui"))
+        #expect(labels.contains("ui"))
+
+        let previews = ContentViewTestHooks.codexSkillTemplatePreviews(
+            skillNames: [
+                "build-ios-apps:swiftui-ui-patterns",
+                "google-stitch",
+                "build-ios-apps:swiftui-ui-patterns"
+            ]
+        )
+        #expect(previews.count == 2)
+        #expect(previews.first(where: { $0.id == "codex-skill:build-ios-apps:swiftui-ui-patterns" }) != nil)
+        #expect(previews.contains(where: { $0.labels.contains("ux") }))
+    }
+
     @Test("pm planner template options expose expected quick-start ids")
     func pmPlannerTemplateOptionIDsCoverage() {
         let optionIDs = ContentViewTestHooks.pmBriefTemplateOptionIDs()
@@ -11261,6 +11401,27 @@ struct KanbanPersistenceTests {
         #expect(eligible.first?.id == qualifiedAgent.id)
     }
 
+    @Test("assignable agents include partial skill matches when enabled")
+    func assignableAgentsAllowPartialSkillMatches() {
+        let task = WorkTask(
+            title: "Docs and release",
+            details: "",
+            requiredSkills: ["documentation", "release", "testing"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let partialAgent = AgentProfile(name: "Doc Agent", skills: ["documentation"], maxConcurrentTasks: 2)
+        let mismatchAgent = AgentProfile(name: "UI Agent", skills: ["swiftui"], maxConcurrentTasks: 2)
+        let viewModel = KanbanBoardViewModel(tasks: [task], agents: [partialAgent, mismatchAgent])
+
+        let strictEligible = viewModel.assignableAgents(for: task.id)
+        let partialEligible = viewModel.assignableAgents(for: task.id, allowPartialSkillMatch: true)
+
+        #expect(strictEligible.isEmpty)
+        #expect(partialEligible.map(\.id) == [partialAgent.id])
+    }
+
     @Test("resolves triage assignments by keeping valid selections and dropping stale task ids")
     func resolvesTriageAssignmentsKeepingValidSelections() {
         let firstTask = WorkTask(
@@ -11517,6 +11678,28 @@ struct KanbanPersistenceTests {
         #expect(viewModel.tasks.first(where: { $0.id == testingTask.id })?.assignedAgentID == nil)
         #expect(viewModel.triageCandidates().count == 1)
         #expect(store.savedSnapshots.count == 1)
+    }
+
+    @Test("bulk triage can assign partial skill matches when enabled")
+    func bulkTriageAssignsPartialSkillMatchesWhenEnabled() {
+        let releaseTask = WorkTask(
+            title: "Release and docs",
+            details: "",
+            requiredSkills: ["release", "documentation"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let partialAgent = AgentProfile(name: "Release Agent", skills: ["release"], maxConcurrentTasks: 1)
+        let viewModel = KanbanBoardViewModel(tasks: [releaseTask], agents: [partialAgent])
+
+        let strictAssigned = viewModel.bulkAssignTriageTasks()
+        let partialAssigned = viewModel.bulkAssignTriageTasks(allowPartialSkillMatch: true)
+
+        #expect(strictAssigned == 0)
+        #expect(partialAssigned == 1)
+        #expect(viewModel.tasks.first(where: { $0.id == releaseTask.id })?.assignedAgentID == partialAgent.id)
+        #expect(viewModel.triageCandidates().isEmpty)
     }
 
     @Test("bulk triage reports partial assignment when some tasks still need manual triage")

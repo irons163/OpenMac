@@ -112,6 +112,11 @@
 "Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model." = "Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model.";
 "Reasoning Effort" = "Reasoning Effort";
 "Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort." = "Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort.";
+"Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)." = "Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`).";
+"Codex Skills" = "Codex Skills";
+"Add Codex Skill" = "Add Codex Skill";
+"Selected Codex Skills: %@" = "Selected Codex Skills: %@";
+"No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`." = "No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`.";
 "Automatic" = "Automatic";
 "Minimal" = "Minimal";
 "Low" = "Low";
@@ -704,3 +709,5 @@
 "Cancellation requested for \"%@\"" = "Cancellation requested for \"%@\"";
 "Cancellation requested for %d running task(s)" = "Cancellation requested for %d running task(s)";
 "Execution cancelled by user" = "Execution cancelled by user";
+
+"Allow partial skill match" = "Allow partial skill match";

@@ -118,6 +118,11 @@
 "Medium" = "Moyen";
 "High" = "Élevé";
 "XHigh" = "Très élevé";
+"Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)." = "Astuce : ajoutez `skill:<name>` dans Outils pour charger des Skills Codex (par exemple : `skill:google-stitch`).";
+"Codex Skills" = "Compétences Codex";
+"Add Codex Skill" = "Ajouter une compétence Codex";
+"Selected Codex Skills: %@" = "Compétences Codex sélectionnées : %@";
+"No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`." = "Aucune compétence Codex locale trouvée. Installez des compétences dans `~/.codex/skills` ou `$CODEX_HOME/skills`.";
 "Use Folder" = "Utiliser ce dossier";
 "%@ (%@)" = "%@ (%@)";
 "%d %@" = "%d %@";
@@ -705,3 +710,5 @@
 "Cancellation requested for \"%@\"" = "Cancellation requested for \"%@\"";
 "Cancellation requested for %d running task(s)" = "Cancellation requested for %d running task(s)";
 "Execution cancelled by user" = "Execution cancelled by user";
+
+"Allow partial skill match" = "Autoriser la correspondance partielle des compétences";

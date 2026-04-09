@@ -741,6 +741,246 @@ struct TaskTemplate: Identifiable, Equatable, Codable {
     }
 }
 
+struct CodexSkillRootDescriptor: Equatable {
+    var url: URL
+    var namespacePrefix: String?
+
+    fileprivate var normalizedKey: String {
+        let normalizedPrefix = namespacePrefix?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return url.path.lowercased() + "|" + normalizedPrefix
+    }
+}
+
+enum CodexSkillCatalog {
+    static func rootDescriptors(
+        environment: [String: String],
+        fallbackHomeDirectoryPath: String,
+        fileManager: FileManager = .default
+    ) -> [CodexSkillRootDescriptor] {
+        var roots: [CodexSkillRootDescriptor] = []
+
+        func appendUnique(_ descriptor: CodexSkillRootDescriptor) {
+            guard !roots.contains(where: { $0.normalizedKey == descriptor.normalizedKey }) else { return }
+            roots.append(descriptor)
+        }
+
+        if let codexHomeRaw = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !codexHomeRaw.isEmpty {
+            let codexHomePath = (codexHomeRaw as NSString).expandingTildeInPath
+            let codexHomeURL = URL(fileURLWithPath: codexHomePath, isDirectory: true)
+            appendUnique(
+                CodexSkillRootDescriptor(
+                    url: codexHomeURL.appendingPathComponent("skills", isDirectory: true),
+                    namespacePrefix: nil
+                )
+            )
+            for descriptor in pluginCacheSkillRoots(codexHomeURL: codexHomeURL, fileManager: fileManager) {
+                appendUnique(descriptor)
+            }
+        }
+
+        let resolvedHomePath: String = {
+            let raw = environment["HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if raw.isEmpty {
+                return fallbackHomeDirectoryPath
+            }
+            return (raw as NSString).expandingTildeInPath
+        }()
+
+        if !resolvedHomePath.isEmpty {
+            let codexHomeURL = URL(fileURLWithPath: resolvedHomePath, isDirectory: true)
+                .appendingPathComponent(".codex", isDirectory: true)
+            appendUnique(
+                CodexSkillRootDescriptor(
+                    url: codexHomeURL.appendingPathComponent("skills", isDirectory: true),
+                    namespacePrefix: nil
+                )
+            )
+            for descriptor in pluginCacheSkillRoots(codexHomeURL: codexHomeURL, fileManager: fileManager) {
+                appendUnique(descriptor)
+            }
+        }
+
+        return roots
+    }
+
+    static func discoverSkillNames(
+        environment: [String: String],
+        fallbackHomeDirectoryPath: String,
+        fileManager: FileManager = .default
+    ) -> [String] {
+        let roots = rootDescriptors(
+            environment: environment,
+            fallbackHomeDirectoryPath: fallbackHomeDirectoryPath,
+            fileManager: fileManager
+        )
+        var discovered = Set<String>()
+
+        for root in roots {
+            guard fileManager.fileExists(atPath: root.url.path) else { continue }
+            guard let entries = try? fileManager.contentsOfDirectory(
+                at: root.url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            let normalizedPrefix = normalizedNamespacePrefix(root.namespacePrefix)
+
+            for entry in entries {
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    continue
+                }
+                let skillFile = entry.appendingPathComponent("SKILL.md", isDirectory: false)
+                guard fileManager.fileExists(atPath: skillFile.path) else { continue }
+
+                let rawName = entry.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !rawName.isEmpty else { continue }
+
+                if let normalizedPrefix {
+                    discovered.insert("\(normalizedPrefix):\(rawName)")
+                } else {
+                    discovered.insert(rawName)
+                }
+            }
+        }
+
+        return discovered.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    static func resolveSkillPath(
+        skillName: String,
+        rootDescriptors: [CodexSkillRootDescriptor],
+        fileManager: FileManager = .default
+    ) -> String? {
+        let trimmedName = skillName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return nil }
+
+        let requestedPrefix: String?
+        let requestedSkillName: String
+        if let separator = trimmedName.firstIndex(of: ":") {
+            requestedPrefix = normalizedNamespacePrefix(String(trimmedName[..<separator]))
+            requestedSkillName = String(trimmedName[trimmedName.index(after: separator)...])
+        } else {
+            requestedPrefix = nil
+            requestedSkillName = trimmedName
+        }
+
+        let normalizedRequestedSkillName = requestedSkillName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedRequestedSkillName.isEmpty else { return nil }
+
+        for root in rootDescriptors {
+            let rootPrefix = normalizedNamespacePrefix(root.namespacePrefix)
+            if let requestedPrefix {
+                guard requestedPrefix == rootPrefix else { continue }
+            }
+
+            let directSkillFile = root.url
+                .appendingPathComponent(normalizedRequestedSkillName, isDirectory: true)
+                .appendingPathComponent("SKILL.md", isDirectory: false)
+            if fileManager.fileExists(atPath: directSkillFile.path) {
+                return directSkillFile.path
+            }
+
+            if requestedPrefix == nil {
+                let fullNameSkillFile = root.url
+                    .appendingPathComponent(trimmedName, isDirectory: true)
+                    .appendingPathComponent("SKILL.md", isDirectory: false)
+                if fileManager.fileExists(atPath: fullNameSkillFile.path) {
+                    return fullNameSkillFile.path
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func pluginCacheSkillRoots(
+        codexHomeURL: URL,
+        fileManager: FileManager
+    ) -> [CodexSkillRootDescriptor] {
+        let cacheURL = codexHomeURL
+            .appendingPathComponent("plugins", isDirectory: true)
+            .appendingPathComponent("cache", isDirectory: true)
+        guard fileManager.fileExists(atPath: cacheURL.path) else { return [] }
+        guard let enumerator = fileManager.enumerator(
+            at: cacheURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var roots: [CodexSkillRootDescriptor] = []
+        let cachePathPrefix = cacheURL.path.hasSuffix("/") ? cacheURL.path : cacheURL.path + "/"
+
+        for case let url as URL in enumerator {
+            guard url.lastPathComponent == "skills" else { continue }
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+            guard url.path.hasPrefix(cachePathPrefix) else { continue }
+
+            let relativePath = String(url.path.dropFirst(cachePathPrefix.count))
+            let namespacePrefix = pluginNamespace(fromRelativeCacheSkillsPath: relativePath)
+            roots.append(
+                CodexSkillRootDescriptor(
+                    url: url,
+                    namespacePrefix: namespacePrefix
+                )
+            )
+            enumerator.skipDescendants()
+        }
+
+        return roots
+    }
+
+    private static func pluginNamespace(fromRelativeCacheSkillsPath relativePath: String) -> String? {
+        let components = relativePath
+            .split(separator: "/")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard components.last?.lowercased() == "skills" else { return nil }
+
+        if components.count >= 4 {
+            return normalizedNamespacePrefix(components[1])
+        }
+
+        if components.count == 3 {
+            if looksLikeVersionOrHash(components[1]) {
+                return normalizedNamespacePrefix(components[0])
+            }
+            return normalizedNamespacePrefix(components[1])
+        }
+
+        if components.count == 2 {
+            return normalizedNamespacePrefix(components[0])
+        }
+
+        return nil
+    }
+
+    private static func looksLikeVersionOrHash(_ value: String) -> Bool {
+        let lowered = value.lowercased()
+        if lowered.hasPrefix("v") { return true }
+        if lowered.count >= 8 && lowered.allSatisfy({ $0.isHexDigit }) { return true }
+        return false
+    }
+
+    private static func normalizedNamespacePrefix(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 struct TaskExecutionRecord: Equatable, Codable {
     var status: TaskExecutionStatus
     var runCount: Int

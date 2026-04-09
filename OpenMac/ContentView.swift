@@ -28,6 +28,27 @@ private struct PMBriefTemplateDefinition: Equatable {
     let briefKey: String
 }
 
+private struct CodexSkillTemplateOption: Identifiable, Equatable {
+    let id: String
+    let skillName: String
+    let title: String
+    let suggestedTaskTitle: String
+    let suggestedTaskDetails: String
+    let capabilityLabels: [String]
+    let storyPoints: Int
+
+    var requiredSkillsText: String {
+        capabilityLabels.joined(separator: ", ")
+    }
+}
+
+private struct AssigneeFilterOption: Identifiable, Hashable {
+    let key: String
+    let label: String
+
+    var id: String { key }
+}
+
 struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("appearanceMode") private var appearanceModeRawValue = AppAppearanceMode.system.rawValue
@@ -62,6 +83,7 @@ struct ContentView: View {
     @State private var newTaskPoints = 1
     @State private var newTaskDeliveryContract = TaskDeliveryContract.defaultContract
     @State private var selectedTaskTemplateID: UUID?
+    @State private var selectedCodexSkillTemplateID = ""
     @State private var editingTaskID: UUID?
     @State private var editTaskTitle = ""
     @State private var editTaskDetails = ""
@@ -79,6 +101,7 @@ struct ContentView: View {
     @State private var newAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .codexBridge
     @State private var newAgentCodexProfile = ""
     @State private var newAgentCodexReasoningEffort: CodexReasoningEffort = .automatic
+    @State private var discoveredCodexSkillNames: [String] = []
     @State private var editingAgentID: UUID?
     @State private var editAgentName = ""
     @State private var editAgentSkills = ""
@@ -94,6 +117,7 @@ struct ContentView: View {
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
+    @State private var manualTriageAllowPartialSkillMatch = false
     @State private var taskSearchQuery = ""
     @State private var globalTaskSearchQuery = ""
     @State private var selectedAssigneeFilterKey = "all"
@@ -200,115 +224,7 @@ struct ContentView: View {
             }
             .navigationTitle(L10n.string("AI Agents"))
         } detail: {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.string("AI Agent Kanban Dispatch"))
-                                .font(.title2.weight(.semibold))
-                            Text(L10n.format("Board: %@", viewModel.selectedBoardName))
-                                .font(.caption)
-                                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-                        }
-                        Spacer()
-                        if !viewModel.triageCandidates().isEmpty {
-                            Text(L10n.format("%d task(s) need manual triage", viewModel.triageCandidates().count))
-                                .font(.callout)
-                                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
-                        }
-                        if viewModel.pendingApprovalTaskCount > 0 {
-                            Text(L10n.format("Pending approvals: %d", viewModel.pendingApprovalTaskCount))
-                                .font(.callout)
-                                .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
-                        }
-                    }
-
-                    BoardHealthSummaryView(
-                        totalTasks: viewModel.totalTaskCount,
-                        todoTasks: viewModel.todoTaskCount,
-                        unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
-                        overloadedAgents: viewModel.overloadedAgentCount,
-                        healthScore: viewModel.boardHealthScore,
-                        healthLabel: viewModel.boardHealthLabel,
-                        healthBreakdownText: viewModel.boardHealthBreakdownText,
-                        inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
-                        reviewPressure: viewModel.wipPressurePercent(for: .review),
-                        blockedTasks: selectedBoardDependencyInsights.blockedTaskCount,
-                        criticalPathStoryPoints: selectedBoardDependencyInsights.criticalPathStoryPoints
-                    )
-
-                    BoardHealthRecommendationsView(
-                        recommendations: viewModel.healthRecommendations(),
-                        onAction: applyHealthRecommendation,
-                        onApplyAll: applyAllHealthRecommendations
-                    )
-
-                    BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
-                    pmPlannerStatusSection()
-
-                    HStack(spacing: 12) {
-                        TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 300)
-
-                        Picker(L10n.string("Assignee"), selection: $selectedAssigneeFilterKey) {
-                            ForEach(assigneeFilterOptions, id: \.key) { option in
-                                Text(option.label).tag(option.key)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        Text(L10n.format("Showing %d / %d", filteredTaskCount, viewModel.tasks.count))
-                            .font(.caption)
-                            .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
-
-                        Button(L10n.string("Reset Filters")) {
-                            resetTaskFilters()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(taskSearchQuery.isEmpty && selectedAssigneeFilterKey == "all")
-
-                        Spacer()
-                    }
-
-                    if let message = viewModel.lastBoardMessage {
-                        boardMessageSection(message)
-                    }
-
-                    sharedAgentMemorySection()
-
-                    if let selectedAgent = selectedAgentForConsole {
-                        AgentLiveConsoleView(
-                            agentName: selectedAgent.name,
-                            isRunning: viewModel.isAgentExecutionRunning(selectedAgent.id),
-                            events: viewModel.executionEvents(for: selectedAgent.id),
-                            onCopy: copyToPasteboard,
-                            onClear: {
-                                viewModel.clearExecutionEvents(for: selectedAgent.id)
-                            }
-                        )
-                    }
-
-                    ScrollView(.horizontal) {
-                        HStack(alignment: .top, spacing: 14) {
-                            ForEach(KanbanStatus.allCases) { status in
-                                kanbanColumn(for: status)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
-            }
-            .background(
-                LinearGradient(
-                    colors: detailBackgroundColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            detailBoardContent
         }
         .toolbar {
             ToolbarItemGroup {
@@ -338,7 +254,7 @@ struct ContentView: View {
                 .help(L10n.string("Auto-assign then batch-run in repeated passes until queue is stable"))
                 .disabled(isAutoCycleRunning ? viewModel.isAutoCycleCancelRequested : !canRunAutoCycle)
                 Button(L10n.string("New Task")) {
-                    isShowingNewTaskSheet = true
+                    openNewTaskSheet()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
                 .help(L10n.string("Create a new task (Command-N)"))
@@ -824,353 +740,43 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $isShowingNewBoardSheet) {
-            NewBoardSheet(
-                name: $newBoardName,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: closeNewBoardSheet,
-                onCreate: createBoardFromSheet
-            )
+            newBoardSheetView
         }
         .sheet(isPresented: $isShowingRenameBoardSheet) {
-            RenameBoardSheet(
-                name: $renameBoardName,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: closeRenameBoardSheet,
-                onRename: renameBoardFromSheet
-            )
+            renameBoardSheetView
         }
         .sheet(isPresented: $isShowingGlobalTaskFinder) {
-            GlobalTaskSearchSheet(
-                query: $globalTaskSearchQuery,
-                results: globalTaskSearchResults,
-                onOpenResult: openGlobalTaskSearchResult,
-                onClose: closeGlobalTaskFinder
-            )
+            globalTaskFinderSheetView
         }
         .sheet(isPresented: $isShowingPMPlannerSheet) {
-            PMPlannerSheet(
-                projectName: $pmProjectName,
-                projectBrief: $pmProjectBrief,
-                autoAssignAfterCreate: $pmAutoAssignAfterCreate,
-                createNewBoardForPlan: $pmCreateNewBoardForPlan,
-                autopilotMaxPasses: $autoCycleMaxPasses,
-                autoCreateMissingDependenciesDuringCycle: $autoCycleAutoCreateMissingDependencies,
-                planSummary: pmPlanSummary,
-                plannedTickets: $pmPlannedTickets,
-                plannerEngineMode: $pmPlannerEngineMode,
-                pmPluginsAutoDiscover: viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
-                pmPluginsDirectoryPath: viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath,
-                pmLocalPluginCount: viewModel.pmPlanningLocalPluginCount(),
-                pmLocalPluginNames: viewModel.pmPlanningLocalPluginNames(),
-                ticketDeliveryProfile: $pmTicketDeliveryProfile,
-                realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
-                selectedTemplateID: $pmSelectedTemplateID,
-                templateOptions: pmTemplateOptions,
-                blueprintVision: $pmBlueprintVision,
-                blueprintTargetUsers: $pmBlueprintTargetUsers,
-                blueprintCoreFeatures: $pmBlueprintCoreFeatures,
-                blueprintTechScope: $pmBlueprintTechScope,
-                blueprintConstraints: $pmBlueprintConstraints,
-                blueprintQualityBar: $pmBlueprintQualityBar,
-                plannerExtensions: pmPlannerExtensions,
-                plannerPanelCommands: plannerPanelPMExtensionCommands,
-                runningExtensionCommandIDs: runningExtensionCommandIDs,
-                brainstormFocus: $pmBrainstormFocus,
-                brainstormTranscript: $pmBrainstormTranscript,
-                brainstormStatusText: $pmBrainstormStatusText,
-                brainstormRoundCount: $pmBrainstormRoundCount,
-                isBrainstormRunning: $pmBrainstormIsRunning,
-                plannerExtensionFieldValues: $pmPlannerExtensionFieldValues,
-                testPlanText: pmTestPlanText,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: closePMPlannerSheet,
-                onApplyTemplate: applyPMTemplateFromSheet,
-                onApplyTemplateAndGenerate: applyAndGeneratePMTemplateFromSheet,
-                onApplyBlueprint: applyPMBlueprintFromSheet,
-                onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
-                onRunBrainstormRound: runPMBrainstormRoundFromSheet,
-                onApplyBrainstormToBrief: applyPMBrainstormToBriefFromSheet,
-                onApplyBrainstormAndGenerate: applyPMBrainstormAndGeneratePlanFromSheet,
-                onApplyBrainstormGenerateAndCreate: applyPMBrainstormGenerateAndCreateTicketsFromSheet,
-                onClearBrainstorm: clearPMBrainstormFromSheet,
-                onRunPlannerCommand: { command, inputs in
-                    runPMExtensionCommand(command, extensionInputs: inputs) { succeeded, detail in
-                        guard succeeded else { return }
-                        applyPlannerExtensionCommandOutputIfNeeded(
-                            command: command,
-                            extensionInputs: inputs,
-                            detail: detail
-                        )
-                    }
-                },
-                onGeneratePlan: generatePMPlanFromSheet,
-                onGenerateTestPlan: generatePMTestPlanFromSheet,
-                onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
-                onChainDependencies: applyPMDependencyChainFromSheet,
-                onAutoACForAllTickets: applyPMAutoAcceptanceCriteriaForAllTickets,
-                onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
-                onCreateTickets: createPMTicketsFromSheet,
-                onCreateAndRun: createAndRunPMTicketsFromSheet,
-                onRunAutopilot: runPMOneClickFlowFromSheet,
-                onCopyPlan: copyPMPlanFromSheet,
-                onCopyTestPlan: copyPMTestPlanFromSheet,
-                onCopyBlueprint: copyPMBlueprintFromSheet,
-                onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
-                onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
-                onRefreshPMPlugins: { refreshPMPluginDiagnostics() },
-                onInstallPMExtension: installPMExtensionFromFolder,
-                onOpenPMExtensionsMarketplace: openExtensionsMarketplaceSheet,
-                onCopyPMPluginDiagnostics: {
-                    let names = viewModel.pmPlanningLocalPluginNames()
-                    let namesText = names.isEmpty ? "-" : names.joined(separator: ", ")
-                    let diagnostics = [
-                        "\(L10n.string("Planning Engine")): \(viewModel.pmPlannerEngineMode.title)",
-                        L10n.format(
-                            "Plugin discovery: %@ · Local plugins: %d",
-                            viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins ? L10n.string("On") : L10n.string("Off"),
-                            names.count
-                        ),
-                        L10n.format("Plugins folder: %@", viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath),
-                        L10n.format("Detected plugins: %@", namesText)
-                    ].joined(separator: "\n")
-                    copyToPasteboard(diagnostics)
-                }
-            )
+            pmPlannerSheetView
         }
         .sheet(isPresented: $isShowingMCPServersSheet) {
-            MCPServersSheet(
-                autoFetchEnabled: $mcpAutoFetchEnabled,
-                registryURL: $mcpRegistryURL,
-                manualServerName: $mcpManualServerName,
-                manualBootstrapCommand: $mcpManualBootstrapCommand,
-                manualKeywordHints: $mcpManualKeywordHints,
-                isSyncingRegistry: isMCPRegistrySyncing,
-                statusText: viewModel.mcpServerStatusSummaryText(),
-                lastSyncError: viewModel.mcpServerPolicy.lastSyncError,
-                manualServers: viewModel.mcpServerPolicy.manualServers,
-                effectiveServers: viewModel.mcpServerPolicy.effectiveServers,
-                onApplySettings: applyMCPSettingsFromSheet,
-                onSyncRegistry: syncMCPRegistryNowFromToolbar,
-                onAddManualServer: addManualMCPServerFromSheet,
-                onToggleManualServer: { name, isEnabled in
-                    viewModel.setManualMCPServerEnabled(name: name, isEnabled: isEnabled)
-                },
-                onRemoveManualServer: removeManualMCPServerFromSheet,
-                onClose: closeMCPServersSheet
-            )
+            mcpServersSheetView
         }
         .sheet(isPresented: $isShowingExtensionsMarketplaceSheet) {
-            PMExtensionsMarketplaceSheet(
-                installedExtensions: installedPMExtensions,
-                commands: installedPMExtensionCommands,
-                configuredHooks: configuredPMExtensionHooks,
-                marketplacePanelCommands: marketplacePanelPMExtensionCommands,
-                marketplaceSources: pmExtensionMarketplaceSources,
-                observabilitySnapshots: pmExtensionObservabilitySnapshots,
-                acceptanceReport: viewModel.pmExtensionLastAcceptanceReport,
-                preferredChannel: viewModel.pmPreferredExtensionChannel(),
-                runningCommandIDs: runningExtensionCommandIDs,
-                activityLog: pmExtensionActivityLog,
-                pluginsFolderPath: resolvedPMPluginsDirectoryPath,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onInstallFromFolder: installPMExtensionFromFolder,
-                onInstallFromRemote: { source in
-                    _ = viewModel.installPMExtensionFromRemote(source)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onUpdateAllSources: {
-                    _ = viewModel.updateAllPMExtensionsFromMarketplaceSources()
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onInstallByID: { pluginID in
-                    _ = viewModel.installPMExtensionByID(pluginID)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onSetPreferredChannel: { channel in
-                    viewModel.updatePMPreferredExtensionChannel(channel)
-                },
-                onRescan: { refreshPMPluginDiagnostics() },
-                onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
-                onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
-                onUninstall: { pluginID in
-                    _ = viewModel.uninstallPMExtension(pluginID: pluginID)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onLockToInstalledVersion: { pluginID in
-                    _ = viewModel.lockPMExtensionToInstalledVersion(pluginID: pluginID)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onUnlockVersion: { pluginID in
-                    _ = viewModel.unlockPMExtensionVersion(pluginID: pluginID)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onSetExtensionEnabled: { pluginID, enabled in
-                    _ = viewModel.setPMExtensionEnabled(pluginID: pluginID, enabled: enabled)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onAddSource: { name, source in
-                    _ = viewModel.addPMExtensionMarketplaceSource(name: name, source: source)
-                },
-                onRemoveSource: { sourceID in
-                    _ = viewModel.removePMExtensionMarketplaceSource(id: sourceID)
-                },
-                onInstallSource: { sourceID in
-                    _ = viewModel.installPMExtensionFromMarketplaceSource(id: sourceID)
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onRunCommand: runPMExtensionCommandFromToolbar,
-                onDryRunCommand: { command, inputs in
-                    runPMExtensionCommand(command, extensionInputs: inputs)
-                },
-                onAddBoardHook: { event, commandDescriptorID in
-                    _ = viewModel.addPMBoardExtensionHook(
-                        eventRawValue: event,
-                        commandDescriptorID: commandDescriptorID
-                    )
-                },
-                onSetBoardHookEnabled: { hookID, isEnabled in
-                    _ = viewModel.setPMBoardExtensionHookEnabled(
-                        hookID: hookID,
-                        isEnabled: isEnabled
-                    )
-                },
-                onRemoveBoardHook: { hookID in
-                    _ = viewModel.removePMBoardExtensionHook(hookID: hookID)
-                },
-                onRunE2EAcceptance: {
-                    _ = viewModel.runPMExtensionE2EAcceptance()
-                    refreshPMPluginDiagnostics(announce: false)
-                },
-                onCopyE2EReport: { copyToPasteboard(viewModel.pmExtensionAcceptanceReportText()) },
-                onCopyObservability: { copyToPasteboard(viewModel.pmExtensionObservabilityText()) },
-                onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
-                onClearActivityLog: viewModel.clearPMExtensionActivityLog,
-                onClose: closeExtensionsMarketplaceSheet
-            )
+            extensionsMarketplaceSheetView
         }
         .sheet(isPresented: $isShowingNewTaskSheet) {
-            NewTaskSheet(
-                title: $newTaskTitle,
-                details: $newTaskDetails,
-                skills: $newTaskSkills,
-                storyPoints: $newTaskPoints,
-                deliveryContract: $newTaskDeliveryContract,
-                selectedTemplateID: $selectedTaskTemplateID,
-                templates: viewModel.taskTemplates,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: resetDraftAndClose,
-                onApplyTemplate: applySelectedTaskTemplateFromSheet,
-                onSaveAsTemplate: saveCurrentTaskAsTemplateFromSheet,
-                onCreate: { createTaskFromSheet(autoAssign: false) },
-                onCreateAutoAssign: { createTaskFromSheet(autoAssign: true) }
-            )
+            newTaskSheetView
         }
         .sheet(isPresented: $isShowingWIPSettingsSheet) {
-            WIPSettingsSheet(
-                inProgressLimit: $inProgressWIPLimitDraft,
-                reviewLimit: $reviewWIPLimitDraft,
-                onCancel: { isShowingWIPSettingsSheet = false },
-                onApply: applyWIPSettings
-            )
+            wipSettingsSheetView
         }
         .sheet(isPresented: $isShowingEditTaskSheet) {
-            EditTaskSheet(
-                title: $editTaskTitle,
-                details: $editTaskDetails,
-                skills: $editTaskSkills,
-                storyPoints: $editTaskPoints,
-                deliveryContract: $editTaskDeliveryContract,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: closeEditTaskSheet,
-                onSave: applyTaskEdits
-            )
+            editTaskSheetView
         }
         .sheet(isPresented: $isShowingNewAgentSheet) {
-            NewAgentSheet(
-                name: $newAgentName,
-                skills: $newAgentSkills,
-                maxConcurrentTasks: $newAgentCapacity,
-                runtimeEnabled: $newAgentRuntimeEnabled,
-                runtimeProvider: $newAgentRuntimeProvider,
-                runtimeModel: $newAgentRuntimeModel,
-                runtimeEndpoint: $newAgentRuntimeEndpoint,
-                runtimeTools: $newAgentRuntimeTools,
-                openAIAuthMode: $newAgentOpenAIAuthMode,
-                codexProfile: $newAgentCodexProfile,
-                codexReasoningEffort: $newAgentCodexReasoningEffort,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: resetAgentDraftAndClose,
-                onCreate: {
-                    let added = viewModel.addAgent(
-                        name: newAgentName,
-                        skillsText: newAgentSkills,
-                        maxConcurrentTasks: newAgentCapacity,
-                        runtimeProfile: buildRuntimeProfile(
-                            isEnabled: newAgentRuntimeEnabled,
-                            provider: newAgentRuntimeProvider,
-                            model: newAgentRuntimeModel,
-                            endpoint: newAgentRuntimeEndpoint,
-                            toolsText: newAgentRuntimeTools,
-                            openAIAuthMode: newAgentOpenAIAuthMode,
-                            codexProfile: newAgentCodexProfile,
-                            codexReasoningEffort: newAgentCodexReasoningEffort
-                        )
-                    )
-                    if added {
-                        resetAgentDraftAndClose()
-                    }
-                }
-            )
+            newAgentSheetView
         }
         .sheet(isPresented: $isShowingEditAgentSheet) {
-            EditAgentSheet(
-                name: $editAgentName,
-                skills: $editAgentSkills,
-                maxConcurrentTasks: $editAgentCapacity,
-                runtimeEnabled: $editAgentRuntimeEnabled,
-                runtimeProvider: $editAgentRuntimeProvider,
-                runtimeModel: $editAgentRuntimeModel,
-                runtimeEndpoint: $editAgentRuntimeEndpoint,
-                runtimeTools: $editAgentRuntimeTools,
-                openAIAuthMode: $editAgentOpenAIAuthMode,
-                codexProfile: $editAgentCodexProfile,
-                codexReasoningEffort: $editAgentCodexReasoningEffort,
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                onCancel: closeEditAgentSheet,
-                onSave: applyAgentEdits
-            )
+            editAgentSheetView
         }
         .sheet(isPresented: $isShowingManualTriageSheet) {
-            ManualTriageSheet(
-                tasks: viewModel.triageCandidates(),
-                boardMessage: viewModel.lastBoardMessage,
-                boardMessageSeverity: viewModel.lastBoardMessageSeverity,
-                selectedAgentByTaskID: $triageSelectionByTaskID,
-                assignAllEligibleCount: viewModel.bulkAssignableTriageTaskCount(using: triageSelectionByTaskID),
-                unassignableTaskCount: viewModel.bulkUnassignableTriageTaskCount(using: triageSelectionByTaskID),
-                assignableAgents: { task in
-                    viewModel.assignableAgents(for: task.id)
-                },
-                loadText: { agent in "\(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)" },
-                onAssign: assignManually,
-                onAssignAll: assignAllManually,
-                onClose: { isShowingManualTriageSheet = false }
-            )
+            manualTriageSheetView
         }
         .sheet(item: $selectedExecutionDetails) { details in
-            ExecutionDetailsSheet(
-                details: details,
-                onCopy: copyToPasteboard,
-                onClose: { selectedExecutionDetails = nil }
-            )
+            executionDetailsSheetView(for: details)
         }
         .onAppear {
             applyWindowAppearanceMode()
@@ -1189,6 +795,7 @@ struct ContentView: View {
             syncMCPDraftFromViewModel()
             syncPMPluginDraftFromViewModel()
             ensureCodexProjectsDirectoryExists()
+            refreshDiscoveredCodexSkills()
             viewModel.showXcodeDeveloperDirectoryWarningIfNeeded()
             viewModel.syncMCPServerRegistryInBackgroundIfNeeded()
         }
@@ -1219,10 +826,534 @@ struct ContentView: View {
             Button(L10n.string("Delete"), role: .destructive) {
                 removeSelectedBoard()
             }
-        } message: {
-            Text(L10n.format("Delete \"%@\" and all tasks/agents in it? This cannot be undone.", viewModel.selectedBoardName))
         }
         .preferredColorScheme(selectedAppearanceMode.preferredColorScheme)
+    }
+
+    @ViewBuilder
+    private var kanbanColumnsSection: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(KanbanStatus.allCases) { status in
+                    kanbanColumn(for: status)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var taskFilterBarSection: some View {
+        HStack(spacing: 12) {
+            TextField(L10n.string("Search tasks"), text: $taskSearchQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 300)
+
+            Picker(L10n.string("Assignee"), selection: $selectedAssigneeFilterKey) {
+                ForEach(assigneeFilterOptions) { option in
+                    Text(option.label)
+                        .tag(option.key as String)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text(L10n.format("Showing %d / %d", filteredTaskCount, viewModel.tasks.count))
+                .font(.caption)
+                .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+
+            Button(L10n.string("Reset Filters")) {
+                resetTaskFilters()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(taskSearchQuery.isEmpty && selectedAssigneeFilterKey == "all")
+
+            Spacer()
+        }
+    }
+
+    private var detailBoardContent: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 14) {
+                detailBoardHeaderAndHealthSection
+                detailBoardMessageSection
+                sharedAgentMemorySection()
+                detailSelectedAgentConsoleSection
+                kanbanColumnsSection
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .background(
+            LinearGradient(
+                colors: detailBackgroundColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    private var detailBoardHeaderAndHealthSection: some View {
+        Group {
+            boardHeaderSection
+
+            BoardHealthSummaryView(
+                totalTasks: viewModel.totalTaskCount,
+                todoTasks: viewModel.todoTaskCount,
+                unassignedTodoTasks: viewModel.unassignedTodoTaskCount,
+                overloadedAgents: viewModel.overloadedAgentCount,
+                healthScore: viewModel.boardHealthScore,
+                healthLabel: viewModel.boardHealthLabel,
+                healthBreakdownText: viewModel.boardHealthBreakdownText,
+                inProgressPressure: viewModel.wipPressurePercent(for: .inProgress),
+                reviewPressure: viewModel.wipPressurePercent(for: .review),
+                blockedTasks: selectedBoardDependencyInsights.blockedTaskCount,
+                criticalPathStoryPoints: selectedBoardDependencyInsights.criticalPathStoryPoints
+            )
+
+            BoardHealthRecommendationsView(
+                recommendations: viewModel.healthRecommendations(),
+                onAction: applyHealthRecommendation,
+                onApplyAll: applyAllHealthRecommendations
+            )
+
+            BoardDependencyInsightsView(insights: selectedBoardDependencyInsights)
+            pmPlannerStatusSection()
+            taskFilterBarSection
+        }
+    }
+
+    @ViewBuilder
+    private var detailBoardMessageSection: some View {
+        if let message = viewModel.lastBoardMessage {
+            boardMessageSection(message)
+        }
+    }
+
+    @ViewBuilder
+    private var detailSelectedAgentConsoleSection: some View {
+        if let selectedAgent = selectedAgentForConsole {
+            AgentLiveConsoleView(
+                agentName: selectedAgent.name,
+                isRunning: viewModel.isAgentExecutionRunning(selectedAgent.id),
+                events: viewModel.executionEvents(for: selectedAgent.id),
+                onCopy: copyToPasteboard,
+                onClear: {
+                    viewModel.clearExecutionEvents(for: selectedAgent.id)
+                }
+            )
+        }
+    }
+
+    private var boardHeaderSection: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.string("AI Agent Kanban Dispatch"))
+                    .font(.title2.weight(.semibold))
+                Text(L10n.format("Board: %@", viewModel.selectedBoardName))
+                    .font(.caption)
+                    .foregroundStyle(BoardNeutralTextPalette.color(for: .secondary, scheme: effectiveColorScheme))
+            }
+            Spacer()
+            if let triageText = manualTriageSummaryText {
+                Text(triageText)
+                    .font(.callout)
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+            }
+            if let approvalsText = pendingApprovalsSummaryText {
+                Text(approvalsText)
+                    .font(.callout)
+                    .foregroundStyle(BoardSemanticTextPalette.color(for: .warning, scheme: effectiveColorScheme))
+            }
+        }
+    }
+
+    private var manualTriageSummaryText: String? {
+        let manualTriageCount = viewModel.triageCandidates().count
+        guard manualTriageCount > 0 else { return nil }
+        return L10n.format("%d task(s) need manual triage", manualTriageCount)
+    }
+
+    private var pendingApprovalsSummaryText: String? {
+        let pendingCount = viewModel.pendingApprovalTaskCount
+        guard pendingCount > 0 else { return nil }
+        return L10n.format("Pending approvals: %d", pendingCount)
+    }
+
+    private var newBoardSheetView: some View {
+        NewBoardSheet(
+            name: $newBoardName,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: closeNewBoardSheet,
+            onCreate: createBoardFromSheet
+        )
+    }
+
+    private var renameBoardSheetView: some View {
+        RenameBoardSheet(
+            name: $renameBoardName,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: closeRenameBoardSheet,
+            onRename: renameBoardFromSheet
+        )
+    }
+
+    private var globalTaskFinderSheetView: some View {
+        GlobalTaskSearchSheet(
+            query: $globalTaskSearchQuery,
+            results: globalTaskSearchResults,
+            onOpenResult: openGlobalTaskSearchResult,
+            onClose: closeGlobalTaskFinder
+        )
+    }
+
+    private var pmPlannerSheetView: some View {
+        PMPlannerSheet(
+            projectName: $pmProjectName,
+            projectBrief: $pmProjectBrief,
+            autoAssignAfterCreate: $pmAutoAssignAfterCreate,
+            createNewBoardForPlan: $pmCreateNewBoardForPlan,
+            autopilotMaxPasses: $autoCycleMaxPasses,
+            autoCreateMissingDependenciesDuringCycle: $autoCycleAutoCreateMissingDependencies,
+            planSummary: pmPlanSummary,
+            plannedTickets: $pmPlannedTickets,
+            plannerEngineMode: $pmPlannerEngineMode,
+            pmPluginsAutoDiscover: viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins,
+            pmPluginsDirectoryPath: viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath,
+            pmLocalPluginCount: viewModel.pmPlanningLocalPluginCount(),
+            pmLocalPluginNames: viewModel.pmPlanningLocalPluginNames(),
+            ticketDeliveryProfile: $pmTicketDeliveryProfile,
+            realArtifactVerificationPreset: $pmRealArtifactVerificationPreset,
+            selectedTemplateID: $pmSelectedTemplateID,
+            templateOptions: pmTemplateOptions,
+            blueprintVision: $pmBlueprintVision,
+            blueprintTargetUsers: $pmBlueprintTargetUsers,
+            blueprintCoreFeatures: $pmBlueprintCoreFeatures,
+            blueprintTechScope: $pmBlueprintTechScope,
+            blueprintConstraints: $pmBlueprintConstraints,
+            blueprintQualityBar: $pmBlueprintQualityBar,
+            plannerExtensions: pmPlannerExtensions,
+            plannerPanelCommands: plannerPanelPMExtensionCommands,
+            runningExtensionCommandIDs: runningExtensionCommandIDs,
+            brainstormFocus: $pmBrainstormFocus,
+            brainstormTranscript: $pmBrainstormTranscript,
+            brainstormStatusText: $pmBrainstormStatusText,
+            brainstormRoundCount: $pmBrainstormRoundCount,
+            isBrainstormRunning: $pmBrainstormIsRunning,
+            plannerExtensionFieldValues: $pmPlannerExtensionFieldValues,
+            testPlanText: pmTestPlanText,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: closePMPlannerSheet,
+            onApplyTemplate: applyPMTemplateFromSheet,
+            onApplyTemplateAndGenerate: applyAndGeneratePMTemplateFromSheet,
+            onApplyBlueprint: applyPMBlueprintFromSheet,
+            onApplyBlueprintAndGenerate: applyAndGeneratePMBlueprintFromSheet,
+            onRunBrainstormRound: runPMBrainstormRoundFromSheet,
+            onApplyBrainstormToBrief: applyPMBrainstormToBriefFromSheet,
+            onApplyBrainstormAndGenerate: applyPMBrainstormAndGeneratePlanFromSheet,
+            onApplyBrainstormGenerateAndCreate: applyPMBrainstormGenerateAndCreateTicketsFromSheet,
+            onClearBrainstorm: clearPMBrainstormFromSheet,
+            onRunPlannerCommand: { command, inputs in
+                runPMExtensionCommand(command, extensionInputs: inputs) { succeeded, detail in
+                    guard succeeded else { return }
+                    applyPlannerExtensionCommandOutputIfNeeded(
+                        command: command,
+                        extensionInputs: inputs,
+                        detail: detail
+                    )
+                }
+            },
+            onGeneratePlan: generatePMPlanFromSheet,
+            onGenerateTestPlan: generatePMTestPlanFromSheet,
+            onCreateMissingAgents: createMissingAgentsFromPMPlanFromSheet,
+            onChainDependencies: applyPMDependencyChainFromSheet,
+            onAutoACForAllTickets: applyPMAutoAcceptanceCriteriaForAllTickets,
+            onAutoACTicket: applyPMAutoAcceptanceCriteriaForTicket,
+            onCreateTickets: createPMTicketsFromSheet,
+            onCreateAndRun: createAndRunPMTicketsFromSheet,
+            onRunAutopilot: runPMOneClickFlowFromSheet,
+            onCopyPlan: copyPMPlanFromSheet,
+            onCopyTestPlan: copyPMTestPlanFromSheet,
+            onCopyBlueprint: copyPMBlueprintFromSheet,
+            onOpenPMPluginsFolder: openPMPluginsDirectoryInFinder,
+            onCopyPMPluginsPath: { copyToPasteboard(viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath) },
+            onRefreshPMPlugins: { refreshPMPluginDiagnostics() },
+            onInstallPMExtension: installPMExtensionFromFolder,
+            onOpenPMExtensionsMarketplace: openExtensionsMarketplaceSheet,
+            onCopyPMPluginDiagnostics: copyPMPluginDiagnosticsFromSheet
+        )
+    }
+
+    private func copyPMPluginDiagnosticsFromSheet() {
+        let names = viewModel.pmPlanningLocalPluginNames()
+        let namesText: String
+        if names.isEmpty {
+            namesText = "-"
+        } else {
+            namesText = names.joined(separator: ", ")
+        }
+        let planningEngineLabel = L10n.string("Planning Engine")
+        let planningEngineLine = planningEngineLabel + ": " + viewModel.pmPlannerEngineMode.title
+        let pluginDiscoveryState = viewModel.pmPlanningPluginPolicy.autoDiscoverLocalPlugins
+            ? L10n.string("On")
+            : L10n.string("Off")
+        let pluginDiscoveryLine = L10n.format(
+            "Plugin discovery: %@ · Local plugins: %d",
+            pluginDiscoveryState,
+            names.count
+        )
+        let pluginsFolderLine = L10n.format(
+            "Plugins folder: %@",
+            viewModel.pmPlanningPluginPolicy.pluginsDirectoryPath
+        )
+        let detectedPluginsLine = L10n.format("Detected plugins: %@", namesText)
+        let diagnostics = [
+            planningEngineLine,
+            pluginDiscoveryLine,
+            pluginsFolderLine,
+            detectedPluginsLine
+        ].joined(separator: "\n")
+        copyToPasteboard(diagnostics)
+    }
+
+    private var mcpServersSheetView: some View {
+        MCPServersSheet(
+            autoFetchEnabled: $mcpAutoFetchEnabled,
+            registryURL: $mcpRegistryURL,
+            manualServerName: $mcpManualServerName,
+            manualBootstrapCommand: $mcpManualBootstrapCommand,
+            manualKeywordHints: $mcpManualKeywordHints,
+            isSyncingRegistry: isMCPRegistrySyncing,
+            statusText: viewModel.mcpServerStatusSummaryText(),
+            lastSyncError: viewModel.mcpServerPolicy.lastSyncError,
+            manualServers: viewModel.mcpServerPolicy.manualServers,
+            effectiveServers: viewModel.mcpServerPolicy.effectiveServers,
+            onApplySettings: applyMCPSettingsFromSheet,
+            onSyncRegistry: syncMCPRegistryNowFromToolbar,
+            onAddManualServer: addManualMCPServerFromSheet,
+            onToggleManualServer: { name, isEnabled in
+                viewModel.setManualMCPServerEnabled(name: name, isEnabled: isEnabled)
+            },
+            onRemoveManualServer: removeManualMCPServerFromSheet,
+            onClose: closeMCPServersSheet
+        )
+    }
+
+    private var extensionsMarketplaceSheetView: some View {
+        PMExtensionsMarketplaceSheet(
+            installedExtensions: installedPMExtensions,
+            commands: installedPMExtensionCommands,
+            configuredHooks: configuredPMExtensionHooks,
+            marketplacePanelCommands: marketplacePanelPMExtensionCommands,
+            marketplaceSources: pmExtensionMarketplaceSources,
+            observabilitySnapshots: pmExtensionObservabilitySnapshots,
+            acceptanceReport: viewModel.pmExtensionLastAcceptanceReport,
+            preferredChannel: viewModel.pmPreferredExtensionChannel(),
+            runningCommandIDs: runningExtensionCommandIDs,
+            activityLog: pmExtensionActivityLog,
+            pluginsFolderPath: resolvedPMPluginsDirectoryPath,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onInstallFromFolder: installPMExtensionFromFolder,
+            onInstallFromRemote: { source in
+                _ = viewModel.installPMExtensionFromRemote(source)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onUpdateAllSources: {
+                _ = viewModel.updateAllPMExtensionsFromMarketplaceSources()
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onInstallByID: { pluginID in
+                _ = viewModel.installPMExtensionByID(pluginID)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onSetPreferredChannel: { channel in
+                viewModel.updatePMPreferredExtensionChannel(channel)
+            },
+            onRescan: { refreshPMPluginDiagnostics() },
+            onOpenPluginsFolder: openPMPluginsDirectoryInFinder,
+            onCopyPluginsFolderPath: { copyToPasteboard(resolvedPMPluginsDirectoryPath) },
+            onUninstall: { pluginID in
+                _ = viewModel.uninstallPMExtension(pluginID: pluginID)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onLockToInstalledVersion: { pluginID in
+                _ = viewModel.lockPMExtensionToInstalledVersion(pluginID: pluginID)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onUnlockVersion: { pluginID in
+                _ = viewModel.unlockPMExtensionVersion(pluginID: pluginID)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onSetExtensionEnabled: { pluginID, enabled in
+                _ = viewModel.setPMExtensionEnabled(pluginID: pluginID, enabled: enabled)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onAddSource: { name, source in
+                _ = viewModel.addPMExtensionMarketplaceSource(name: name, source: source)
+            },
+            onRemoveSource: { sourceID in
+                _ = viewModel.removePMExtensionMarketplaceSource(id: sourceID)
+            },
+            onInstallSource: { sourceID in
+                _ = viewModel.installPMExtensionFromMarketplaceSource(id: sourceID)
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onRunCommand: runPMExtensionCommandFromToolbar,
+            onDryRunCommand: { command, inputs in
+                runPMExtensionCommand(command, extensionInputs: inputs)
+            },
+            onAddBoardHook: { event, commandDescriptorID in
+                _ = viewModel.addPMBoardExtensionHook(
+                    eventRawValue: event,
+                    commandDescriptorID: commandDescriptorID
+                )
+            },
+            onSetBoardHookEnabled: { hookID, isEnabled in
+                _ = viewModel.setPMBoardExtensionHookEnabled(
+                    hookID: hookID,
+                    isEnabled: isEnabled
+                )
+            },
+            onRemoveBoardHook: { hookID in
+                _ = viewModel.removePMBoardExtensionHook(hookID: hookID)
+            },
+            onRunE2EAcceptance: {
+                _ = viewModel.runPMExtensionE2EAcceptance()
+                refreshPMPluginDiagnostics(announce: false)
+            },
+            onCopyE2EReport: { copyToPasteboard(viewModel.pmExtensionAcceptanceReportText()) },
+            onCopyObservability: { copyToPasteboard(viewModel.pmExtensionObservabilityText()) },
+            onCopyActivityLog: { copyToPasteboard(viewModel.pmExtensionActivityLogText()) },
+            onClearActivityLog: viewModel.clearPMExtensionActivityLog,
+            onClose: closeExtensionsMarketplaceSheet
+        )
+    }
+
+    private var newTaskSheetView: some View {
+        NewTaskSheet(
+            title: $newTaskTitle,
+            details: $newTaskDetails,
+            skills: $newTaskSkills,
+            storyPoints: $newTaskPoints,
+            deliveryContract: $newTaskDeliveryContract,
+            selectedTemplateID: $selectedTaskTemplateID,
+            selectedCodexSkillTemplateID: $selectedCodexSkillTemplateID,
+            templates: viewModel.taskTemplates,
+            codexSkillTemplates: codexSkillTemplateOptions,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: resetDraftAndClose,
+            onApplyTemplate: applySelectedTaskTemplateFromSheet,
+            onApplyCodexSkillTemplate: applySelectedCodexSkillTemplateFromSheet,
+            onSaveAsTemplate: saveCurrentTaskAsTemplateFromSheet,
+            onCreate: { createTaskFromSheet(autoAssign: false) },
+            onCreateAutoAssign: { createTaskFromSheet(autoAssign: true) }
+        )
+    }
+
+    private var wipSettingsSheetView: some View {
+        WIPSettingsSheet(
+            inProgressLimit: $inProgressWIPLimitDraft,
+            reviewLimit: $reviewWIPLimitDraft,
+            onCancel: { isShowingWIPSettingsSheet = false },
+            onApply: applyWIPSettings
+        )
+    }
+
+    private var editTaskSheetView: some View {
+        EditTaskSheet(
+            title: $editTaskTitle,
+            details: $editTaskDetails,
+            skills: $editTaskSkills,
+            storyPoints: $editTaskPoints,
+            deliveryContract: $editTaskDeliveryContract,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: closeEditTaskSheet,
+            onSave: applyTaskEdits
+        )
+    }
+
+    private var newAgentSheetView: some View {
+        NewAgentSheet(
+            name: $newAgentName,
+            skills: $newAgentSkills,
+            maxConcurrentTasks: $newAgentCapacity,
+            runtimeEnabled: $newAgentRuntimeEnabled,
+            runtimeProvider: $newAgentRuntimeProvider,
+            runtimeModel: $newAgentRuntimeModel,
+            runtimeEndpoint: $newAgentRuntimeEndpoint,
+            runtimeTools: $newAgentRuntimeTools,
+            openAIAuthMode: $newAgentOpenAIAuthMode,
+            codexProfile: $newAgentCodexProfile,
+            codexReasoningEffort: $newAgentCodexReasoningEffort,
+            availableCodexSkills: discoveredCodexSkillNames,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: resetAgentDraftAndClose,
+            onCreate: createNewAgentFromSheet
+        )
+    }
+
+    private var editAgentSheetView: some View {
+        EditAgentSheet(
+            name: $editAgentName,
+            skills: $editAgentSkills,
+            maxConcurrentTasks: $editAgentCapacity,
+            runtimeEnabled: $editAgentRuntimeEnabled,
+            runtimeProvider: $editAgentRuntimeProvider,
+            runtimeModel: $editAgentRuntimeModel,
+            runtimeEndpoint: $editAgentRuntimeEndpoint,
+            runtimeTools: $editAgentRuntimeTools,
+            openAIAuthMode: $editAgentOpenAIAuthMode,
+            codexProfile: $editAgentCodexProfile,
+            codexReasoningEffort: $editAgentCodexReasoningEffort,
+            availableCodexSkills: discoveredCodexSkillNames,
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            onCancel: closeEditAgentSheet,
+            onSave: applyAgentEdits
+        )
+    }
+
+    private var manualTriageSheetView: some View {
+        ManualTriageSheet(
+            tasks: viewModel.triageCandidates(),
+            boardMessage: viewModel.lastBoardMessage,
+            boardMessageSeverity: viewModel.lastBoardMessageSeverity,
+            allowPartialSkillMatch: $manualTriageAllowPartialSkillMatch,
+            selectedAgentByTaskID: $triageSelectionByTaskID,
+            assignAllEligibleCount: viewModel.bulkAssignableTriageTaskCount(
+                using: triageSelectionByTaskID,
+                allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+            ),
+            unassignableTaskCount: viewModel.bulkUnassignableTriageTaskCount(
+                using: triageSelectionByTaskID,
+                allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+            ),
+            assignableAgents: { task in
+                viewModel.assignableAgents(
+                    for: task.id,
+                    allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+                )
+            },
+            loadText: { agent in "\(viewModel.activeTaskCount(for: agent.id))/\(agent.maxConcurrentTasks)" },
+            onAssign: assignManually,
+            onAssignAll: assignAllManually,
+            onAllowPartialSkillMatchChanged: refreshTriageSelections,
+            onClose: { isShowingManualTriageSheet = false }
+        )
+    }
+
+    private func executionDetailsSheetView(for details: ExecutionDetailsPresentation) -> some View {
+        ExecutionDetailsSheet(
+            details: details,
+            onCopy: copyToPasteboard,
+            onClose: { selectedExecutionDetails = nil }
+        )
     }
 
     private func resetDraftAndClose() {
@@ -1232,6 +1363,7 @@ struct ContentView: View {
         newTaskPoints = 1
         newTaskDeliveryContract = .defaultContract
         selectedTaskTemplateID = nil
+        selectedCodexSkillTemplateID = ""
         isShowingNewTaskSheet = false
     }
 
@@ -1240,10 +1372,27 @@ struct ContentView: View {
               let template = viewModel.taskTemplate(templateID) else {
             return
         }
+        selectedCodexSkillTemplateID = ""
         newTaskTitle = template.title
         newTaskDetails = template.details
         newTaskSkills = template.requiredSkillsText
         newTaskPoints = template.storyPoints
+    }
+
+    private func applySelectedCodexSkillTemplateFromSheet() {
+        guard let option = codexSkillTemplateOptions.first(where: { $0.id == selectedCodexSkillTemplateID }) else {
+            return
+        }
+
+        selectedTaskTemplateID = nil
+        newTaskTitle = option.suggestedTaskTitle
+        newTaskDetails = option.suggestedTaskDetails
+
+        let mergedSkills = Set(
+            Self.normalizedSkillList(from: newTaskSkills) + option.capabilityLabels
+        )
+        newTaskSkills = Array(mergedSkills).sorted().joined(separator: ", ")
+        newTaskPoints = option.storyPoints
     }
 
     private func saveCurrentTaskAsTemplateFromSheet() {
@@ -1309,6 +1458,28 @@ struct ContentView: View {
         newAgentCodexProfile = ""
         newAgentCodexReasoningEffort = .automatic
         isShowingNewAgentSheet = false
+    }
+
+    private func createNewAgentFromSheet() {
+        let runtimeProfile = buildRuntimeProfile(
+            isEnabled: newAgentRuntimeEnabled,
+            provider: newAgentRuntimeProvider,
+            model: newAgentRuntimeModel,
+            endpoint: newAgentRuntimeEndpoint,
+            toolsText: newAgentRuntimeTools,
+            openAIAuthMode: newAgentOpenAIAuthMode,
+            codexProfile: newAgentCodexProfile,
+            codexReasoningEffort: newAgentCodexReasoningEffort
+        )
+        let added = viewModel.addAgent(
+            name: newAgentName,
+            skillsText: newAgentSkills,
+            maxConcurrentTasks: newAgentCapacity,
+            runtimeProfile: runtimeProfile
+        )
+        if added {
+            resetAgentDraftAndClose()
+        }
     }
 
     private func openNewBoardSheet() {
@@ -2724,6 +2895,140 @@ struct ContentView: View {
         ]
     }
 
+    private static let codexSkillCapabilityKeywordMap: [String: [String]] = [
+        "agent": ["agent", "automation"],
+        "ai": ["ai", "automation"],
+        "api": ["api", "integration"],
+        "app": ["app", "delivery"],
+        "automation": ["automation", "workflow"],
+        "audit": ["qa", "testing"],
+        "backend": ["backend", "api"],
+        "codex": ["agent", "automation"],
+        "data": ["data", "database"],
+        "database": ["database", "backend"],
+        "debug": ["debugging", "qa"],
+        "debugger": ["debugging", "qa"],
+        "deploy": ["release", "devops"],
+        "design": ["ui", "ux"],
+        "docs": ["documentation", "planning"],
+        "extension": ["extension", "integration"],
+        "imagegen": ["design", "visual-assets"],
+        "intents": ["app-intents", "integration"],
+        "ios": ["ios", "mobile"],
+        "macos": ["macos", "desktop"],
+        "openai": ["ai", "api"],
+        "performance": ["performance", "profiling"],
+        "plugin": ["extension", "integration"],
+        "qa": ["qa", "testing"],
+        "refactor": ["refactoring", "architecture"],
+        "release": ["release", "operations"],
+        "security": ["security", "compliance"],
+        "skill": ["automation", "workflow"],
+        "stitch": ["ui", "ux", "design-system"],
+        "swift": ["swift", "app"],
+        "swiftui": ["swiftui", "ui"],
+        "tdd": ["testing", "tdd"],
+        "test": ["testing", "qa"],
+        "testing": ["testing", "qa"],
+        "uikit": ["uikit", "ui"],
+        "ui": ["ui", "ux"],
+        "ux": ["ux", "ui"],
+        "xcode": ["xcode", "build"],
+        "watchos": ["watchos", "mobile"]
+    ]
+
+    fileprivate static func buildCodexSkillTemplateOptions(from skillNames: [String]) -> [CodexSkillTemplateOption] {
+        var seen = Set<String>()
+        var options: [CodexSkillTemplateOption] = []
+
+        for rawName in skillNames {
+            let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else { continue }
+            let normalizedID = trimmedName.lowercased()
+            guard !seen.contains(normalizedID) else { continue }
+            seen.insert(normalizedID)
+
+            let capabilityLabels = codexCapabilityLabels(for: trimmedName)
+            let displayTitle = codexSkillDisplayTitle(for: trimmedName)
+            let suggestedTaskTitle = "Apply \(displayTitle)"
+            let suggestedTaskDetails = """
+            Use Codex skill profile `\(trimmedName)` to implement this scope.
+            Acceptance:
+            - Apply mapped capabilities to the deliverable workflow.
+            - Include actionable validation notes and known limits.
+            """
+            let storyPoints = codexSkillStoryPoints(for: trimmedName, capabilityLabels: capabilityLabels)
+
+            options.append(
+                CodexSkillTemplateOption(
+                    id: "codex-skill:\(normalizedID)",
+                    skillName: trimmedName,
+                    title: "\(displayTitle) · \(trimmedName)",
+                    suggestedTaskTitle: suggestedTaskTitle,
+                    suggestedTaskDetails: suggestedTaskDetails,
+                    capabilityLabels: capabilityLabels,
+                    storyPoints: storyPoints
+                )
+            )
+        }
+
+        return options.sorted { lhs, rhs in
+            lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    fileprivate static func codexCapabilityLabels(for skillName: String) -> [String] {
+        let tokens = codexSkillTokens(skillName)
+        var labels = Set<String>()
+
+        for token in tokens {
+            let mapped = codexSkillCapabilityKeywordMap[token] ?? []
+            for label in mapped {
+                labels.insert(label.lowercased())
+            }
+        }
+
+        if labels.isEmpty {
+            labels.insert("automation")
+        }
+
+        return Array(labels).sorted().prefix(8).map { $0 }
+    }
+
+    private static func codexSkillDisplayTitle(for skillName: String) -> String {
+        let slug: String = {
+            if let separator = skillName.firstIndex(of: ":") {
+                return String(skillName[skillName.index(after: separator)...])
+            }
+            return skillName
+        }()
+        let words = slug
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map { token in
+                let lowered = token.lowercased()
+                return lowered.prefix(1).uppercased() + lowered.dropFirst()
+            }
+        let title = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? skillName : title
+    }
+
+    private static func codexSkillTokens(_ skillName: String) -> [String] {
+        let normalized = skillName.lowercased()
+        return normalized
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private static func codexSkillStoryPoints(for skillName: String, capabilityLabels: [String]) -> Int {
+        let normalized = skillName.lowercased()
+        let heavyKeywords = ["performance", "debug", "debugger", "refactor", "audit", "intents", "integration"]
+        if heavyKeywords.contains(where: { normalized.contains($0) }) {
+            return 5
+        }
+        return capabilityLabels.count >= 4 ? 4 : 3
+    }
+
     fileprivate static func normalizedSkillList(from rawValue: String) -> [String] {
         Array(
             Set(
@@ -3145,7 +3450,13 @@ struct ContentView: View {
         let assigned = Self.manualAssignTask(
             taskID: taskID,
             selectedAgentID: triageSelectionByTaskID[taskID],
-            assigner: viewModel.manuallyAssignTask
+            assigner: { selectedTaskID, selectedAgentID in
+                viewModel.manuallyAssignTask(
+                    selectedTaskID,
+                    to: selectedAgentID,
+                    allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+                )
+            }
         )
         _ = Self.postManualAssignment(
             assigned: assigned,
@@ -3158,7 +3469,10 @@ struct ContentView: View {
     }
 
     private func assignAllManually() {
-        _ = viewModel.bulkAssignTriageTasks(using: triageSelectionByTaskID)
+        _ = viewModel.bulkAssignTriageTasks(
+            using: triageSelectionByTaskID,
+            allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+        )
         refreshTriageSelections()
         if viewModel.triageCandidates().isEmpty {
             isShowingManualTriageSheet = false
@@ -3166,7 +3480,10 @@ struct ContentView: View {
     }
 
     private func refreshTriageSelections() {
-        triageSelectionByTaskID = viewModel.resolvedTriageAssignments(existing: triageSelectionByTaskID)
+        triageSelectionByTaskID = viewModel.resolvedTriageAssignments(
+            existing: triageSelectionByTaskID,
+            allowPartialSkillMatch: manualTriageAllowPartialSkillMatch
+        )
     }
 
     private func deleteAgents(at offsets: IndexSet) {
@@ -3274,6 +3591,7 @@ struct ContentView: View {
     }
 
     private func openEditAgent(_ agent: AgentProfile) {
+        refreshDiscoveredCodexSkills()
         editingAgentID = agent.id
         editAgentName = agent.name
         editAgentSkills = agent.skills.sorted().joined(separator: ", ")
@@ -3330,15 +3648,15 @@ struct ContentView: View {
         )
     }
 
-    private var assigneeFilterOptions: [(key: String, label: String)] {
+    private var assigneeFilterOptions: [AssigneeFilterOption] {
         let base = [
-            (key: "all", label: L10n.string("All Assignees")),
-            (key: "unassigned", label: L10n.string("Unassigned"))
+            AssigneeFilterOption(key: "all", label: L10n.string("All Assignees")),
+            AssigneeFilterOption(key: "unassigned", label: L10n.string("Unassigned"))
         ]
         let agentOptions = viewModel.agents
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map { agent in
-                (key: agent.id.uuidString, label: agent.name)
+                AssigneeFilterOption(key: agent.id.uuidString, label: agent.name)
             }
         return base + agentOptions
     }
@@ -3402,6 +3720,10 @@ struct ContentView: View {
 
     private var pmTemplateOptions: [PMBriefTemplateOption] {
         Self.pmBriefTemplateOptions()
+    }
+
+    private var codexSkillTemplateOptions: [CodexSkillTemplateOption] {
+        Self.buildCodexSkillTemplateOptions(from: discoveredCodexSkillNames)
     }
 
     private var pmPlannerExtensions: [PMPlannerUIExtensionDescriptor] {
@@ -3705,7 +4027,13 @@ struct ContentView: View {
     }
 
     private func openNewAgentSheet() {
+        refreshDiscoveredCodexSkills()
         isShowingNewAgentSheet = true
+    }
+
+    private func openNewTaskSheet() {
+        refreshDiscoveredCodexSkills()
+        isShowingNewTaskSheet = true
     }
 
     private func refreshAndCloseEditAgentSheet() {
@@ -3824,6 +4152,23 @@ struct ContentView: View {
         } catch {
             presentCodexProjectsDirectoryError(error, attemptedPath: resolvedCodexProjectsDirectoryPath)
         }
+    }
+
+    private func refreshDiscoveredCodexSkills() {
+        discoveredCodexSkillNames = Self.discoverCodexSkillNames(
+            environment: ProcessInfo.processInfo.environment,
+            fallbackHomeDirectoryPath: NSHomeDirectory()
+        )
+    }
+
+    private static func discoverCodexSkillNames(
+        environment: [String: String],
+        fallbackHomeDirectoryPath: String
+    ) -> [String] {
+        CodexSkillCatalog.discoverSkillNames(
+            environment: environment,
+            fallbackHomeDirectoryPath: fallbackHomeDirectoryPath
+        )
     }
 
     private func presentCodexProjectsDirectoryError(_ error: Error, attemptedPath: String) {
@@ -8150,12 +8495,15 @@ private struct NewTaskSheet: View {
     @Binding var storyPoints: Int
     @Binding var deliveryContract: TaskDeliveryContract
     @Binding var selectedTemplateID: UUID?
+    @Binding var selectedCodexSkillTemplateID: String
     let templates: [TaskTemplate]
+    let codexSkillTemplates: [CodexSkillTemplateOption]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
     let onCancel: () -> Void
     let onApplyTemplate: () -> Void
+    let onApplyCodexSkillTemplate: () -> Void
     let onSaveAsTemplate: () -> Void
     let onCreate: () -> Void
     let onCreateAutoAssign: () -> Void
@@ -8178,6 +8526,31 @@ private struct NewTaskSheet: View {
             .pickerStyle(.menu)
             .onChange(of: selectedTemplateID) { _, _ in
                 onApplyTemplate()
+            }
+
+            if !codexSkillTemplates.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Codex Skill Template", selection: $selectedCodexSkillTemplateID) {
+                        Text(L10n.string("No Template")).tag("")
+                        ForEach(codexSkillTemplates) { template in
+                            Text(template.title).tag(template.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if let selectedCodexTemplate {
+                        Text("Capability Labels: \(selectedCodexTemplate.requiredSkillsText)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Apply Codex Template", action: onApplyCodexSkillTemplate)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(selectedCodexTemplate == nil)
+                }
+                .padding(8)
+                .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
             }
 
             TextField(L10n.string("Title"), text: $title)
@@ -8256,6 +8629,10 @@ private struct NewTaskSheet: View {
                 )
             }
         )
+    }
+
+    private var selectedCodexTemplate: CodexSkillTemplateOption? {
+        codexSkillTemplates.first(where: { $0.id == selectedCodexSkillTemplateID })
     }
 }
 
@@ -8399,6 +8776,7 @@ private struct NewAgentSheet: View {
     @Binding var openAIAuthMode: OpenAICompatibleAuthMode
     @Binding var codexProfile: String
     @Binding var codexReasoningEffort: CodexReasoningEffort
+    let availableCodexSkills: [String]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -8445,6 +8823,39 @@ private struct NewAgentSheet: View {
                                 Text(effort.displayName).tag(effort)
                             }
                         }
+                        if availableCodexSkills.isEmpty {
+                            Text(L10n.string("No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`."))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Menu {
+                                ForEach(availableCodexSkills, id: \.self) { skill in
+                                    Button {
+                                        toggleCodexSkill(skill)
+                                    } label: {
+                                        if hasCodexSkill(skill) {
+                                            Label(skill, systemImage: "checkmark")
+                                        } else {
+                                            Text(skill)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(L10n.string("Add Codex Skill"), systemImage: "plus")
+                            }
+                            .menuStyle(.borderlessButton)
+
+                            if !selectedCodexSkillNames.isEmpty {
+                                Text(
+                                    L10n.format(
+                                        "Selected Codex Skills: %@",
+                                        selectedCodexSkillNames.joined(separator: ", ")
+                                    )
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
                         Text(L10n.string("Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -8454,6 +8865,11 @@ private struct NewAgentSheet: View {
                     }
                 }
                 TextField(L10n.string("Tools (comma separated)"), text: $runtimeTools)
+                if runtimeProvider == .openAICompatible && openAIAuthMode == .codexBridge {
+                    Text(L10n.string("Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)."))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack {
@@ -8465,6 +8881,56 @@ private struct NewAgentSheet: View {
         }
         .padding(18)
         .frame(width: 420)
+    }
+
+    private var selectedCodexSkillNames: [String] {
+        let prefix = "skill:"
+        var seen = Set<String>()
+        var names: [String] = []
+        for token in normalizedToolTokens(runtimeTools) {
+            guard token.lowercased().hasPrefix(prefix) else { continue }
+            let name = String(token.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let normalized = name.lowercased()
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            names.append(name)
+        }
+        return names.sorted()
+    }
+
+    private func hasCodexSkill(_ skillName: String) -> Bool {
+        let normalized = skillName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return normalizedToolTokens(runtimeTools).contains(where: { token in
+            token.lowercased() == "skill:\(normalized)"
+        })
+    }
+
+    private func toggleCodexSkill(_ skillName: String) {
+        let normalizedSkill = skillName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedSkill.isEmpty else { return }
+        let codexToken = "skill:\(normalizedSkill)"
+        var tokens = normalizedToolTokens(runtimeTools)
+        if tokens.contains(where: { $0.lowercased() == codexToken }) {
+            tokens.removeAll { $0.lowercased() == codexToken }
+        } else {
+            tokens.append(codexToken)
+        }
+        runtimeTools = tokens.joined(separator: ", ")
+    }
+
+    private func normalizedToolTokens(_ rawValue: String) -> [String] {
+        var seen = Set<String>()
+        var tokens: [String] = []
+        for token in rawValue.split(separator: ",").map({ String($0).trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            guard !token.isEmpty else { continue }
+            let lower = token.lowercased()
+            guard !seen.contains(lower) else { continue }
+            seen.insert(lower)
+            tokens.append(token)
+        }
+        return tokens
     }
 }
 
@@ -8480,6 +8946,7 @@ private struct EditAgentSheet: View {
     @Binding var openAIAuthMode: OpenAICompatibleAuthMode
     @Binding var codexProfile: String
     @Binding var codexReasoningEffort: CodexReasoningEffort
+    let availableCodexSkills: [String]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -8526,6 +8993,39 @@ private struct EditAgentSheet: View {
                                 Text(effort.displayName).tag(effort)
                             }
                         }
+                        if availableCodexSkills.isEmpty {
+                            Text(L10n.string("No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`."))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Menu {
+                                ForEach(availableCodexSkills, id: \.self) { skill in
+                                    Button {
+                                        toggleCodexSkill(skill)
+                                    } label: {
+                                        if hasCodexSkill(skill) {
+                                            Label(skill, systemImage: "checkmark")
+                                        } else {
+                                            Text(skill)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(L10n.string("Add Codex Skill"), systemImage: "plus")
+                            }
+                            .menuStyle(.borderlessButton)
+
+                            if !selectedCodexSkillNames.isEmpty {
+                                Text(
+                                    L10n.format(
+                                        "Selected Codex Skills: %@",
+                                        selectedCodexSkillNames.joined(separator: ", ")
+                                    )
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
                         Text(L10n.string("Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -8535,6 +9035,11 @@ private struct EditAgentSheet: View {
                     }
                 }
                 TextField(L10n.string("Tools (comma separated)"), text: $runtimeTools)
+                if runtimeProvider == .openAICompatible && openAIAuthMode == .codexBridge {
+                    Text(L10n.string("Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)."))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack {
@@ -8547,6 +9052,56 @@ private struct EditAgentSheet: View {
         .padding(18)
         .frame(width: 420)
     }
+
+    private var selectedCodexSkillNames: [String] {
+        let prefix = "skill:"
+        var seen = Set<String>()
+        var names: [String] = []
+        for token in normalizedToolTokens(runtimeTools) {
+            guard token.lowercased().hasPrefix(prefix) else { continue }
+            let name = String(token.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let normalized = name.lowercased()
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            names.append(name)
+        }
+        return names.sorted()
+    }
+
+    private func hasCodexSkill(_ skillName: String) -> Bool {
+        let normalized = skillName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return normalizedToolTokens(runtimeTools).contains(where: { token in
+            token.lowercased() == "skill:\(normalized)"
+        })
+    }
+
+    private func toggleCodexSkill(_ skillName: String) {
+        let normalizedSkill = skillName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedSkill.isEmpty else { return }
+        let codexToken = "skill:\(normalizedSkill)"
+        var tokens = normalizedToolTokens(runtimeTools)
+        if tokens.contains(where: { $0.lowercased() == codexToken }) {
+            tokens.removeAll { $0.lowercased() == codexToken }
+        } else {
+            tokens.append(codexToken)
+        }
+        runtimeTools = tokens.joined(separator: ", ")
+    }
+
+    private func normalizedToolTokens(_ rawValue: String) -> [String] {
+        var seen = Set<String>()
+        var tokens: [String] = []
+        for token in rawValue.split(separator: ",").map({ String($0).trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            guard !token.isEmpty else { continue }
+            let lower = token.lowercased()
+            guard !seen.contains(lower) else { continue }
+            seen.insert(lower)
+            tokens.append(token)
+        }
+        return tokens
+    }
 }
 
 private struct ManualTriageSheet: View {
@@ -8554,6 +9109,7 @@ private struct ManualTriageSheet: View {
     let tasks: [WorkTask]
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
+    @Binding var allowPartialSkillMatch: Bool
     @Binding var selectedAgentByTaskID: [UUID: UUID]
     let assignAllEligibleCount: Int
     let unassignableTaskCount: Int
@@ -8561,6 +9117,7 @@ private struct ManualTriageSheet: View {
     let loadText: (AgentProfile) -> String
     let onAssign: (UUID) -> Void
     let onAssignAll: () -> Void
+    let onAllowPartialSkillMatchChanged: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -8578,6 +9135,12 @@ private struct ManualTriageSheet: View {
                     .buttonStyle(.bordered)
                     .disabled(assignAllEligibleCount == 0)
             }
+            Toggle(L10n.string("Allow partial skill match"), isOn: $allowPartialSkillMatch)
+                .toggleStyle(.switch)
+                .font(.caption)
+                .onChange(of: allowPartialSkillMatch) { _, _ in
+                    onAllowPartialSkillMatchChanged()
+                }
 
             if unassignableTaskCount > 0 {
                 Text(L10n.format("%d task(s) currently have no eligible agent and will be skipped.", unassignableTaskCount))
@@ -9687,6 +10250,7 @@ private extension ContentView {
         let fallbackAgentID = UUID()
         let selectedAgentID = UUID()
         var selectedByTask: [UUID: UUID] = [:]
+        var allowPartialSkillMatch = false
         let manualTriageSheet = ManualTriageSheet(
             tasks: [
                 WorkTask(
@@ -9701,6 +10265,7 @@ private extension ContentView {
             ],
             boardMessage: nil,
             boardMessageSeverity: nil,
+            allowPartialSkillMatch: Binding(get: { allowPartialSkillMatch }, set: { allowPartialSkillMatch = $0 }),
             selectedAgentByTaskID: Binding(get: { selectedByTask }, set: { selectedByTask = $0 }),
             assignAllEligibleCount: 0,
             unassignableTaskCount: 0,
@@ -9708,6 +10273,7 @@ private extension ContentView {
             loadText: { _ in "0/1" },
             onAssign: { _ in },
             onAssignAll: {},
+            onAllowPartialSkillMatchChanged: {},
             onClose: {}
         )
         hit { _ = manualTriageSheet.testTriageCardBackground }
@@ -10291,6 +10857,16 @@ enum ContentViewTestHooks {
         ContentView.normalizedSkillList(from: rawValue)
     }
 
+    static func codexCapabilityLabels(for skillName: String) -> [String] {
+        ContentView.codexCapabilityLabels(for: skillName)
+    }
+
+    static func codexSkillTemplatePreviews(skillNames: [String]) -> [(id: String, title: String, labels: [String], storyPoints: Int)] {
+        ContentView.buildCodexSkillTemplateOptions(from: skillNames).map { option in
+            (id: option.id, title: option.title, labels: option.capabilityLabels, storyPoints: option.storyPoints)
+        }
+    }
+
     static func pmBriefTemplateOptionIDs() -> [String] {
         ContentView.pmBriefTemplateOptions().map(\.id)
     }
@@ -10839,6 +11415,7 @@ enum ContentViewTestHooks {
         var taskPoints = 3
         var taskDeliveryContract = TaskDeliveryContract(outputType: .codeModule, gateMode: .strict)
         var selectedTemplateID: UUID? = nil
+        var selectedCodexTemplateID = ""
         let previewTemplates = [
             TaskTemplate(
                 name: "UI Task",
@@ -10848,6 +11425,9 @@ enum ContentViewTestHooks {
                 storyPoints: 3
             )
         ]
+        let previewCodexTemplates = ContentView.buildCodexSkillTemplateOptions(
+            from: ["build-ios-apps:swiftui-ui-patterns"]
+        )
         render(NewTaskSheet(
             title: Binding(get: { taskTitle }, set: { taskTitle = $0 }),
             details: Binding(get: { taskDetails }, set: { taskDetails = $0 }),
@@ -10855,11 +11435,14 @@ enum ContentViewTestHooks {
             storyPoints: Binding(get: { taskPoints }, set: { taskPoints = $0 }),
             deliveryContract: Binding(get: { taskDeliveryContract }, set: { taskDeliveryContract = $0 }),
             selectedTemplateID: Binding(get: { selectedTemplateID }, set: { selectedTemplateID = $0 }),
+            selectedCodexSkillTemplateID: Binding(get: { selectedCodexTemplateID }, set: { selectedCodexTemplateID = $0 }),
             templates: previewTemplates,
+            codexSkillTemplates: previewCodexTemplates,
             boardMessage: nil,
             boardMessageSeverity: nil,
             onCancel: {},
             onApplyTemplate: {},
+            onApplyCodexSkillTemplate: {},
             onSaveAsTemplate: {},
             onCreate: {},
             onCreateAutoAssign: {}
@@ -10908,6 +11491,7 @@ enum ContentViewTestHooks {
             openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
             codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
             codexReasoningEffort: Binding(get: { reasoningEffort }, set: { reasoningEffort = $0 }),
+            availableCodexSkills: [],
             boardMessage: nil,
             boardMessageSeverity: nil,
             onCancel: {},
@@ -10926,6 +11510,7 @@ enum ContentViewTestHooks {
             openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
             codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
             codexReasoningEffort: Binding(get: { reasoningEffort }, set: { reasoningEffort = $0 }),
+            availableCodexSkills: [],
             boardMessage: "Updated",
             boardMessageSeverity: .info,
             onCancel: {},
@@ -10933,10 +11518,12 @@ enum ContentViewTestHooks {
         ))
 
         var triageSelections: [UUID: UUID] = [todoTask.id: agentA.id]
+        var allowPartialSkillMatch = false
         render(ManualTriageSheet(
             tasks: [todoTask],
             boardMessage: nil,
             boardMessageSeverity: nil,
+            allowPartialSkillMatch: Binding(get: { allowPartialSkillMatch }, set: { allowPartialSkillMatch = $0 }),
             selectedAgentByTaskID: Binding(get: { triageSelections }, set: { triageSelections = $0 }),
             assignAllEligibleCount: 1,
             unassignableTaskCount: 0,
@@ -10944,6 +11531,7 @@ enum ContentViewTestHooks {
             loadText: { _ in "1/3" },
             onAssign: { _ in },
             onAssignAll: {},
+            onAllowPartialSkillMatchChanged: {},
             onClose: {}
         ))
 

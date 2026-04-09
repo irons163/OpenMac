@@ -468,9 +468,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         onProgress: @escaping (_ update: String) -> Void
     ) -> AgentTaskExecutionOutcome {
         onProgress(L10n.format("Codex Bridge started for \"%@\"", task.title))
-        let prompt = buildCodexBridgePrompt(task: task, agent: agent)
+        let environment = environmentProvider()
+        let prompt = buildCodexBridgePrompt(task: task, agent: agent, environment: environment)
         let workingDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
-            environment: environmentProvider()
+            environment: environment
         )
         let request = CodexBridgeRequest(
             taskID: task.id,
@@ -680,25 +681,41 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
     private func buildMessages(task: WorkTask, agent: AgentProfile) -> [ChatMessage] {
         let template = executionPromptTemplate()
-        let userPrompt = executionPrompt(task: task, agent: agent, template: template)
+        let userPrompt = executionPrompt(
+            task: task,
+            agent: agent,
+            template: template,
+            environment: environmentProvider()
+        )
         return [
             ChatMessage(role: "system", content: template.systemPrompt),
             ChatMessage(role: "user", content: userPrompt)
         ]
     }
 
-    private func buildCodexBridgePrompt(task: WorkTask, agent: AgentProfile) -> String {
+    private func buildCodexBridgePrompt(
+        task: WorkTask,
+        agent: AgentProfile,
+        environment: [String: String]
+    ) -> String {
         let template = executionPromptTemplate()
-        return executionPrompt(task: task, agent: agent, template: template)
+        return executionPrompt(task: task, agent: agent, template: template, environment: environment)
     }
 
-    private func executionPrompt(task: WorkTask, agent: AgentProfile, template: ExecutionPromptTemplate) -> String {
+    private func executionPrompt(
+        task: WorkTask,
+        agent: AgentProfile,
+        template: ExecutionPromptTemplate,
+        environment: [String: String]
+    ) -> String {
         let sortedSkills = task.requiredSkills.sorted().joined(separator: ", ")
         let skillsLine = sortedSkills.isEmpty ? template.noneSkillsText : sortedSkills
         let deliveryContract = task.resolvedDeliveryContract
         let expectedEvidence = deliveryContract.requiredArtifactsText.isEmpty
             ? "none"
             : deliveryContract.requiredArtifactsText
+        let codexSkillSection = codexSkillPromptSection(task: task, agent: agent, environment: environment)
+        let codexSkillSectionBlock = codexSkillSection.isEmpty ? "" : "\n\n\(codexSkillSection)"
         return """
         \(template.preamble)
         \(template.agentLabel): \(agent.name)
@@ -710,6 +727,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         Completion gate: \(deliveryContract.gateMode.title) / \(deliveryContract.artifactRule.title)
         Expected evidence: \(expectedEvidence)
         \(template.filesystemGuardrailsSection)
+        \(codexSkillSectionBlock)
 
         \(template.sectionsInstruction)
         \(template.languageInstruction)
@@ -718,6 +736,74 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         \(template.evidenceSection)
         \(template.risksSection)
         """
+    }
+
+    private func codexSkillPromptSection(
+        task: WorkTask,
+        agent: AgentProfile,
+        environment: [String: String]
+    ) -> String {
+        guard let runtimeProfile = agent.runtimeProfile else { return "" }
+        let requestedSkills = codexSkillNames(from: runtimeProfile)
+        guard !requestedSkills.isEmpty else { return "" }
+
+        let resolvedSkills = resolvedCodexSkillReferences(skillNames: requestedSkills, environment: environment)
+        let allReferences = resolvedSkills.map { reference in
+            if let path = reference.path {
+                return "- [$\(reference.name)](\(path))"
+            }
+            return "- $\(reference.name)"
+        }.joined(separator: "\n")
+
+        let taskSkillsHint = task.requiredSkills.sorted().joined(separator: ", ")
+        let requiredSkillsHint = taskSkillsHint.isEmpty ? "none" : taskSkillsHint
+        return """
+        Codex skills for this run (enabled via `skill:<name>` in agent tools):
+        \(allReferences)
+        Use these skills as operating instructions when relevant to the task.
+        If a skill is missing/unavailable, continue execution and mention it in Risks or blockers.
+        Task required skills hint: \(requiredSkillsHint)
+        """
+    }
+
+    private func codexSkillNames(from runtimeProfile: AgentRuntimeProfile) -> [String] {
+        let prefix = "skill:"
+        var seen = Set<String>()
+        var names: [String] = []
+        for tool in runtimeProfile.tools.sorted() {
+            guard tool.hasPrefix(prefix) else { continue }
+            let name = String(tool.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            guard !seen.contains(name) else { continue }
+            seen.insert(name)
+            names.append(name)
+        }
+        return names
+    }
+
+    private func resolvedCodexSkillReferences(
+        skillNames: [String],
+        environment: [String: String]
+    ) -> [(name: String, path: String?)] {
+        let candidateRoots = codexSkillRootDescriptors(environment: environment)
+        let fileManager = FileManager.default
+        return skillNames.map { name in
+            if let path = CodexSkillCatalog.resolveSkillPath(
+                skillName: name,
+                rootDescriptors: candidateRoots,
+                fileManager: fileManager
+            ) {
+                return (name: name, path: path)
+            }
+            return (name: name, path: nil)
+        }
+    }
+
+    private func codexSkillRootDescriptors(environment: [String: String]) -> [CodexSkillRootDescriptor] {
+        CodexSkillCatalog.rootDescriptors(
+            environment: environment,
+            fallbackHomeDirectoryPath: NSHomeDirectory()
+        )
     }
 
     private func executionPromptTemplate() -> ExecutionPromptTemplate {
@@ -11580,15 +11666,33 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
-    func assignableAgents(for taskID: UUID) -> [AgentProfile] {
+    func assignableAgents(for taskID: UUID, allowPartialSkillMatch: Bool = false) -> [AgentProfile] {
         guard let task = tasks.first(where: { $0.id == taskID }) else { return [] }
         guard task.status == .todo, task.assignedAgentID == nil else { return [] }
 
         return agents
             .filter { agent in
-                agent.hasSkills(for: task) && activeTaskCount(for: agent.id) < agent.maxConcurrentTasks
+                agentMatchesTaskSkills(
+                    agent,
+                    task: task,
+                    allowPartialSkillMatch: allowPartialSkillMatch
+                ) && activeTaskCount(for: agent.id) < agent.maxConcurrentTasks
             }
             .sorted { lhs, rhs in
+                if allowPartialSkillMatch {
+                    let lhsExact = lhs.hasSkills(for: task)
+                    let rhsExact = rhs.hasSkills(for: task)
+                    if lhsExact != rhsExact {
+                        return lhsExact && !rhsExact
+                    }
+
+                    let leftMatchCount = skillMatchCount(agent: lhs, task: task)
+                    let rightMatchCount = skillMatchCount(agent: rhs, task: task)
+                    if leftMatchCount != rightMatchCount {
+                        return leftMatchCount > rightMatchCount
+                    }
+                }
+
                 let leftLoad = activeTaskCount(for: lhs.id)
                 let rightLoad = activeTaskCount(for: rhs.id)
 
@@ -11619,20 +11723,41 @@ final class KanbanBoardViewModel: ObservableObject {
             }
     }
 
-    func resolvedTriageAssignments(existing: [UUID: UUID] = [:]) -> [UUID: UUID] {
-        bulkTriageAssignmentPlan(using: existing)
+    func resolvedTriageAssignments(
+        existing: [UUID: UUID] = [:],
+        allowPartialSkillMatch: Bool = false
+    ) -> [UUID: UUID] {
+        bulkTriageAssignmentPlan(
+            using: existing,
+            allowPartialSkillMatch: allowPartialSkillMatch
+        )
     }
 
-    func bulkAssignableTriageTaskCount(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
-        bulkTriageAssignmentPlan(using: preferredAssignments).count
+    func bulkAssignableTriageTaskCount(
+        using preferredAssignments: [UUID: UUID] = [:],
+        allowPartialSkillMatch: Bool = false
+    ) -> Int {
+        bulkTriageAssignmentPlan(
+            using: preferredAssignments,
+            allowPartialSkillMatch: allowPartialSkillMatch
+        ).count
     }
 
-    func bulkUnassignableTriageTaskCount(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
-        let assignableCount = bulkAssignableTriageTaskCount(using: preferredAssignments)
+    func bulkUnassignableTriageTaskCount(
+        using preferredAssignments: [UUID: UUID] = [:],
+        allowPartialSkillMatch: Bool = false
+    ) -> Int {
+        let assignableCount = bulkAssignableTriageTaskCount(
+            using: preferredAssignments,
+            allowPartialSkillMatch: allowPartialSkillMatch
+        )
         return max(0, triageCandidates().count - assignableCount)
     }
 
-    func bulkTriageAssignmentPlan(using preferredAssignments: [UUID: UUID] = [:]) -> [UUID: UUID] {
+    func bulkTriageAssignmentPlan(
+        using preferredAssignments: [UUID: UUID] = [:],
+        allowPartialSkillMatch: Bool = false
+    ) -> [UUID: UUID] {
         let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
         var plan: [UUID: UUID] = [:]
@@ -11642,7 +11767,8 @@ final class KanbanBoardViewModel: ObservableObject {
                 for: task,
                 preferredAgentID: preferredAssignments[task.id],
                 agentsByID: agentsByID,
-                loadsByAgentID: loadsByAgentID
+                loadsByAgentID: loadsByAgentID,
+                allowPartialSkillMatch: allowPartialSkillMatch
             ) else {
                 continue
             }
@@ -11655,7 +11781,11 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func manuallyAssignTask(_ taskID: UUID, to agentID: UUID) -> Bool {
+    func manuallyAssignTask(
+        _ taskID: UUID,
+        to agentID: UUID,
+        allowPartialSkillMatch: Bool = false
+    ) -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
         guard let agent = agents.first(where: { $0.id == agentID }) else { return false }
 
@@ -11668,7 +11798,11 @@ final class KanbanBoardViewModel: ObservableObject {
             return false
         }
 
-        guard agent.hasSkills(for: tasks[taskIndex]) else {
+        guard agentMatchesTaskSkills(
+            agent,
+            task: tasks[taskIndex],
+            allowPartialSkillMatch: allowPartialSkillMatch
+        ) else {
             lastBoardMessage = message("Agent %@ does not match required skills", agent.name)
             return false
         }
@@ -11681,7 +11815,11 @@ final class KanbanBoardViewModel: ObservableObject {
 
         tasks[taskIndex].assignedAgentID = agentID
         lastUnassignedTaskIDs.remove(taskID)
-        lastAssignmentReasons[taskID] = "manual[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+        if allowPartialSkillMatch, !agent.hasSkills(for: tasks[taskIndex]) {
+            lastAssignmentReasons[taskID] = "manual-partial[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+        } else {
+            lastAssignmentReasons[taskID] = "manual[\(agent.name)] load[\(currentLoad + 1)/\(agent.maxConcurrentTasks)]"
+        }
         persistBoardState()
         lastBoardMessage = nil
         return true
@@ -11725,8 +11863,14 @@ final class KanbanBoardViewModel: ObservableObject {
     }
 
     @discardableResult
-    func bulkAssignTriageTasks(using preferredAssignments: [UUID: UUID] = [:]) -> Int {
-        let assignmentPlan = bulkTriageAssignmentPlan(using: preferredAssignments)
+    func bulkAssignTriageTasks(
+        using preferredAssignments: [UUID: UUID] = [:],
+        allowPartialSkillMatch: Bool = false
+    ) -> Int {
+        let assignmentPlan = bulkTriageAssignmentPlan(
+            using: preferredAssignments,
+            allowPartialSkillMatch: allowPartialSkillMatch
+        )
         let candidates = triageCandidates()
         var loadsByAgentID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, activeTaskCount(for: $0.id)) })
         var assignedCount = 0
@@ -11740,7 +11884,11 @@ final class KanbanBoardViewModel: ObservableObject {
             tasks[taskIndex].assignedAgentID = selectedAgent.id
             loadsByAgentID[selectedAgent.id] = currentLoad + 1
             lastUnassignedTaskIDs.remove(task.id)
-            lastAssignmentReasons[task.id] = "manual-bulk[\(selectedAgent.name)] load[\(currentLoad + 1)/\(selectedAgent.maxConcurrentTasks)]"
+            if allowPartialSkillMatch, !selectedAgent.hasSkills(for: task) {
+                lastAssignmentReasons[task.id] = "manual-bulk-partial[\(selectedAgent.name)] load[\(currentLoad + 1)/\(selectedAgent.maxConcurrentTasks)]"
+            } else {
+                lastAssignmentReasons[task.id] = "manual-bulk[\(selectedAgent.name)] load[\(currentLoad + 1)/\(selectedAgent.maxConcurrentTasks)]"
+            }
             assignedCount += 1
         }
 
@@ -11768,19 +11916,44 @@ final class KanbanBoardViewModel: ObservableObject {
         for task: WorkTask,
         preferredAgentID: UUID?,
         agentsByID: [UUID: AgentProfile],
-        loadsByAgentID: [UUID: Int]
+        loadsByAgentID: [UUID: Int],
+        allowPartialSkillMatch: Bool
     ) -> AgentProfile? {
         if let preferredAgentID,
            let preferredAgent = agentsByID[preferredAgentID],
-           isEligibleForBulkTriage(preferredAgent, task: task, loadsByAgentID: loadsByAgentID) {
+           isEligibleForBulkTriage(
+            preferredAgent,
+            task: task,
+            loadsByAgentID: loadsByAgentID,
+            allowPartialSkillMatch: allowPartialSkillMatch
+           ) {
             return preferredAgent
         }
 
         return agents
             .filter { agent in
-                isEligibleForBulkTriage(agent, task: task, loadsByAgentID: loadsByAgentID)
+                isEligibleForBulkTriage(
+                    agent,
+                    task: task,
+                    loadsByAgentID: loadsByAgentID,
+                    allowPartialSkillMatch: allowPartialSkillMatch
+                )
             }
             .sorted { lhs, rhs in
+                if allowPartialSkillMatch {
+                    let lhsExact = lhs.hasSkills(for: task)
+                    let rhsExact = rhs.hasSkills(for: task)
+                    if lhsExact != rhsExact {
+                        return lhsExact && !rhsExact
+                    }
+
+                    let leftMatchCount = skillMatchCount(agent: lhs, task: task)
+                    let rightMatchCount = skillMatchCount(agent: rhs, task: task)
+                    if leftMatchCount != rightMatchCount {
+                        return leftMatchCount > rightMatchCount
+                    }
+                }
+
                 let leftLoad = loadsByAgentID[lhs.id, default: 0]
                 let rightLoad = loadsByAgentID[rhs.id, default: 0]
 
@@ -11795,10 +11968,32 @@ final class KanbanBoardViewModel: ObservableObject {
     private func isEligibleForBulkTriage(
         _ agent: AgentProfile,
         task: WorkTask,
-        loadsByAgentID: [UUID: Int]
+        loadsByAgentID: [UUID: Int],
+        allowPartialSkillMatch: Bool
     ) -> Bool {
-        guard agent.hasSkills(for: task) else { return false }
+        guard agentMatchesTaskSkills(
+            agent,
+            task: task,
+            allowPartialSkillMatch: allowPartialSkillMatch
+        ) else { return false }
         return loadsByAgentID[agent.id, default: 0] < agent.maxConcurrentTasks
+    }
+
+    private func agentMatchesTaskSkills(
+        _ agent: AgentProfile,
+        task: WorkTask,
+        allowPartialSkillMatch: Bool
+    ) -> Bool {
+        if agent.hasSkills(for: task) {
+            return true
+        }
+        guard allowPartialSkillMatch else { return false }
+        if task.requiredSkills.isEmpty { return true }
+        return skillMatchCount(agent: agent, task: task) > 0
+    }
+
+    private func skillMatchCount(agent: AgentProfile, task: WorkTask) -> Int {
+        agent.skills.intersection(task.requiredSkills).count
     }
 
     private func bulkTriageAssignmentSummary(assignedCount: Int, remainingCount: Int) -> String {
@@ -13023,7 +13218,7 @@ extension KanbanBoardViewModel {
 #if DEBUG
 private extension DefaultAgentTaskExecutor {
     func testCodexBridgePrompt(task: WorkTask, agent: AgentProfile) -> String {
-        buildCodexBridgePrompt(task: task, agent: agent)
+        buildCodexBridgePrompt(task: task, agent: agent, environment: environmentProvider())
     }
 
     func testResolvedEndpoint(configuredEndpoint: String?, environment: [String: String]) -> String {
@@ -13142,10 +13337,11 @@ enum KanbanBoardViewModelTestHooks {
     static func codexPrompt(
         languageOverrideRawValue: String?,
         task: WorkTask,
-        agent: AgentProfile
+        agent: AgentProfile,
+        environment: [String: String] = [:]
     ) -> String {
         let executor = DefaultAgentTaskExecutor(
-            environmentProvider: { [:] },
+            environmentProvider: { environment },
             urlSession: .shared,
             timeoutSeconds: 1,
             appLanguageOverrideProvider: { languageOverrideRawValue },

@@ -112,6 +112,11 @@
 "Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model." = "使用本地 `codex login` 会话。若配置模型不支持 ChatGPT 登录，OpenMac 会改用 Codex 默认模型重试。";
 "Reasoning Effort" = "推理强度";
 "Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort." = "部分模型可能不支持 xhigh。若因推理强度导致执行失败，请改用 high 或更低。";
+"Tip: add `skill:<name>` in Tools to load Codex Skills (for example: `skill:google-stitch`)." = "提示：可在工具字段加入 `skill:<name>` 以加载 Codex Skill（例如：`skill:google-stitch`）。";
+"Codex Skills" = "Codex Skills";
+"Add Codex Skill" = "添加 Codex Skill";
+"Selected Codex Skills: %@" = "已选 Codex Skill：%@";
+"No local Codex skills found. Install skills under `~/.codex/skills` or `$CODEX_HOME/skills`." = "未找到本地 Codex Skill。请安装到 `~/.codex/skills` 或 `$CODEX_HOME/skills`。";
 "Automatic" = "自动";
 "Minimal" = "最小";
 "Low" = "低";
@@ -704,3 +709,5 @@
 "Cancellation requested for \"%@\"" = "Cancellation requested for \"%@\"";
 "Cancellation requested for %d running task(s)" = "Cancellation requested for %d running task(s)";
 "Execution cancelled by user" = "Execution cancelled by user";
+
+"Allow partial skill match" = "允许部分技能符合";
