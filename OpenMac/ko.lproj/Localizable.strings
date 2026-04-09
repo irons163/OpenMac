@@ -110,6 +110,14 @@
 "Tip: limit cannot be smaller than the number of tasks currently in that column." = "팁: 한도는 현재 해당 열에 있는 작업 수보다 작을 수 없습니다.";
 "Reads `OPENAI_API_KEY` (or `OPENAI_COMPAT_API_KEY`) from environment." = "환경에서 `OPENAI_API_KEY`(또는 `OPENAI_COMPAT_API_KEY`)을 읽습니다.";
 "Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model." = "Codex CLI를 통해 로컬 `codex login` 세션을 사용합니다. 구성된 모델이 ChatGPT 로그인을 지원하지 않는 경우 OpenMac은 Codex 기본 모델을 사용하여 다시 시도합니다.";
+"Reasoning Effort" = "추론 강도";
+"Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort." = "일부 모델은 xhigh를 지원하지 않을 수 있습니다. 추론 강도로 실행이 실패하면 high 이하를 사용하세요.";
+"Automatic" = "자동";
+"Minimal" = "최소";
+"Low" = "낮음";
+"Medium" = "중간";
+"High" = "높음";
+"XHigh" = "최고";
 "Use Folder" = "폴더 사용";
 "%@ (%@)" = "%@ (%@)";
 "%d %@" = "%d %@";

@@ -82,6 +82,43 @@ enum OpenAICompatibleAuthMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum CodexReasoningEffort: String, CaseIterable, Codable, Identifiable {
+    case automatic
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .automatic:
+            return L10n.string("Automatic")
+        case .minimal:
+            return L10n.string("Minimal")
+        case .low:
+            return L10n.string("Low")
+        case .medium:
+            return L10n.string("Medium")
+        case .high:
+            return L10n.string("High")
+        case .xhigh:
+            return L10n.string("XHigh")
+        }
+    }
+
+    var cliValue: String? {
+        switch self {
+        case .automatic:
+            return nil
+        case .minimal, .low, .medium, .high, .xhigh:
+            return rawValue
+        }
+    }
+}
+
 struct AgentRuntimeProfile: Equatable, Codable {
     static let codexBridgeDefaultModel = "gpt-5"
 
@@ -99,6 +136,7 @@ struct AgentRuntimeProfile: Equatable, Codable {
     var tools: Set<String>
     var openAIAuthMode: OpenAICompatibleAuthMode
     var codexProfile: String?
+    var codexReasoningEffort: CodexReasoningEffort
 
     init(
         provider: AgentRuntimeProvider = .localMock,
@@ -106,7 +144,8 @@ struct AgentRuntimeProfile: Equatable, Codable {
         endpoint: String? = nil,
         tools: [String] = [],
         openAIAuthMode: OpenAICompatibleAuthMode = .apiKey,
-        codexProfile: String? = nil
+        codexProfile: String? = nil,
+        codexReasoningEffort: CodexReasoningEffort = .automatic
     ) {
         self.provider = provider
         let trimmedModel = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -115,6 +154,7 @@ struct AgentRuntimeProfile: Equatable, Codable {
         self.tools = Set(tools.map(Self.normalizeTool))
         self.openAIAuthMode = openAIAuthMode
         self.codexProfile = Self.normalizeOptional(codexProfile)
+        self.codexReasoningEffort = codexReasoningEffort
     }
 
     init(
@@ -129,7 +169,8 @@ struct AgentRuntimeProfile: Equatable, Codable {
             endpoint: endpoint,
             tools: tools,
             openAIAuthMode: .apiKey,
-            codexProfile: nil
+            codexProfile: nil,
+            codexReasoningEffort: .automatic
         )
     }
 
@@ -140,6 +181,7 @@ struct AgentRuntimeProfile: Equatable, Codable {
         case tools
         case openAIAuthMode
         case codexProfile
+        case codexReasoningEffort
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +192,7 @@ struct AgentRuntimeProfile: Equatable, Codable {
         let tools = try container.decodeIfPresent([String].self, forKey: .tools) ?? []
         let openAIAuthMode = try container.decodeIfPresent(OpenAICompatibleAuthMode.self, forKey: .openAIAuthMode) ?? .apiKey
         let codexProfile = try container.decodeIfPresent(String.self, forKey: .codexProfile)
+        let codexReasoningEffort = try container.decodeIfPresent(CodexReasoningEffort.self, forKey: .codexReasoningEffort) ?? .automatic
 
         self.init(
             provider: provider,
@@ -157,7 +200,8 @@ struct AgentRuntimeProfile: Equatable, Codable {
             endpoint: endpoint,
             tools: tools,
             openAIAuthMode: openAIAuthMode,
-            codexProfile: codexProfile
+            codexProfile: codexProfile,
+            codexReasoningEffort: codexReasoningEffort
         )
     }
 
@@ -169,6 +213,7 @@ struct AgentRuntimeProfile: Equatable, Codable {
         try container.encode(Array(tools).sorted(), forKey: .tools)
         try container.encode(openAIAuthMode, forKey: .openAIAuthMode)
         try container.encodeIfPresent(codexProfile, forKey: .codexProfile)
+        try container.encode(codexReasoningEffort, forKey: .codexReasoningEffort)
     }
 
     nonisolated private static func normalizeTool(_ rawValue: String) -> String {

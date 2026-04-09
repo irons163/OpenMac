@@ -78,6 +78,7 @@ struct ContentView: View {
     @State private var newAgentRuntimeTools = ""
     @State private var newAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .codexBridge
     @State private var newAgentCodexProfile = ""
+    @State private var newAgentCodexReasoningEffort: CodexReasoningEffort = .automatic
     @State private var editingAgentID: UUID?
     @State private var editAgentName = ""
     @State private var editAgentSkills = ""
@@ -89,6 +90,7 @@ struct ContentView: View {
     @State private var editAgentRuntimeTools = ""
     @State private var editAgentOpenAIAuthMode: OpenAICompatibleAuthMode = .apiKey
     @State private var editAgentCodexProfile = ""
+    @State private var editAgentCodexReasoningEffort: CodexReasoningEffort = .automatic
     @State private var inProgressWIPLimitDraft = 1
     @State private var reviewWIPLimitDraft = 1
     @State private var triageSelectionByTaskID: [UUID: UUID] = [:]
@@ -1101,6 +1103,7 @@ struct ContentView: View {
                 runtimeTools: $newAgentRuntimeTools,
                 openAIAuthMode: $newAgentOpenAIAuthMode,
                 codexProfile: $newAgentCodexProfile,
+                codexReasoningEffort: $newAgentCodexReasoningEffort,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: resetAgentDraftAndClose,
@@ -1116,7 +1119,8 @@ struct ContentView: View {
                             endpoint: newAgentRuntimeEndpoint,
                             toolsText: newAgentRuntimeTools,
                             openAIAuthMode: newAgentOpenAIAuthMode,
-                            codexProfile: newAgentCodexProfile
+                            codexProfile: newAgentCodexProfile,
+                            codexReasoningEffort: newAgentCodexReasoningEffort
                         )
                     )
                     if added {
@@ -1137,6 +1141,7 @@ struct ContentView: View {
                 runtimeTools: $editAgentRuntimeTools,
                 openAIAuthMode: $editAgentOpenAIAuthMode,
                 codexProfile: $editAgentCodexProfile,
+                codexReasoningEffort: $editAgentCodexReasoningEffort,
                 boardMessage: viewModel.lastBoardMessage,
                 boardMessageSeverity: viewModel.lastBoardMessageSeverity,
                 onCancel: closeEditAgentSheet,
@@ -1302,6 +1307,7 @@ struct ContentView: View {
         newAgentRuntimeTools = ""
         newAgentOpenAIAuthMode = .codexBridge
         newAgentCodexProfile = ""
+        newAgentCodexReasoningEffort = .automatic
         isShowingNewAgentSheet = false
     }
 
@@ -3279,6 +3285,7 @@ struct ContentView: View {
         editAgentRuntimeTools = agent.runtimeProfile?.tools.sorted().joined(separator: ", ") ?? ""
         editAgentOpenAIAuthMode = agent.runtimeProfile?.openAIAuthMode ?? .codexBridge
         editAgentCodexProfile = agent.runtimeProfile?.codexProfile ?? ""
+        editAgentCodexReasoningEffort = agent.runtimeProfile?.codexReasoningEffort ?? .automatic
         isShowingEditAgentSheet = true
     }
 
@@ -3294,6 +3301,7 @@ struct ContentView: View {
         editAgentRuntimeTools = ""
         editAgentOpenAIAuthMode = .codexBridge
         editAgentCodexProfile = ""
+        editAgentCodexReasoningEffort = .automatic
         isShowingEditAgentSheet = false
     }
 
@@ -3305,7 +3313,8 @@ struct ContentView: View {
             endpoint: editAgentRuntimeEndpoint,
             toolsText: editAgentRuntimeTools,
             openAIAuthMode: editAgentOpenAIAuthMode,
-            codexProfile: editAgentCodexProfile
+            codexProfile: editAgentCodexProfile,
+            codexReasoningEffort: editAgentCodexReasoningEffort
         )
 
         _ = Self.handleBoolResult(
@@ -4261,12 +4270,17 @@ struct ContentView: View {
             return L10n.string("Runtime: Disabled")
         }
         if runtimeProfile.provider == .openAICompatible {
-            return L10n.format(
+            var summary = L10n.format(
                 "Runtime: %@ / %@ / %@",
                 runtimeProfile.provider.displayName,
                 runtimeProfile.model,
                 runtimeProfile.openAIAuthMode.displayName
             )
+            if runtimeProfile.openAIAuthMode == .codexBridge,
+               runtimeProfile.codexReasoningEffort != .automatic {
+                summary += " / \(runtimeProfile.codexReasoningEffort.displayName)"
+            }
+            return summary
         }
         return L10n.format(
             "Runtime: %@ / %@",
@@ -4282,7 +4296,8 @@ struct ContentView: View {
         endpoint: String,
         toolsText: String,
         openAIAuthMode: OpenAICompatibleAuthMode,
-        codexProfile: String
+        codexProfile: String,
+        codexReasoningEffort: CodexReasoningEffort
     ) -> AgentRuntimeProfile? {
         guard isEnabled else { return nil }
         let resolvedModelInput = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4300,13 +4315,17 @@ struct ContentView: View {
         }
         let resolvedEndpoint = provider == .openAICompatible && resolvedOpenAIAuthMode == .apiKey ? endpoint : ""
         let resolvedCodexProfile = provider == .openAICompatible && resolvedOpenAIAuthMode == .codexBridge ? codexProfile : ""
+        let resolvedCodexReasoningEffort = provider == .openAICompatible && resolvedOpenAIAuthMode == .codexBridge
+            ? codexReasoningEffort
+            : .automatic
         return AgentRuntimeProfile(
             provider: provider,
             model: resolvedModel,
             endpoint: resolvedEndpoint,
             tools: parsedTools,
             openAIAuthMode: resolvedOpenAIAuthMode,
-            codexProfile: resolvedCodexProfile
+            codexProfile: resolvedCodexProfile,
+            codexReasoningEffort: resolvedCodexReasoningEffort
         )
     }
 
@@ -8379,6 +8398,7 @@ private struct NewAgentSheet: View {
     @Binding var runtimeTools: String
     @Binding var openAIAuthMode: OpenAICompatibleAuthMode
     @Binding var codexProfile: String
+    @Binding var codexReasoningEffort: CodexReasoningEffort
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -8420,6 +8440,14 @@ private struct NewAgentSheet: View {
                             .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField(L10n.string("Codex Profile (optional)"), text: $codexProfile)
+                        Picker(L10n.string("Reasoning Effort"), selection: $codexReasoningEffort) {
+                            ForEach(CodexReasoningEffort.allCases) { effort in
+                                Text(effort.displayName).tag(effort)
+                            }
+                        }
+                        Text(L10n.string("Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text(L10n.string("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -8451,6 +8479,7 @@ private struct EditAgentSheet: View {
     @Binding var runtimeTools: String
     @Binding var openAIAuthMode: OpenAICompatibleAuthMode
     @Binding var codexProfile: String
+    @Binding var codexReasoningEffort: CodexReasoningEffort
     let boardMessage: String?
     let boardMessageSeverity: BoardMessageSeverity?
 
@@ -8492,6 +8521,14 @@ private struct EditAgentSheet: View {
                             .foregroundStyle(.secondary)
                     case .codexBridge:
                         TextField(L10n.string("Codex Profile (optional)"), text: $codexProfile)
+                        Picker(L10n.string("Reasoning Effort"), selection: $codexReasoningEffort) {
+                            ForEach(CodexReasoningEffort.allCases) { effort in
+                                Text(effort.displayName).tag(effort)
+                            }
+                        }
+                        Text(L10n.string("Some models may not support xhigh. Use high or lower if a run fails due to reasoning effort."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text(L10n.string("Uses local `codex login` session via Codex CLI. If the configured model is not supported for ChatGPT login, OpenMac retries with Codex default model."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -8985,7 +9022,8 @@ private extension ContentView {
         endpoint: String,
         toolsText: String,
         openAIAuthMode: OpenAICompatibleAuthMode,
-        codexProfile: String
+        codexProfile: String,
+        codexReasoningEffort: CodexReasoningEffort
     ) -> AgentRuntimeProfile? {
         buildRuntimeProfile(
             isEnabled: isEnabled,
@@ -8994,7 +9032,8 @@ private extension ContentView {
             endpoint: endpoint,
             toolsText: toolsText,
             openAIAuthMode: openAIAuthMode,
-            codexProfile: codexProfile
+            codexProfile: codexProfile,
+            codexReasoningEffort: codexReasoningEffort
         )
     }
 
@@ -10010,7 +10049,8 @@ enum ContentViewTestHooks {
         endpoint: String,
         toolsText: String,
         openAIAuthMode: OpenAICompatibleAuthMode,
-        codexProfile: String
+        codexProfile: String,
+        codexReasoningEffort: CodexReasoningEffort
     ) -> AgentRuntimeProfile? {
         let view = ContentView(viewModel: KanbanBoardViewModel(tasks: [], agents: []))
         return view.testBuildRuntimeProfile(
@@ -10020,7 +10060,8 @@ enum ContentViewTestHooks {
             endpoint: endpoint,
             toolsText: toolsText,
             openAIAuthMode: openAIAuthMode,
-            codexProfile: codexProfile
+            codexProfile: codexProfile,
+            codexReasoningEffort: codexReasoningEffort
         )
     }
 
@@ -10851,6 +10892,7 @@ enum ContentViewTestHooks {
         var runtimeTools = "shell,git"
         var authMode: OpenAICompatibleAuthMode = .apiKey
         var codexProfile = "default"
+        var reasoningEffort: CodexReasoningEffort = .medium
         var agentName = "Agent"
         var agentSkills = "swiftui"
         var agentCapacity = 3
@@ -10865,6 +10907,7 @@ enum ContentViewTestHooks {
             runtimeTools: Binding(get: { runtimeTools }, set: { runtimeTools = $0 }),
             openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
             codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
+            codexReasoningEffort: Binding(get: { reasoningEffort }, set: { reasoningEffort = $0 }),
             boardMessage: nil,
             boardMessageSeverity: nil,
             onCancel: {},
@@ -10882,6 +10925,7 @@ enum ContentViewTestHooks {
             runtimeTools: Binding(get: { runtimeTools }, set: { runtimeTools = $0 }),
             openAIAuthMode: Binding(get: { authMode }, set: { authMode = $0 }),
             codexProfile: Binding(get: { codexProfile }, set: { codexProfile = $0 }),
+            codexReasoningEffort: Binding(get: { reasoningEffort }, set: { reasoningEffort = $0 }),
             boardMessage: "Updated",
             boardMessageSeverity: .info,
             onCancel: {},

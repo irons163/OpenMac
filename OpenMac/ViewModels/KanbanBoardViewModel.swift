@@ -261,8 +261,25 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let taskID: UUID
         let prompt: String
         let model: String
+        let reasoningEffort: String?
         let profile: String?
         let workingDirectoryPath: String?
+
+        init(
+            taskID: UUID,
+            prompt: String,
+            model: String,
+            reasoningEffort: String? = nil,
+            profile: String?,
+            workingDirectoryPath: String?
+        ) {
+            self.taskID = taskID
+            self.prompt = prompt
+            self.model = model
+            self.reasoningEffort = reasoningEffort
+            self.profile = profile
+            self.workingDirectoryPath = workingDirectoryPath
+        }
     }
 
     var environmentProvider: () -> [String: String] = { ProcessInfo.processInfo.environment }
@@ -459,6 +476,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             taskID: task.id,
             prompt: prompt,
             model: runtimeProfile.model,
+            reasoningEffort: runtimeProfile.codexReasoningEffort.cliValue,
             profile: runtimeProfile.codexProfile,
             workingDirectoryPath: workingDirectoryPath
         )
@@ -504,6 +522,7 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
                     taskID: task.id,
                     prompt: prompt,
                     model: "",
+                    reasoningEffort: runtimeProfile.codexReasoningEffort.cliValue,
                     profile: runtimeProfile.codexProfile,
                     workingDirectoryPath: workingDirectoryPath
                 )
@@ -1003,6 +1022,10 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         }
         if !request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             arguments.append(contentsOf: ["--model", request.model])
+        }
+        if let reasoningEffort = request.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !reasoningEffort.isEmpty {
+            arguments.append(contentsOf: ["--reasoning-effort", reasoningEffort])
         }
         if let profile = request.profile?.trimmingCharacters(in: .whitespacesAndNewlines), !profile.isEmpty {
             arguments.append(contentsOf: ["--profile", profile])

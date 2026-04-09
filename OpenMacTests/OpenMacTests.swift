@@ -1664,17 +1664,21 @@ struct AgentTaskExecutorTests {
             contents: """
             #!/bin/sh
             out=""
+            effort=""
             while [ "$#" -gt 0 ]; do
               if [ "$1" = "--output-last-message" ]; then
                 shift
                 out="$1"
+              elif [ "$1" = "--reasoning-effort" ]; then
+                shift
+                effort="$1"
               fi
               shift
             done
             echo '{"type":"item.started","item":{"type":"command_execution","command":"echo hi"}}'
             echo '{"type":"item.completed","item":{"type":"agent_message","text":"agent finished"}}'
             if [ -n "$out" ]; then
-              printf 'Summary from fake codex\\n' > "$out"
+              printf 'Summary from fake codex (%s)\\n' "$effort" > "$out"
             fi
             exit 0
             """,
@@ -1686,6 +1690,7 @@ struct AgentTaskExecutorTests {
             taskID: UUID(),
             prompt: "run",
             model: "gpt-5",
+            reasoningEffort: "high",
             profile: "test",
             workingDirectoryPath: tempDirectory.path
         )
@@ -1703,7 +1708,7 @@ struct AgentTaskExecutorTests {
             environment: environment
         )
 
-        #expect(summary == "Summary from fake codex")
+        #expect(summary == "Summary from fake codex (high)")
         #expect(progressUpdates.contains(where: { $0.contains("Codex workdir:") }))
         #expect(progressUpdates.contains("Running command: echo hi"))
         #expect(progressUpdates.contains("agent finished"))
@@ -4476,7 +4481,8 @@ struct KanbanSupportTypeTests {
             endpoint: "https://api.openai.com/v1",
             tools: ["shell", "git"],
             openAIAuthMode: .codexBridge,
-            codexProfile: "team-default"
+            codexProfile: "team-default",
+            codexReasoningEffort: .high
         )
 
         let encoded = try JSONEncoder().encode(profile)
@@ -4488,6 +4494,7 @@ struct KanbanSupportTypeTests {
         #expect(decoded.tools == Set(["shell", "git"]))
         #expect(decoded.openAIAuthMode == .codexBridge)
         #expect(decoded.codexProfile == "team-default")
+        #expect(decoded.codexReasoningEffort == .high)
     }
 
     @Test("agent runtime profile decode defaults optional coding keys")
@@ -4508,6 +4515,7 @@ struct KanbanSupportTypeTests {
         #expect(decoded.tools.isEmpty)
         #expect(decoded.openAIAuthMode == .apiKey)
         #expect(decoded.codexProfile == nil)
+        #expect(decoded.codexReasoningEffort == .automatic)
     }
 
     @Test("delivery contract defaults and titles remain stable")
@@ -6216,6 +6224,15 @@ struct ContentViewLogicTests {
         #expect(codexSummary.contains(codex.provider.displayName))
         #expect(codexSummary.contains("gpt-5"))
         #expect(codexSummary.contains(OpenAICompatibleAuthMode.codexBridge.displayName))
+
+        let codexWithEffort = AgentRuntimeProfile(
+            provider: .openAICompatible,
+            model: "gpt-5",
+            openAIAuthMode: .codexBridge,
+            codexReasoningEffort: .high
+        )
+        let codexWithEffortSummary = ContentViewTestHooks.runtimeSummary(runtimeProfile: codexWithEffort)
+        #expect(codexWithEffortSummary.contains(CodexReasoningEffort.high.displayName))
     }
 
     @Test("build runtime profile normalizes endpoint, tools, and auth mode")
@@ -6228,7 +6245,8 @@ struct ContentViewLogicTests {
                 endpoint: "",
                 toolsText: "",
                 openAIAuthMode: .apiKey,
-                codexProfile: ""
+                codexProfile: "",
+                codexReasoningEffort: .high
             ) == nil
         )
 
@@ -6239,12 +6257,14 @@ struct ContentViewLogicTests {
             endpoint: "https://api.example.com/v1",
             toolsText: " Git , shell,git ",
             openAIAuthMode: .apiKey,
-            codexProfile: "ignored"
+            codexProfile: "ignored",
+            codexReasoningEffort: .xhigh
         )
         #expect(openAIAPIKey?.model == AgentRuntimeProvider.openAICompatible.defaultModel)
         #expect(openAIAPIKey?.endpoint == "https://api.example.com/v1")
         #expect(openAIAPIKey?.openAIAuthMode == .apiKey)
         #expect(openAIAPIKey?.codexProfile == nil)
+        #expect(openAIAPIKey?.codexReasoningEffort == .automatic)
         #expect(openAIAPIKey?.tools == Set(["git", "shell"]))
 
         let openAICodex = ContentViewTestHooks.buildRuntimeProfile(
@@ -6254,11 +6274,13 @@ struct ContentViewLogicTests {
             endpoint: "https://should-be-ignored",
             toolsText: "",
             openAIAuthMode: .codexBridge,
-            codexProfile: "team-profile"
+            codexProfile: "team-profile",
+            codexReasoningEffort: .medium
         )
         #expect(openAICodex?.openAIAuthMode == .codexBridge)
         #expect(openAICodex?.endpoint == nil)
         #expect(openAICodex?.codexProfile == "team-profile")
+        #expect(openAICodex?.codexReasoningEffort == .medium)
 
         let openAICodexDefaultModel = ContentViewTestHooks.buildRuntimeProfile(
             isEnabled: true,
@@ -6267,7 +6289,8 @@ struct ContentViewLogicTests {
             endpoint: "",
             toolsText: "",
             openAIAuthMode: .codexBridge,
-            codexProfile: ""
+            codexProfile: "",
+            codexReasoningEffort: .automatic
         )
         #expect(openAICodexDefaultModel?.model == AgentRuntimeProfile.codexBridgeDefaultModel)
 
@@ -6278,12 +6301,14 @@ struct ContentViewLogicTests {
             endpoint: "https://ignored-for-local",
             toolsText: "",
             openAIAuthMode: .codexBridge,
-            codexProfile: "ignored"
+            codexProfile: "ignored",
+            codexReasoningEffort: .xhigh
         )
         #expect(localRuntime?.provider == .localMock)
         #expect(localRuntime?.openAIAuthMode == .apiKey)
         #expect(localRuntime?.endpoint == nil)
         #expect(localRuntime?.codexProfile == nil)
+        #expect(localRuntime?.codexReasoningEffort == .automatic)
     }
 
     @Test("assignee filter selection resolves to valid enum values")
