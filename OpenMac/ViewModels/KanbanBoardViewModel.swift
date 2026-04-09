@@ -482,6 +482,8 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
             workingDirectoryPath: workingDirectoryPath
         )
         let trimmedModel = runtimeProfile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReasoningEffort = runtimeProfile.codexReasoningEffort.cliValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         do {
             try codexBridgePreflight()
             let summary = try codexBridgeRunner(request, onProgress).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -510,6 +512,74 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
 
                     Automatic Codex app restart retry failed.
                     \(recoveryRawFailure)
+                    """
+                    return codexBridgeFailureOutcome(from: rawFailure)
+                }
+            }
+
+            // Older Codex CLIs do not support --reasoning-effort.
+            // Retry once without this flag to preserve compatibility.
+            if !trimmedReasoningEffort.isEmpty,
+               Self.isCodexReasoningEffortUnsupported(initialRawFailure) {
+                let fallbackRequest = CodexBridgeRequest(
+                    taskID: task.id,
+                    prompt: prompt,
+                    model: runtimeProfile.model,
+                    reasoningEffort: nil,
+                    profile: runtimeProfile.codexProfile,
+                    workingDirectoryPath: workingDirectoryPath
+                )
+                do {
+                    onProgress(L10n.string("Codex CLI does not support reasoning effort flag. Retrying without explicit reasoning effort."))
+                    let fallbackSummary = try codexBridgeRunner(fallbackRequest, onProgress)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !fallbackSummary.isEmpty else {
+                        return .failure(message: L10n.string("Codex Bridge returned empty output"))
+                    }
+                    return .success(summary: fallbackSummary)
+                } catch {
+                    let fallbackRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if !trimmedModel.isEmpty,
+                       Self.isCodexChatGPTModelUnsupported(fallbackRawFailure) {
+                        let modelFallbackRequest = CodexBridgeRequest(
+                            taskID: task.id,
+                            prompt: prompt,
+                            model: "",
+                            reasoningEffort: nil,
+                            profile: runtimeProfile.codexProfile,
+                            workingDirectoryPath: workingDirectoryPath
+                        )
+                        do {
+                            onProgress(L10n.string("Configured model rejected by Codex account. Retrying without explicit model."))
+                            let modelFallbackSummary = try codexBridgeRunner(modelFallbackRequest, onProgress)
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !modelFallbackSummary.isEmpty else {
+                                return .failure(message: L10n.string("Codex Bridge returned empty output"))
+                            }
+                            return .success(summary: modelFallbackSummary)
+                        } catch {
+                            let modelFallbackRawFailure = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let rawFailure = """
+                            Initial run failed because current Codex CLI does not support --reasoning-effort.
+                            \(initialRawFailure)
+
+                            Retry without reasoning effort failed due to configured model.
+                            \(fallbackRawFailure)
+
+                            Retry without reasoning effort and without explicit model also failed.
+                            \(modelFallbackRawFailure)
+                            """
+                            return codexBridgeFailureOutcome(from: rawFailure)
+                        }
+                    }
+
+                    let rawFailure = """
+                    Initial run failed because current Codex CLI does not support --reasoning-effort.
+                    \(initialRawFailure)
+
+                    Fallback run without reasoning effort failed.
+                    \(fallbackRawFailure)
                     """
                     return codexBridgeFailureOutcome(from: rawFailure)
                 }
@@ -567,6 +637,14 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         return normalized.contains("model is not supported when using codex with a chatgpt account")
     }
 
+    private static func isCodexReasoningEffortUnsupported(_ rawFailure: String) -> Bool {
+        let normalized = rawFailure.lowercased()
+        if normalized.contains("unexpected argument '--reasoning-effort'") { return true }
+        if normalized.contains("unknown option '--reasoning-effort'") { return true }
+        if normalized.contains("unrecognized option '--reasoning-effort'") { return true }
+        return false
+    }
+
     private static func isCodexUsageLimitError(_ rawFailure: String) -> Bool {
         let normalized = rawFailure.lowercased()
         if normalized.contains("insufficient_quota") { return true }
@@ -588,6 +666,9 @@ struct DefaultAgentTaskExecutor: AgentTaskExecuting {
         let normalized = trimmed.lowercased()
         if isCodexChatGPTModelUnsupported(trimmed) {
             return L10n.string("Configured model is not supported for Codex Bridge with ChatGPT login. Leave model blank to use Codex default, or switch to a Codex-supported model.")
+        }
+        if isCodexReasoningEffortUnsupported(trimmed) {
+            return L10n.string("Current Codex CLI does not support reasoning effort flag. Update Codex CLI or set reasoning effort to Automatic.")
         }
         if isCodexUsageLimitError(trimmed) {
             return L10n.string("Codex usage limit/quota appears exhausted. OpenMac attempted a Codex app restart and retry once. Please wait for quota reset or top up usage, then retry.")
@@ -13243,6 +13324,10 @@ private extension DefaultAgentTaskExecutor {
         isCodexChatGPTModelUnsupported(rawFailure)
     }
 
+    static func testIsCodexReasoningEffortUnsupported(_ rawFailure: String) -> Bool {
+        isCodexReasoningEffortUnsupported(rawFailure)
+    }
+
     static func testIsCodexUsageLimitError(_ rawFailure: String) -> Bool {
         isCodexUsageLimitError(rawFailure)
     }
@@ -13367,6 +13452,10 @@ enum KanbanBoardViewModelTestHooks {
 
     static func isCodexChatGPTModelUnsupported(_ rawFailure: String) -> Bool {
         DefaultAgentTaskExecutor.testIsCodexChatGPTModelUnsupported(rawFailure)
+    }
+
+    static func isCodexReasoningEffortUnsupported(_ rawFailure: String) -> Bool {
+        DefaultAgentTaskExecutor.testIsCodexReasoningEffortUnsupported(rawFailure)
     }
 
     static func isCodexUsageLimitError(_ rawFailure: String) -> Bool {

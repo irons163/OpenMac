@@ -971,6 +971,63 @@ struct AgentTaskExecutorTests {
         #expect(seenRequests.last?.model == "")
     }
 
+    @Test("default executor retries codex bridge without reasoning effort when CLI flag unsupported")
+    func openAICompatibleCodexBridgeRetriesWithoutReasoningEffortWhenUnsupported() {
+        let task = WorkTask(
+            title: "Bridge unsupported reasoning flag",
+            details: "",
+            requiredSkills: ["automation"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Bridge Agent",
+            skills: ["automation"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5",
+                openAIAuthMode: .codexBridge,
+                codexReasoningEffort: .high
+            )
+        )
+        var seenRequests: [DefaultAgentTaskExecutor.CodexBridgeRequest] = []
+        var progressEvents: [String] = []
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [:] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                seenRequests.append(request)
+                if seenRequests.count == 1 {
+                    struct UnsupportedFlagError: LocalizedError {
+                        var errorDescription: String? {
+                            "error: unexpected argument '--reasoning-effort' found"
+                        }
+                    }
+                    throw UnsupportedFlagError()
+                }
+                return "Reasoning compatibility fallback succeeded"
+            }
+        )
+
+        let outcome = executor.execute(task: task, agent: agent) { update in
+            progressEvents.append(update)
+        }
+
+        switch outcome {
+        case let .success(summary):
+            #expect(summary == "Reasoning compatibility fallback succeeded")
+        case .failure:
+            #expect(Bool(false), "Expected fallback success when reasoning-effort is unsupported")
+        }
+        #expect(seenRequests.count == 2)
+        #expect(seenRequests.first?.reasoningEffort == "high")
+        #expect(seenRequests.last?.reasoningEffort == nil)
+        #expect(progressEvents.contains(where: { $0.contains("without explicit reasoning effort") }))
+    }
+
     @Test("codex progress parser reports command start events")
     func codexProgressParsesCommandStartEvent() {
         let line = #"{"type":"item.started","item":{"type":"command_execution","command":"ls -la"}}"#
@@ -1613,6 +1670,11 @@ struct AgentTaskExecutorTests {
         )
         #expect(unsupported.contains("not supported for Codex Bridge with ChatGPT login"))
 
+        let reasoningUnsupported = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure(
+            "error: unexpected argument '--reasoning-effort' found"
+        )
+        #expect(reasoningUnsupported.contains("does not support reasoning effort flag"))
+
         let quota = KanbanBoardViewModelTestHooks.summarizeCodexBridgeFailure("usage limit exceeded: insufficient_quota")
         #expect(quota.contains("usage limit/quota appears exhausted"))
 
@@ -1693,6 +1755,13 @@ struct AgentTaskExecutorTests {
             )
         )
         #expect(!KanbanBoardViewModelTestHooks.isCodexChatGPTModelUnsupported("model unavailable"))
+
+        #expect(
+            KanbanBoardViewModelTestHooks.isCodexReasoningEffortUnsupported(
+                "error: unexpected argument '--reasoning-effort' found"
+            )
+        )
+        #expect(!KanbanBoardViewModelTestHooks.isCodexReasoningEffortUnsupported("unexpected argument '--temperature' found"))
     }
 
     @Test("codex bridge sandbox mode and environment helpers are deterministic")
