@@ -116,6 +116,52 @@ enum CodexProjectsDirectorySettings {
     }
 }
 
+enum WorktreeExecutionSettings {
+    static let enabledUserDefaultsKey = "worktreeExecutionEnabled"
+    static let repositoryPathUserDefaultsKey = "worktreeRepositoryPath"
+    static let branchPrefixUserDefaultsKey = "worktreeBranchPrefix"
+    private static let fallbackRepositoryPathUserDefaultsKey = "githubRepositoryPath"
+    private static let fallbackBranchPrefixUserDefaultsKey = "githubBranchPrefix"
+
+    static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: enabledUserDefaultsKey)
+    }
+
+    static func resolvedRepositoryPath(userDefaults: UserDefaults = .standard) -> String {
+        let explicitPath = userDefaults.string(forKey: repositoryPathUserDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicitPath.isEmpty {
+            return (explicitPath as NSString).expandingTildeInPath
+        }
+        let fallbackPath = userDefaults.string(forKey: fallbackRepositoryPathUserDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (fallbackPath as NSString).expandingTildeInPath
+    }
+
+    static func resolvedBranchPrefix(userDefaults: UserDefaults = .standard) -> String {
+        let explicitPrefix = userDefaults.string(forKey: branchPrefixUserDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicitPrefix.isEmpty {
+            return normalizeBranchPrefix(explicitPrefix)
+        }
+        let fallbackPrefix = userDefaults.string(forKey: fallbackBranchPrefixUserDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalizeBranchPrefix(fallbackPrefix)
+    }
+
+    private static func normalizeBranchPrefix(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "openmac" }
+        return trimmed
+            .split(separator: "/")
+            .map { segment in
+                segment.lowercased().replacingOccurrences(of: " ", with: "-")
+            }
+            .joined(separator: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}
+
 struct BoardHealthRecommendation: Identifiable, Equatable {
     let action: BoardHealthAction
     let title: String
@@ -10839,20 +10885,166 @@ final class KanbanBoardViewModel: ObservableObject {
 
         let upstreamEnvironmentProvider = defaultExecutor.environmentProvider
         let boardName = selectedBoardName
+        let baselineEnvironment = upstreamEnvironmentProvider()
+        let resolvedWorkingDirectory = resolvedExecutionWorkingDirectoryPath(
+            task: task,
+            agent: agent,
+            boardName: boardName,
+            environment: baselineEnvironment,
+            onProgress: onProgress
+        )
         defaultExecutor.environmentProvider = {
             var environment = upstreamEnvironmentProvider()
-            let baseProjectsDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
-                environment: environment
-            )
-            let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
-                baseDirectoryPath: baseProjectsDirectoryPath,
-                boardName: boardName
-            )
-            environment[CodexProjectsDirectorySettings.environmentOverrideKey] = boardScopedPath
+            environment[CodexProjectsDirectorySettings.environmentOverrideKey] = resolvedWorkingDirectory
             return environment
         }
 
         return defaultExecutor.execute(task: task, agent: agent, onProgress: onProgress)
+    }
+
+    private func resolvedExecutionWorkingDirectoryPath(
+        task: WorkTask,
+        agent: AgentProfile,
+        boardName: String,
+        environment: [String: String],
+        onProgress: @escaping (_ update: String) -> Void
+    ) -> String {
+        let baseProjectsDirectoryPath = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+            environment: environment
+        )
+        let boardScopedPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: baseProjectsDirectoryPath,
+            boardName: boardName
+        )
+
+        guard WorktreeExecutionSettings.isEnabled() else {
+            return boardScopedPath
+        }
+
+        let repositoryPath = WorktreeExecutionSettings.resolvedRepositoryPath()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !repositoryPath.isEmpty else {
+            onProgress("Worktree enabled but repository path is empty. Falling back to board workspace.")
+            return boardScopedPath
+        }
+
+        let branchPrefix = WorktreeExecutionSettings.resolvedBranchPrefix()
+        do {
+            let worktreePath = try Self.prepareWorktreeDirectoryForExecution(
+                task: task,
+                agent: agent,
+                boardName: boardName,
+                repositoryPath: repositoryPath,
+                boardScopedPath: boardScopedPath,
+                branchPrefix: branchPrefix,
+                environment: environment
+            )
+            onProgress("Worktree ready: \(worktreePath)")
+            return worktreePath
+        } catch {
+            onProgress("Worktree setup failed (\(error.localizedDescription)). Falling back to board workspace.")
+            return boardScopedPath
+        }
+    }
+
+    private static func prepareWorktreeDirectoryForExecution(
+        task: WorkTask,
+        agent: AgentProfile,
+        boardName: String,
+        repositoryPath: String,
+        boardScopedPath: String,
+        branchPrefix: String,
+        environment: [String: String]
+    ) throws -> String {
+        let expandedRepositoryPath = (repositoryPath as NSString).expandingTildeInPath
+        let fileManager = FileManager.default
+        let repositoryURL = URL(fileURLWithPath: expandedRepositoryPath, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: repositoryURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw NSError(
+                domain: "OpenMac.Worktree",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Repository path does not exist"]
+            )
+        }
+
+        let repositoryCheck = try runShellCommand(
+            "git -C \(shellQuoted(repositoryURL.path)) rev-parse --is-inside-work-tree",
+            environment: environment
+        )
+        guard repositoryCheck.code == 0 else {
+            throw NSError(
+                domain: "OpenMac.Worktree",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Repository path is not a git repository"]
+            )
+        }
+
+        let worktreesRootURL = URL(fileURLWithPath: boardScopedPath, isDirectory: true)
+            .appendingPathComponent(".worktrees", isDirectory: true)
+        try fileManager.createDirectory(at: worktreesRootURL, withIntermediateDirectories: true)
+
+        let boardSlug = worktreeSlug(boardName, fallback: "board")
+        let agentSlug = worktreeSlug(agent.name, fallback: "agent")
+        let taskSlug = worktreeSlug(task.title, fallback: "task")
+        let taskIDPrefix = String(task.id.uuidString.lowercased().prefix(8))
+        let worktreeDirectoryName = "\(boardSlug)-\(agentSlug)-\(taskSlug)-\(taskIDPrefix)"
+        let worktreeURL = worktreesRootURL.appendingPathComponent(worktreeDirectoryName, isDirectory: true)
+        let worktreePath = worktreeURL.path
+        let worktreeGitMarker = worktreeURL.appendingPathComponent(".git", isDirectory: false).path
+        if fileManager.fileExists(atPath: worktreeGitMarker) {
+            return worktreePath
+        }
+
+        let resolvedBranchPrefix = branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "openmac"
+            : branchPrefix
+        let branchName = "\(resolvedBranchPrefix)/\(boardSlug)/\(agentSlug)-\(taskIDPrefix)"
+        let createBranchCommand =
+            "git -C \(shellQuoted(repositoryURL.path)) worktree add -b \(shellQuoted(branchName)) \(shellQuoted(worktreePath))"
+        let createBranchResult = try runShellCommand(createBranchCommand, environment: environment)
+        if createBranchResult.code == 0 {
+            return worktreePath
+        }
+
+        let attachExistingCommand =
+            "git -C \(shellQuoted(repositoryURL.path)) worktree add \(shellQuoted(worktreePath)) \(shellQuoted(branchName))"
+        let attachExistingResult = try runShellCommand(attachExistingCommand, environment: environment)
+        if attachExistingResult.code == 0 {
+            return worktreePath
+        }
+
+        let debugOutput = [
+            mergedShellOutput(stdout: createBranchResult.output, stderr: ""),
+            mergedShellOutput(stdout: attachExistingResult.output, stderr: "")
+        ]
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = debugOutput.isEmpty ? "git worktree add failed" : debugOutput
+        throw NSError(
+            domain: "OpenMac.Worktree",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: detail]
+        )
+    }
+
+    private static func worktreeSlug(_ rawValue: String, fallback: String) -> String {
+        let lowered = rawValue
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let slug = lowered
+            .map { character -> Character in
+                if character.isLetter || character.isNumber {
+                    return character
+                }
+                return "-"
+            }
+        let collapsed = String(slug)
+            .replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let resolved = collapsed.isEmpty ? fallback : collapsed
+        return String(resolved.prefix(32))
     }
 
     private func applyRetryRunCount(for taskID: UUID, additionalAttempts: Int) {

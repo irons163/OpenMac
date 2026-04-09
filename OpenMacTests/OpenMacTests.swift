@@ -17311,6 +17311,38 @@ private final class SequencedTaskExecutor: AgentTaskExecuting {
     }
 }
 
+struct WorktreeExecutionSettingsTests {
+    @Test("worktree settings resolve explicit repository path first")
+    func resolvesExplicitRepositoryPathFirst() {
+        let suiteName = "openmac.tests.worktree.repo.explicit.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("/tmp/custom-worktree-repo", forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        defaults.set("/tmp/fallback-github-repo", forKey: "githubRepositoryPath")
+
+        let resolved = WorktreeExecutionSettings.resolvedRepositoryPath(userDefaults: defaults)
+        #expect(resolved == "/tmp/custom-worktree-repo")
+    }
+
+    @Test("worktree settings fallback to github repository path and branch prefix")
+    func fallsBackToGitHubDefaults() {
+        let suiteName = "openmac.tests.worktree.repo.fallback.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("", forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        defaults.set("/tmp/fallback-github-repo", forKey: "githubRepositoryPath")
+        defaults.set("", forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+        defaults.set("codex/feature", forKey: "githubBranchPrefix")
+
+        let resolvedRepository = WorktreeExecutionSettings.resolvedRepositoryPath(userDefaults: defaults)
+        let resolvedPrefix = WorktreeExecutionSettings.resolvedBranchPrefix(userDefaults: defaults)
+        #expect(resolvedRepository == "/tmp/fallback-github-repo")
+        #expect(resolvedPrefix == "codex/feature")
+    }
+}
+
 private final class HookedTaskExecutor: AgentTaskExecuting {
     let outcomesByTaskID: [UUID: AgentTaskExecutionOutcome]
     let fallbackOutcome: AgentTaskExecutionOutcome

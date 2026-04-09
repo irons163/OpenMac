@@ -61,6 +61,9 @@ struct ContentView: View {
     @AppStorage("githubBaseBranch") private var githubBaseBranch = "main"
     @AppStorage("githubRemoteName") private var githubRemoteName = "origin"
     @AppStorage("githubBranchPrefix") private var githubBranchPrefix = "openmac"
+    @AppStorage(WorktreeExecutionSettings.enabledUserDefaultsKey) private var worktreeExecutionEnabled = false
+    @AppStorage(WorktreeExecutionSettings.repositoryPathUserDefaultsKey) private var worktreeRepositoryPath = ""
+    @AppStorage(WorktreeExecutionSettings.branchPrefixUserDefaultsKey) private var worktreeBranchPrefix = ""
     @StateObject private var viewModel: KanbanBoardViewModel
 
     @State private var isShowingNewTaskSheet = false
@@ -734,6 +737,27 @@ struct ContentView: View {
                         Button(L10n.string("Copy Codex Login Command")) {
                             copyToPasteboard(loginCommand)
                         }
+                    }
+                    Divider()
+                    Text("Git Worktree")
+                    Toggle("Enable per-task/per-agent git worktree", isOn: $worktreeExecutionEnabled)
+                    Text(resolvedWorktreeRepositoryPath)
+                        .font(.caption2.monospaced())
+                    Button("Choose Worktree Repository...") {
+                        chooseWorktreeRepositoryDirectory()
+                    }
+                    Button("Use GitHub Repository as Worktree Source") {
+                        worktreeRepositoryPath = resolvedGitHubRepositoryPath
+                    }
+                    Button("Open Worktree Repository in Finder") {
+                        openWorktreeRepositoryInFinder()
+                    }
+                    Button("Copy Worktree Repository Path") {
+                        copyToPasteboard(resolvedWorktreeRepositoryPath)
+                    }
+                    if !resolvedWorktreeBranchPrefix.isEmpty {
+                        Text("Branch Prefix: \(resolvedWorktreeBranchPrefix)")
+                            .font(.caption2.monospaced())
                     }
                 }
                 .help(L10n.string("Enable developer diagnostics and quick-copy execution logs"))
@@ -3998,6 +4022,21 @@ struct ContentView: View {
         return trimmed.isEmpty ? resolvedCodexProjectsDirectoryPath : trimmed
     }
 
+    private var resolvedWorktreeRepositoryPath: String {
+        let trimmed = worktreeRepositoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? resolvedGitHubRepositoryPath : trimmed
+    }
+
+    private var resolvedWorktreeBranchPrefix: String {
+        let trimmed = worktreeBranchPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return githubBranchPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "openmac"
+                : githubBranchPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
     private func resetTaskFilters() {
         taskSearchQuery = ""
         selectedAssigneeFilterKey = "all"
@@ -4108,6 +4147,22 @@ struct ContentView: View {
         githubRepositoryPath = url.path
     }
 
+    private func chooseWorktreeRepositoryDirectory() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.title = "Choose Worktree Repository"
+        panel.message = "Select the git repository used for worktree execution."
+        panel.prompt = L10n.string("Use Folder")
+        panel.directoryURL = URL(fileURLWithPath: resolvedWorktreeRepositoryPath, isDirectory: true)
+
+        let (modalResponse, url) = Self.openPanelResultProvider(panel)
+        guard modalResponse == .OK, let url else { return }
+        worktreeRepositoryPath = url.path
+    }
+
     private func useDefaultCodexProjectsDirectory() {
         codexProjectsDirectoryPath = ""
         ensureCodexProjectsDirectoryExists()
@@ -4141,6 +4196,13 @@ struct ContentView: View {
 
     private func openGitHubRepositoryInFinder() {
         let path = resolvedGitHubRepositoryPath
+        let expanded = (path as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded, isDirectory: true)
+        Self.workspaceActivator([url])
+    }
+
+    private func openWorktreeRepositoryInFinder() {
+        let path = resolvedWorktreeRepositoryPath
         let expanded = (path as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded, isDirectory: true)
         Self.workspaceActivator([url])
