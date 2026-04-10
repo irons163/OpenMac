@@ -17341,6 +17341,12 @@ struct WorktreeExecutionSettingsTests {
         #expect(resolvedRepository == "/tmp/fallback-github-repo")
         #expect(resolvedPrefix == "codex/feature")
     }
+
+    @Test("worktree branch prefix normalization keeps slash segments and lowercases")
+    func normalizesBranchPrefix() {
+        let normalized = WorktreeExecutionSettings.normalizedBranchPrefix("  Team A/Feature X  ")
+        #expect(normalized == "team-a/feature-x")
+    }
 }
 
 private final class HookedTaskExecutor: AgentTaskExecuting {

@@ -142,14 +142,14 @@ enum WorktreeExecutionSettings {
         let explicitPrefix = userDefaults.string(forKey: branchPrefixUserDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !explicitPrefix.isEmpty {
-            return normalizeBranchPrefix(explicitPrefix)
+            return normalizedBranchPrefix(explicitPrefix)
         }
         let fallbackPrefix = userDefaults.string(forKey: fallbackBranchPrefixUserDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return normalizeBranchPrefix(fallbackPrefix)
+        return normalizedBranchPrefix(fallbackPrefix)
     }
 
-    private static func normalizeBranchPrefix(_ rawValue: String) -> String {
+    static func normalizedBranchPrefix(_ rawValue: String) -> String {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "openmac" }
         return trimmed

@@ -77,6 +77,7 @@ struct ContentView: View {
     @State private var isShowingManualTriageSheet = false
     @State private var isShowingPMPlannerSheet = false
     @State private var isShowingMCPServersSheet = false
+    @State private var isShowingWorktreeSettingsSheet = false
     @State private var isShowingDeleteBoardAlert = false
     @State private var newBoardName = ""
     @State private var renameBoardName = ""
@@ -759,6 +760,9 @@ struct ContentView: View {
                         Text("Branch Prefix: \(resolvedWorktreeBranchPrefix)")
                             .font(.caption2.monospaced())
                     }
+                    Button("Worktree Settings...") {
+                        openWorktreeSettingsSheet()
+                    }
                 }
                 .help(L10n.string("Enable developer diagnostics and quick-copy execution logs"))
             }
@@ -777,6 +781,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingMCPServersSheet) {
             mcpServersSheetView
+        }
+        .sheet(isPresented: $isShowingWorktreeSettingsSheet) {
+            worktreeSettingsSheetView
         }
         .sheet(isPresented: $isShowingExtensionsMarketplaceSheet) {
             extensionsMarketplaceSheetView
@@ -1162,6 +1169,22 @@ struct ContentView: View {
             },
             onRemoveManualServer: removeManualMCPServerFromSheet,
             onClose: closeMCPServersSheet
+        )
+    }
+
+    private var worktreeSettingsSheetView: some View {
+        WorktreeSettingsSheet(
+            isEnabled: $worktreeExecutionEnabled,
+            repositoryPath: $worktreeRepositoryPath,
+            branchPrefix: $worktreeBranchPrefix,
+            fallbackRepositoryPath: resolvedGitHubRepositoryPath,
+            fallbackBranchPrefix: githubBranchPrefix,
+            onChooseRepository: chooseWorktreeRepositoryDirectory,
+            onUseGitHubRepository: { worktreeRepositoryPath = resolvedGitHubRepositoryPath },
+            onUseDefaultBranchPrefix: { worktreeBranchPrefix = "" },
+            onOpenRepositoryInFinder: openWorktreeRepositoryInFinder,
+            onCopyRepositoryPath: { copyToPasteboard(resolvedWorktreeRepositoryPath) },
+            onClose: closeWorktreeSettingsSheet
         )
     }
 
@@ -2370,6 +2393,15 @@ struct ContentView: View {
 
     private func closeMCPServersSheet() {
         isShowingMCPServersSheet = false
+    }
+
+    private func openWorktreeSettingsSheet() {
+        isShowingWorktreeSettingsSheet = true
+    }
+
+    private func closeWorktreeSettingsSheet() {
+        worktreeBranchPrefix = WorktreeExecutionSettings.normalizedBranchPrefix(worktreeBranchPrefix)
+        isShowingWorktreeSettingsSheet = false
     }
 
     private func openExtensionsMarketplaceSheet() {
@@ -8792,6 +8824,88 @@ private struct EditTaskSheet: View {
                 )
             }
         )
+    }
+}
+
+private struct WorktreeSettingsSheet: View {
+    @Binding var isEnabled: Bool
+    @Binding var repositoryPath: String
+    @Binding var branchPrefix: String
+    let fallbackRepositoryPath: String
+    let fallbackBranchPrefix: String
+    let onChooseRepository: () -> Void
+    let onUseGitHubRepository: () -> Void
+    let onUseDefaultBranchPrefix: () -> Void
+    let onOpenRepositoryInFinder: () -> Void
+    let onCopyRepositoryPath: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Worktree Settings")
+                .font(.headline)
+
+            Toggle("Enable per-task/per-agent git worktree", isOn: $isEnabled)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Repository Path")
+                    .font(.subheadline.weight(.semibold))
+                TextField("Git repository path", text: $repositoryPath)
+                    .textFieldStyle(.roundedBorder)
+                Text(resolvedRepositoryPath)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button("Choose Repository...", action: onChooseRepository)
+                    Button("Use GitHub Repository", action: onUseGitHubRepository)
+                    Button("Open in Finder", action: onOpenRepositoryInFinder)
+                    Button("Copy Path", action: onCopyRepositoryPath)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Branch Prefix")
+                    .font(.subheadline.weight(.semibold))
+                TextField("openmac", text: $branchPrefix)
+                    .textFieldStyle(.roundedBorder)
+                Text("Effective: \(resolvedBranchPrefix)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button("Use Default Prefix", action: onUseDefaultBranchPrefix)
+                    if !fallbackBranchPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Use GitHub Prefix") {
+                            branchPrefix = fallbackBranchPrefix
+                        }
+                    }
+                }
+            }
+
+            Text("Worktrees are created under board workspace: .worktrees/<board-agent-task> and reused on reruns.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Close"), action: onClose)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 680)
+    }
+
+    private var resolvedRepositoryPath: String {
+        let trimmed = repositoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallbackRepositoryPath : trimmed
+    }
+
+    private var resolvedBranchPrefix: String {
+        let trimmed = branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return WorktreeExecutionSettings.normalizedBranchPrefix(fallbackBranchPrefix)
+        }
+        return WorktreeExecutionSettings.normalizedBranchPrefix(trimmed)
     }
 }
 
