@@ -2289,6 +2289,26 @@ struct AgentTaskExecutorTests {
         #expect(resolvedDefault.contains("Library/Application Support/OpenMac/Projects"))
     }
 
+    @Test("projects directory resolver prefers environment override and expands tilde")
+    func projectsDirectoryResolverEnvironmentOverride() {
+        let suiteName = "openmac-tests.projects.env.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            #expect(Bool(false), "Failed to initialize isolated UserDefaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        defaults.set("/tmp/openmac-defaults-path", forKey: CodexProjectsDirectorySettings.userDefaultsKey)
+        let resolved = CodexProjectsDirectorySettings.resolvedProjectsDirectoryPath(
+            environment: [CodexProjectsDirectorySettings.environmentOverrideKey: " ~/OpenMacProjects "],
+            userDefaults: defaults
+        )
+        let expected = ("~/OpenMacProjects" as NSString).expandingTildeInPath
+        #expect(resolved == expected)
+    }
+
     @Test("projects directory default URL uses provided home directory")
     func projectsDirectoryDefaultURLUsesHomeDirectory() {
         let home = URL(fileURLWithPath: "/tmp/openmac-home-\(UUID().uuidString)", isDirectory: true)
@@ -2324,6 +2344,12 @@ struct AgentTaskExecutorTests {
             boardName: "   / :   "
         )
         #expect(fallback == "/tmp/openmac-projects-root/board")
+
+        let normalized = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: base,
+            boardName: "__ iOS + macOS /// MVP (v2) __"
+        )
+        #expect(normalized == "/tmp/openmac-projects-root/iOS-macOS-MVP-v2")
     }
 
     @Test("view model executes codex bridge under board-scoped projects directory")
@@ -18313,6 +18339,17 @@ struct WorktreeExecutionSettingsTests {
         #expect(resolved == "/tmp/custom-worktree-repo")
     }
 
+    @Test("worktree settings expand tilde in repository paths")
+    func resolvesRepositoryPathExpandsTilde() {
+        let suiteName = "openmac.tests.worktree.repo.tilde.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(" ~/custom-repo ", forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        let resolved = WorktreeExecutionSettings.resolvedRepositoryPath(userDefaults: defaults)
+        #expect(resolved == ("~/custom-repo" as NSString).expandingTildeInPath)
+    }
+
     @Test("worktree settings fallback to github repository path and branch prefix")
     func fallsBackToGitHubDefaults() {
         let suiteName = "openmac.tests.worktree.repo.fallback.\(UUID().uuidString)"
@@ -18334,6 +18371,12 @@ struct WorktreeExecutionSettingsTests {
     func normalizesBranchPrefix() {
         let normalized = WorktreeExecutionSettings.normalizedBranchPrefix("  Team A/Feature X  ")
         #expect(normalized == "team-a/feature-x")
+    }
+
+    @Test("worktree branch prefix normalization trims leading and trailing separators")
+    func normalizesBranchPrefixTrimsSeparators() {
+        let normalized = WorktreeExecutionSettings.normalizedBranchPrefix(" / Team Alpha // Release / ")
+        #expect(normalized == "team-alpha/release")
     }
 
     @Test("worktree branch prefix falls back to openmac when inputs are blank")
