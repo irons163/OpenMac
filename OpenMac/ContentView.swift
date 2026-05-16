@@ -9930,6 +9930,11 @@ private extension ContentView {
             exercised += 1
         }
 
+        func render<V: View>(_ view: V) {
+            _ = view.body
+            exercised += 1
+        }
+
         hit { view.cycleAppearanceMode() }
         hit { view.resetDraftAndClose() }
         hit { view.copyToPasteboard("coverage") }
@@ -10050,13 +10055,13 @@ private extension ContentView {
         hit { view.openWIPSettings() }
         hit { fallbackWIPView.openWIPSettings() }
         hit { view.applyWIPSettings() }
-        hit { _ = view.newTaskSheetView }
-        hit { _ = view.editTaskSheetView }
-        hit { _ = view.newAgentSheetView }
-        hit { _ = view.editAgentSheetView }
-        hit { _ = view.worktreeSettingsSheetView }
-        hit { _ = view.mcpServersSheetView }
-        hit { _ = view.wipSettingsSheetView }
+        render(view.newTaskSheetView)
+        render(view.editTaskSheetView)
+        render(view.newAgentSheetView)
+        render(view.editAgentSheetView)
+        render(view.worktreeSettingsSheetView)
+        render(view.mcpServersSheetView)
+        render(view.wipSettingsSheetView)
         hit { _ = view.pmTemplateOptions.count }
         hit {
             view.developerModeEnabled = false
@@ -10254,7 +10259,7 @@ private extension ContentView {
         hit { view.chooseWorktreeRepositoryDirectory() }
         hit { view.openWorktreeRepositoryInFinder() }
         hit { view.openExtensionsMarketplaceSheet() }
-        hit { _ = view.extensionsMarketplaceSheetView }
+        render(view.extensionsMarketplaceSheetView)
         hit { view.copyPMPlannerStatusSnapshot() }
         hit { view.closeExtensionsMarketplaceSheet() }
         hit { view.choosePMPluginsDirectory() }
@@ -10266,6 +10271,29 @@ private extension ContentView {
             view.applyPMPluginSettings()
         }
         hit { view.copyPMPluginDiagnosticsFromSheet() }
+        hit {
+            if let command = view.viewModel.pmPlannerPanelExtensionCommands().first(where: {
+                $0.pluginID == "openmac.system" && $0.commandID == "system.google-stitch.generate"
+            }) {
+                view.runPMExtensionCommandFromToolbar(command)
+                if let firstTask = view.viewModel.tasks.first {
+                    view.runPMExtensionCommandForTask(firstTask, command: command)
+                }
+                view.runPMExtensionCommand(
+                    command,
+                    extensionInputs: ["_openmacExtensionDescriptorID": "coverage-extension"]
+                ) { succeeded, detail in
+                    _ = succeeded
+                    _ = detail
+                }
+                view.applyPlannerExtensionCommandOutputIfNeeded(
+                    command: command,
+                    extensionInputs: ["_openmacExtensionDescriptorID": "coverage-extension"],
+                    detail: "Generated prompt output"
+                )
+                _ = view.latestPMExtensionCommandDetail(command: command, startedAt: Date.distantPast)
+            }
+        }
         hit { view.runGitHubPRFlowFromToolbar() }
         hit { view.clearExecutionCheckpointFromToolbar() }
         hit { view.resumeInterruptedExecutionFromToolbar() }
