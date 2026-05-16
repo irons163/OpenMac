@@ -9933,7 +9933,13 @@ private extension ContentView {
         hit { view.cycleAppearanceMode() }
         hit { view.resetDraftAndClose() }
         hit { view.copyToPasteboard("coverage") }
+        hit { _ = view.codexSkillTemplateOptions.first?.requiredSkillsText }
         hit { view.openExecutionDetails(todoAssigned) }
+        hit {
+            if let details = view.selectedExecutionDetails {
+                _ = view.executionDetailsSheetView(for: details)
+            }
+        }
         hit { view.applyTaskEdits() }
         hit {
             view.openEditTask(todoAssigned)
@@ -10149,11 +10155,39 @@ private extension ContentView {
             view.newTaskPoints = 1
             view.createTaskFromSheet(autoAssign: false)
         }
+        hit { view.applySelectedTaskTemplateFromSheet() }
+        hit {
+            view.newTaskTitle = "Coverage Template"
+            view.newTaskDetails = "template details"
+            view.newTaskSkills = "swiftui, testing"
+            view.newTaskPoints = 2
+            view.saveCurrentTaskAsTemplateFromSheet()
+            view.selectedTaskTemplateID = view.viewModel.taskTemplates.first?.id
+            view.applySelectedTaskTemplateFromSheet()
+        }
+        hit {
+            if let option = view.codexSkillTemplateOptions.first {
+                view.selectedCodexSkillTemplateID = option.id
+                view.applySelectedCodexSkillTemplateFromSheet()
+            }
+        }
         hit {
             view.newTaskTitle = " "
             view.createTaskFromSheet(autoAssign: false)
         }
+        hit {
+            view.newAgentName = "Coverage Added Agent"
+            view.newAgentSkills = "swiftui,release"
+            view.newAgentCapacity = 2
+            view.createNewAgentFromSheet()
+        }
+        hit {
+            view.newAgentName = " "
+            view.createNewAgentFromSheet()
+        }
         hit { view.archiveDoneTasks() }
+        hit { view.approveAllPendingRunsFromToolbar() }
+        hit { view.createAcceptanceE2ETasksFromToolbar() }
         hit { view.rebalanceTodoAssignments() }
         hit { view.runAutoAssignFromToolbar() }
         hit { view.runAssignedExecutionsFromToolbar() }
@@ -10204,13 +10238,29 @@ private extension ContentView {
         hit { view.chooseGitHubRepositoryDirectory() }
         hit { view.openGitHubRepositoryInFinder() }
         hit { view.syncMCPRegistryNowFromToolbar() }
+        hit {
+            view.mcpAutoFetchEnabled = false
+            view.applyMCPSettingsFromSheet()
+        }
+        hit { view.openMCPServersSheet() }
+        hit { view.closeMCPServersSheet() }
         hit { view.openWorktreeSettingsSheet() }
         hit { view.closeWorktreeSettingsSheet() }
         hit { view.chooseWorktreeRepositoryDirectory() }
         hit { view.openWorktreeRepositoryInFinder() }
+        hit { view.openExtensionsMarketplaceSheet() }
+        hit { _ = view.extensionsMarketplaceSheetView }
+        hit { view.copyPMPlannerStatusSnapshot() }
+        hit { view.closeExtensionsMarketplaceSheet() }
         hit { view.choosePMPluginsDirectory() }
         hit { view.openPMPluginsDirectoryInFinder() }
         hit { view.installPMExtensionFromFolder() }
+        hit {
+            view.pmPluginsAutoDiscover = true
+            view.pmPluginsDirectoryPath = view.resolvedPMPluginsDirectoryPath
+            view.applyPMPluginSettings()
+        }
+        hit { view.copyPMPluginDiagnosticsFromSheet() }
         hit { view.runGitHubPRFlowFromToolbar() }
         hit { view.clearExecutionCheckpointFromToolbar() }
         hit { view.resumeInterruptedExecutionFromToolbar() }
@@ -10220,6 +10270,7 @@ private extension ContentView {
             view.mcpManualKeywordHints = "xcode,mcp"
             view.addManualMCPServerFromSheet()
         }
+        hit { view.removeManualMCPServerFromSheet("xcode") }
         hit {
             view.dagSchedulerEnabled = true
             view.dagSchedulerAutoAssignBeforeRun = true
@@ -10228,6 +10279,40 @@ private extension ContentView {
             view.dagSchedulerAutoCreateDependencies = true
             view.dagSchedulerMaxPasses = 2
             view.applyDAGSchedulerSettings()
+        }
+        hit {
+            view.approvalGateEnabled = true
+            view.approvalGateMinStoryPoints = 2
+            view.applyApprovalGateSettings()
+        }
+        hit {
+            view.quotaGovernanceEnabled = true
+            view.quotaMaxEstimatedTokens = 9_999
+            view.quotaMaxEstimatedCostUSD = 1.25
+            view.quotaCostPer1KTokensUSD = 0.002
+            view.applyQuotaGovernanceSettings()
+        }
+        hit {
+            view.parallelSchedulerEnabled = true
+            view.parallelSchedulerMaxAgents = 2
+            view.applyParallelSchedulerSettings()
+        }
+        hit {
+            view.prQualityGateEnabled = true
+            view.applyPRQualityGateSettings()
+        }
+        hit {
+            view.qualitySafetyGateEnabled = true
+            view.qualitySafetyRequireAcceptance = true
+            view.qualitySafetyRequireCoverageIntent = true
+            view.qualitySafetyRequireSecurityPrivacyNotes = false
+            view.applyQualitySafetyGateSettings()
+        }
+        hit {
+            view.realArtifactVerificationEnabled = true
+            view.realArtifactRequireInfoPlistExecutableKey = true
+            view.realArtifactRequireXcodeBuild = false
+            view.applyRealArtifactVerificationSettings()
         }
         hit {
             shouldFailCodexDirectoryEnsurer = true
