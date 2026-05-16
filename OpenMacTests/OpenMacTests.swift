@@ -3162,6 +3162,52 @@ struct KanbanFlowTests {
         #expect(Set(hints).count == hints.count)
     }
 
+    @Test("git remote source heuristic covers ssh and github URL branches")
+    func gitRemoteSourceHeuristicCoverage() {
+        #expect(KanbanBoardViewModelTestHooks.isLikelyGitRemoteSource("git@github.com:openai/openmac.git"))
+        #expect(KanbanBoardViewModelTestHooks.isLikelyGitRemoteSource("https://github.com/openai/openmac"))
+        #expect(KanbanBoardViewModelTestHooks.isLikelyGitRemoteSource("http://github.com/openai/openmac"))
+        #expect(!KanbanBoardViewModelTestHooks.isLikelyGitRemoteSource("/tmp/local-plugin"))
+    }
+
+    @Test("board extension hook bindings normalize trim dedup and sort")
+    func normalizedBoardExtensionHookBindingsCoverage() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let now = Date(timeIntervalSince1970: 1_735_000_000)
+        let bindings = [
+            PMBoardExtensionHookBinding(
+                id: secondID,
+                event: .ticketCreated,
+                pluginID: " openmac.system ",
+                commandID: " system.google-stitch.generate ",
+                isEnabled: true,
+                createdAt: now.addingTimeInterval(1)
+            ),
+            PMBoardExtensionHookBinding(
+                id: firstID,
+                event: .ticketCreated,
+                pluginID: "openmac.system",
+                commandID: "system.google-stitch.generate",
+                isEnabled: false,
+                createdAt: now
+            ),
+            PMBoardExtensionHookBinding(
+                event: .reviewEntered,
+                pluginID: "   ",
+                commandID: "noop",
+                isEnabled: true,
+                createdAt: now
+            )
+        ]
+
+        let normalized = KanbanBoardViewModelTestHooks.normalizedBoardExtensionHookBindings(bindings)
+        #expect(normalized.count == 1)
+        #expect(normalized.first?.id == secondID)
+        #expect(normalized.first?.pluginID == "openmac.system")
+        #expect(normalized.first?.commandID == "system.google-stitch.generate")
+    }
+
     @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
     func startupWarningForCommandLineToolsOnly() {
         let viewModel = KanbanBoardViewModel(
@@ -14180,6 +14226,83 @@ struct KanbanPersistenceTests {
         #expect(viewModel.switchBoard(to: boardOneID))
         #expect(viewModel.sharedAgentMemoryText().contains("Board one note"))
         #expect(!viewModel.sharedAgentMemoryText().contains("Board two note"))
+    }
+
+    @Test("clear shared memory removes entries and posts warning message")
+    func clearSharedMemoryCoverage() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        #expect(viewModel.addSharedAgentMemoryNote("to-clear"))
+        #expect(!viewModel.sharedAgentMemory.isEmpty)
+
+        viewModel.clearSharedAgentMemory()
+
+        #expect(viewModel.sharedAgentMemory.isEmpty)
+        #expect(viewModel.lastBoardMessageSeverity == .warning)
+        #expect(viewModel.lastBoardMessage?.isEmpty == false)
+    }
+
+    @Test("reset execution quota usage clears consumed counters")
+    func resetExecutionQuotaUsageCoverage() {
+        let agent = AgentProfile(name: "Quota Agent", skills: ["swift"], maxConcurrentTasks: 1)
+        let task = WorkTask(
+            title: "Quota task",
+            details: "Execute to consume quota usage",
+            requiredSkills: ["swift"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: agent.id
+        )
+        let executor = HookedTaskExecutor(
+            outcomesByTaskID: [task.id: .success(summary: "done")]
+        )
+        let viewModel = KanbanBoardViewModel(
+            tasks: [task],
+            agents: [agent],
+            taskExecutor: executor
+        )
+
+        #expect(viewModel.runTaskExecution(task.id))
+        #expect(viewModel.executionQuotaUsage.consumedRuns > 0)
+
+        viewModel.resetExecutionQuotaUsage()
+
+        #expect(viewModel.executionQuotaUsage.consumedRuns == 0)
+        #expect(viewModel.executionQuotaUsage.estimatedTokensUsed == 0)
+        #expect(viewModel.executionQuotaUsage.estimatedCostUSD == 0)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+    }
+
+    @Test("PM extension text helpers render activity and observability snapshots")
+    func pmExtensionTextHelpersCoverage() {
+        let viewModel = KanbanBoardViewModel(
+            tasks: [],
+            agents: [],
+            runOnBackground: { work in work() },
+            runOnMain: { work in work() }
+        )
+        guard let command = viewModel.pmPlannerPanelExtensionCommands().first(where: {
+            $0.pluginID == "openmac.system" &&
+            $0.commandID == "system.google-stitch.generate"
+        }) else {
+            #expect(Bool(false), "Missing system stitch command")
+            return
+        }
+
+        #expect(
+            viewModel.runPMExtensionCommand(
+                command,
+                extensionInputs: [
+                    "projectBrief": "Coverage helper",
+                    "targetPlatform": "iOS"
+                ]
+            )
+        )
+
+        let activityText = viewModel.pmExtensionActivityLogText()
+        let observabilityText = viewModel.pmExtensionObservabilityText()
+        #expect(activityText.contains("system.google-stitch.generate"))
+        #expect(activityText.contains("openmac.system"))
+        #expect(observabilityText.contains("openmac.system"))
     }
 
     @Test("shared memory provider mode is imported from workspace snapshot")

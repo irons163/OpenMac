@@ -13779,6 +13779,16 @@ private extension KanbanBoardViewModel {
         let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
         return viewModel.preferredBuildScheme(from: schemes)
     }
+
+    static func testIsLikelyGitRemoteSource(_ source: String) -> Bool {
+        isLikelyGitRemoteSource(source)
+    }
+
+    static func testNormalizedBoardExtensionHookBindings(
+        _ bindings: [PMBoardExtensionHookBinding]
+    ) -> [PMBoardExtensionHookBinding] {
+        normalizedBoardExtensionHookBindings(bindings)
+    }
 }
 
 enum KanbanBoardViewModelTestHooks {
@@ -13975,6 +13985,16 @@ enum KanbanBoardViewModelTestHooks {
 
     static func preferredBuildScheme(from schemes: [String]) -> String? {
         KanbanBoardViewModel.testPreferredBuildScheme(from: schemes)
+    }
+
+    static func isLikelyGitRemoteSource(_ source: String) -> Bool {
+        KanbanBoardViewModel.testIsLikelyGitRemoteSource(source)
+    }
+
+    static func normalizedBoardExtensionHookBindings(
+        _ bindings: [PMBoardExtensionHookBinding]
+    ) -> [PMBoardExtensionHookBinding] {
+        KanbanBoardViewModel.testNormalizedBoardExtensionHookBindings(bindings)
     }
 }
 #endif
