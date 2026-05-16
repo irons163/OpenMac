@@ -5212,6 +5212,17 @@ struct KanbanFlowTests {
 @Suite(.serialized)
 @MainActor
 struct KanbanSupportTypeTests {
+    @Test("board health actions expose stable auto-fixability")
+    func boardHealthActionAutoFixableMapping() {
+        #expect(BoardHealthAction.autoAssignUnassignedTodo.isAutoFixable)
+        #expect(BoardHealthAction.createMissingDependencyTasks.isAutoFixable)
+        #expect(!BoardHealthAction.openManualTriage.isAutoFixable)
+        #expect(!BoardHealthAction.openNewAgent.isAutoFixable)
+        #expect(BoardHealthAction.rebalanceTodoLoad.isAutoFixable)
+        #expect(BoardHealthAction.increaseWIPLimit(.inProgress).isAutoFixable)
+        #expect(BoardHealthAction.archiveDone.isAutoFixable)
+    }
+
     @Test("board health recommendation id is stable for each action")
     func boardHealthRecommendationIDMapping() {
         #expect(
@@ -5259,6 +5270,50 @@ struct KanbanSupportTypeTests {
         )
 
         #expect(result.id == "\(boardID.uuidString)-\(taskID.uuidString)")
+    }
+
+    @Test("agent task executor default helpers deduplicate cancellation and forward execute calls")
+    func agentTaskExecutorDefaultHelperCoverage() {
+        final class ProbeExecutor: AgentTaskExecuting {
+            var executeCallCount = 0
+            var cancelledTaskIDs: [UUID] = []
+
+            func execute(task _: WorkTask, agent _: AgentProfile) -> AgentTaskExecutionOutcome {
+                executeCallCount += 1
+                return .success(summary: "ok")
+            }
+
+            func requestCancellation(taskID: UUID) {
+                cancelledTaskIDs.append(taskID)
+            }
+
+            func clearCancellation(taskID _: UUID) {}
+        }
+
+        let probe = ProbeExecutor()
+        let taskID = UUID()
+        let task = WorkTask(
+            id: taskID,
+            title: "Task",
+            details: "Details",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Agent", skills: [], maxConcurrentTasks: 1)
+        var progressUpdates: [String] = []
+
+        let outcome = probe.execute(task: task, agent: agent) { update in
+            progressUpdates.append(update)
+        }
+        #expect(outcome == .success(summary: "ok"))
+        #expect(probe.executeCallCount == 1)
+        #expect(progressUpdates.isEmpty)
+
+        let duplicateIDs = [taskID, taskID, UUID()]
+        probe.requestCancellation(taskIDs: duplicateIDs)
+        #expect(Set(probe.cancelledTaskIDs).count == 2)
     }
 
     @Test("runtime provider and auth mode ids map to raw values")
