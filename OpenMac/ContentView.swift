@@ -10359,6 +10359,13 @@ private extension ContentView {
         hit { view.assignManually(taskID: UUID()) }
         hit { Self.assignFirstManualCandidateIfAny(view: view, viewModel: viewModel) }
         hit {
+            if let firstTask = viewModel.tasks.first,
+               let firstAgent = viewModel.agents.first {
+                view.triageSelectionByTaskID[firstTask.id] = firstAgent.id
+                view.assignManually(taskID: firstTask.id)
+            }
+        }
+        hit {
             if let assignedTaskID = viewModel.tasks.first(where: { $0.assignedAgentID != nil })?.id {
                 view.assignManually(taskID: assignedTaskID)
             }
@@ -10422,6 +10429,7 @@ private extension ContentView {
                 view.assignTaskToAgent(UUID(), firstAgent.id)
                 view.reassignTaskToAgent(UUID(), firstAgent.id)
                 view.runTaskExecution(task.id)
+                view.cancelTaskExecution(task.id)
                 view.retryTaskExecution(task.id)
                 view.removeTask(task.id)
             }
