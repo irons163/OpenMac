@@ -13754,6 +13754,31 @@ private extension KanbanBoardViewModel {
     static func testWorktreeSlug(_ rawValue: String, fallback: String) -> String {
         worktreeSlug(rawValue, fallback: fallback)
     }
+
+    static func testRepairedMCPBootstrapCommand(
+        rawCommand: String,
+        preferredServerName: String
+    ) -> String {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        return viewModel.repairedMCPBootstrapCommandIfNeeded(
+            rawCommand: rawCommand,
+            preferredServerName: preferredServerName
+        )
+    }
+
+    static func testInferredMCPKeywordHints(name: String, description: String?) -> [String] {
+        inferredKeywordHints(name: name, description: description)
+    }
+
+    static func testParseXcodeSchemes(fromListOutput output: String) -> [String] {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        return viewModel.parseXcodeSchemes(fromListOutput: output)
+    }
+
+    static func testPreferredBuildScheme(from schemes: [String]) -> String? {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        return viewModel.preferredBuildScheme(from: schemes)
+    }
 }
 
 enum KanbanBoardViewModelTestHooks {
@@ -13931,6 +13956,25 @@ enum KanbanBoardViewModelTestHooks {
 
     static func verificationBuildOverrides(forSDKRoot sdkRoot: String?) -> (sdk: String?, destination: String?, modeLabel: String) {
         KanbanBoardViewModel.verificationBuildOverrides(forSDKRoot: sdkRoot)
+    }
+
+    static func repairedMCPBootstrapCommand(rawCommand: String, preferredServerName: String) -> String {
+        KanbanBoardViewModel.testRepairedMCPBootstrapCommand(
+            rawCommand: rawCommand,
+            preferredServerName: preferredServerName
+        )
+    }
+
+    static func inferredMCPKeywordHints(name: String, description: String?) -> [String] {
+        KanbanBoardViewModel.testInferredMCPKeywordHints(name: name, description: description)
+    }
+
+    static func parseXcodeSchemes(fromListOutput output: String) -> [String] {
+        KanbanBoardViewModel.testParseXcodeSchemes(fromListOutput: output)
+    }
+
+    static func preferredBuildScheme(from schemes: [String]) -> String? {
+        KanbanBoardViewModel.testPreferredBuildScheme(from: schemes)
     }
 }
 #endif

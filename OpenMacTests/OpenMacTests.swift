@@ -3101,6 +3101,67 @@ struct KanbanFlowTests {
         #expect(missing == nil)
     }
 
+    @Test("xcode scheme parser extracts deduplicated indented schemes and prefers non-test scheme")
+    func xcodeSchemeParsingAndPreferredSelection() {
+        let output = """
+        Information about project "Demo":
+            Targets:
+                Demo
+
+            Build Configurations:
+                Debug
+                Release
+
+            Schemes:
+                DemoTests
+                DemoApp
+                DemoApp
+
+            If no build configuration is specified and -scheme is not passed then "Release" is used.
+        """
+
+        let schemes = KanbanBoardViewModelTestHooks.parseXcodeSchemes(fromListOutput: output)
+        #expect(schemes.prefix(2) == ["DemoTests", "DemoApp"])
+        #expect(schemes.filter { $0 == "DemoApp" }.count == 1)
+        #expect(KanbanBoardViewModelTestHooks.preferredBuildScheme(from: schemes) == "DemoApp")
+        #expect(KanbanBoardViewModelTestHooks.preferredBuildScheme(from: ["OnlyTests"]) == "OnlyTests")
+        #expect(KanbanBoardViewModelTestHooks.preferredBuildScheme(from: []) == nil)
+    }
+
+    @Test("MCP bootstrap repair rewrites codex add command while preserving others")
+    func mcpBootstrapRepairCommandCoverage() {
+        let repaired = KanbanBoardViewModelTestHooks.repairedMCPBootstrapCommand(
+            rawCommand: "codex mcp add ai.appdeploy/deploy-app --url https://example.com/mcp",
+            preferredServerName: "ai-appdeploy-deploy-app"
+        )
+        #expect(repaired == "codex mcp add 'ai-appdeploy-deploy-app' --url https://example.com/mcp")
+
+        let unchanged = KanbanBoardViewModelTestHooks.repairedMCPBootstrapCommand(
+            rawCommand: "echo hello",
+            preferredServerName: "demo"
+        )
+        #expect(unchanged == "echo hello")
+
+        let emptyURL = KanbanBoardViewModelTestHooks.repairedMCPBootstrapCommand(
+            rawCommand: "codex mcp add demo --url   ",
+            preferredServerName: "demo"
+        )
+        #expect(emptyURL == "codex mcp add demo --url   ")
+    }
+
+    @Test("MCP keyword inference tokenizes and de-duplicates normalized names")
+    func mcpKeywordHintInferenceCoverage() {
+        let hints = KanbanBoardViewModelTestHooks.inferredMCPKeywordHints(
+            name: "Google-Stitch_MCP  Server",
+            description: "unused"
+        )
+        #expect(hints.contains("google"))
+        #expect(hints.contains("stitch"))
+        #expect(hints.contains("mcp"))
+        #expect(hints.contains("server"))
+        #expect(Set(hints).count == hints.count)
+    }
+
     @Test("startup warning appears only when Xcode exists and active directory points to CommandLineTools")
     func startupWarningForCommandLineToolsOnly() {
         let viewModel = KanbanBoardViewModel(
