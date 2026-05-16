@@ -12200,6 +12200,135 @@ enum ContentViewTestHooks {
         render(AgentExecutionEventRow(event: event, onCopy: { _ in }))
         render(BoardMessageBanner(message: "Info message", severity: .info))
 
+        var pmProjectName = "Coverage PM"
+        var pmProjectBrief = "Create a project plan and execution roadmap."
+        var pmAutoAssign = true
+        var pmCreateBoard = true
+        var pmPasses = 3
+        var pmAutoDeps = true
+        var pmTickets = [
+            PMPlannedTicket(
+                title: "Coverage Ticket",
+                details: "Acceptance: verify coverage flow",
+                requiredSkills: ["planning", "testing"],
+                storyPoints: 3,
+                epic: "Planning",
+                milestone: "M1"
+            )
+        ]
+        var pmEngineMode: PMPlannerEngineMode = .brainstormPluginPreferred
+        var pmDeliveryProfile: PMTicketDeliveryProfile = .balanced
+        var pmVerificationPreset: PMRealArtifactVerificationPreset = .strict
+        var pmTemplateID = ContentView.pmCustomTemplateID
+        var pmBlueprintVision = "Ship a high-confidence planner."
+        var pmBlueprintUsers = "builders"
+        var pmBlueprintFeatures = "planning, review, execution"
+        var pmBlueprintScope = "macOS"
+        var pmBlueprintConstraints = "no regressions"
+        var pmBlueprintQuality = "high signal"
+        var pmBrainstormFocus = "workflow"
+        var pmBrainstormTranscript = "notes"
+        var pmBrainstormStatus = "ready"
+        var pmBrainstormRound = 1
+        var pmBrainstormRunning = false
+        var pmExtensionValues: [String: String] = [:]
+        let pmTemplates = [
+            PMBriefTemplateOption(id: ContentView.pmCustomTemplateID, title: "Custom"),
+            PMBriefTemplateOption(id: "desktop-app", title: "Desktop App")
+        ]
+        let pmPlannerCommand = PMExtensionCommandDescriptor(
+            id: "openmac.system::system.google-stitch.generate",
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            commandID: "system.google-stitch.generate",
+            title: "Generate Stitch Prompt",
+            subtitle: "",
+            slots: ["planner"],
+            permissions: [],
+            timeoutSeconds: nil,
+            entrypoint: nil
+        )
+        let pmPlannerExtensions = [
+            PMPlannerUIExtensionDescriptor(
+                id: "planner-extension",
+                pluginID: "openmac.system",
+                pluginName: "OpenMac System",
+                slot: "planner",
+                title: "Brainstorm",
+                subtitle: "Built-in",
+                componentType: "brainstorm.v1",
+                priority: 0,
+                source: .builtIn,
+                uiSchema: nil
+            )
+        ]
+        render(PMPlannerSheet(
+            projectName: Binding(get: { pmProjectName }, set: { pmProjectName = $0 }),
+            projectBrief: Binding(get: { pmProjectBrief }, set: { pmProjectBrief = $0 }),
+            autoAssignAfterCreate: Binding(get: { pmAutoAssign }, set: { pmAutoAssign = $0 }),
+            createNewBoardForPlan: Binding(get: { pmCreateBoard }, set: { pmCreateBoard = $0 }),
+            autopilotMaxPasses: Binding(get: { pmPasses }, set: { pmPasses = $0 }),
+            autoCreateMissingDependenciesDuringCycle: Binding(get: { pmAutoDeps }, set: { pmAutoDeps = $0 }),
+            planSummary: "Plan generated",
+            plannedTickets: Binding(get: { pmTickets }, set: { pmTickets = $0 }),
+            plannerEngineMode: Binding(get: { pmEngineMode }, set: { pmEngineMode = $0 }),
+            pmPluginsAutoDiscover: true,
+            pmPluginsDirectoryPath: "/tmp/openmac-plugins",
+            pmLocalPluginCount: 1,
+            pmLocalPluginNames: ["Local PM"],
+            ticketDeliveryProfile: Binding(get: { pmDeliveryProfile }, set: { pmDeliveryProfile = $0 }),
+            realArtifactVerificationPreset: Binding(get: { pmVerificationPreset }, set: { pmVerificationPreset = $0 }),
+            selectedTemplateID: Binding(get: { pmTemplateID }, set: { pmTemplateID = $0 }),
+            templateOptions: pmTemplates,
+            blueprintVision: Binding(get: { pmBlueprintVision }, set: { pmBlueprintVision = $0 }),
+            blueprintTargetUsers: Binding(get: { pmBlueprintUsers }, set: { pmBlueprintUsers = $0 }),
+            blueprintCoreFeatures: Binding(get: { pmBlueprintFeatures }, set: { pmBlueprintFeatures = $0 }),
+            blueprintTechScope: Binding(get: { pmBlueprintScope }, set: { pmBlueprintScope = $0 }),
+            blueprintConstraints: Binding(get: { pmBlueprintConstraints }, set: { pmBlueprintConstraints = $0 }),
+            blueprintQualityBar: Binding(get: { pmBlueprintQuality }, set: { pmBlueprintQuality = $0 }),
+            plannerExtensions: pmPlannerExtensions,
+            plannerPanelCommands: [pmPlannerCommand],
+            runningExtensionCommandIDs: [],
+            brainstormFocus: Binding(get: { pmBrainstormFocus }, set: { pmBrainstormFocus = $0 }),
+            brainstormTranscript: Binding(get: { pmBrainstormTranscript }, set: { pmBrainstormTranscript = $0 }),
+            brainstormStatusText: Binding(get: { pmBrainstormStatus }, set: { pmBrainstormStatus = $0 }),
+            brainstormRoundCount: Binding(get: { pmBrainstormRound }, set: { pmBrainstormRound = $0 }),
+            isBrainstormRunning: Binding(get: { pmBrainstormRunning }, set: { pmBrainstormRunning = $0 }),
+            plannerExtensionFieldValues: Binding(get: { pmExtensionValues }, set: { pmExtensionValues = $0 }),
+            testPlanText: "test plan",
+            boardMessage: "ok",
+            boardMessageSeverity: .info,
+            onCancel: {},
+            onApplyTemplate: {},
+            onApplyTemplateAndGenerate: {},
+            onApplyBlueprint: {},
+            onApplyBlueprintAndGenerate: {},
+            onRunBrainstormRound: {},
+            onApplyBrainstormToBrief: {},
+            onApplyBrainstormAndGenerate: {},
+            onApplyBrainstormGenerateAndCreate: {},
+            onClearBrainstorm: {},
+            onRunPlannerCommand: { _, _ in },
+            onGeneratePlan: {},
+            onGenerateTestPlan: {},
+            onCreateMissingAgents: {},
+            onChainDependencies: {},
+            onAutoACForAllTickets: {},
+            onAutoACTicket: { _ in },
+            onCreateTickets: {},
+            onCreateAndRun: {},
+            onRunAutopilot: {},
+            onCopyPlan: {},
+            onCopyTestPlan: {},
+            onCopyBlueprint: {},
+            onOpenPMPluginsFolder: {},
+            onCopyPMPluginsPath: {},
+            onRefreshPMPlugins: {},
+            onInstallPMExtension: {},
+            onOpenPMExtensionsMarketplace: {},
+            onCopyPMPluginDiagnostics: {}
+        ))
+
         return rendered
     }
 
