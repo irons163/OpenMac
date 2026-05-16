@@ -18268,6 +18268,17 @@ private final class SequencedTaskExecutor: AgentTaskExecuting {
 }
 
 struct WorktreeExecutionSettingsTests {
+    @Test("worktree settings enabled flag reflects persisted toggle")
+    func worktreeEnabledFlag() {
+        let suiteName = "openmac.tests.worktree.enabled.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(!WorktreeExecutionSettings.isEnabled(userDefaults: defaults))
+        defaults.set(true, forKey: WorktreeExecutionSettings.enabledUserDefaultsKey)
+        #expect(WorktreeExecutionSettings.isEnabled(userDefaults: defaults))
+    }
+
     @Test("worktree settings resolve explicit repository path first")
     func resolvesExplicitRepositoryPathFirst() {
         let suiteName = "openmac.tests.worktree.repo.explicit.\(UUID().uuidString)"
@@ -18302,6 +18313,19 @@ struct WorktreeExecutionSettingsTests {
     func normalizesBranchPrefix() {
         let normalized = WorktreeExecutionSettings.normalizedBranchPrefix("  Team A/Feature X  ")
         #expect(normalized == "team-a/feature-x")
+    }
+
+    @Test("worktree branch prefix falls back to openmac when inputs are blank")
+    func branchPrefixFallbacksToOpenmac() {
+        let suiteName = "openmac.tests.worktree.prefix.empty.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("   ", forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+        defaults.set(" ", forKey: "githubBranchPrefix")
+
+        let resolvedPrefix = WorktreeExecutionSettings.resolvedBranchPrefix(userDefaults: defaults)
+        #expect(resolvedPrefix == "openmac")
     }
 }
 
