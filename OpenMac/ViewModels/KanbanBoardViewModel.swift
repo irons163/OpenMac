@@ -152,13 +152,14 @@ enum WorktreeExecutionSettings {
     static func normalizedBranchPrefix(_ rawValue: String) -> String {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "openmac" }
-        return trimmed
+        let normalized = trimmed
             .split(separator: "/")
             .map { segment in
                 segment.lowercased().replacingOccurrences(of: " ", with: "-")
             }
             .joined(separator: "/")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return normalized.isEmpty ? "openmac" : normalized
     }
 }
 

@@ -457,6 +457,7 @@ struct OpenMacAppLogicTests {
 }
 
 @Suite(.serialized)
+@MainActor
 struct AgentTaskExecutorTests {
     private func makeExecutableScript(
         contents: String,
@@ -3084,6 +3085,7 @@ struct AppearanceModeTests {
     }
 }
 
+@MainActor
 struct KanbanFlowTests {
 
     @Test("allows adjacent forward and backward transitions")
@@ -18410,6 +18412,12 @@ struct WorktreeExecutionSettingsTests {
     func normalizesBranchPrefixTrimsSeparators() {
         let normalized = WorktreeExecutionSettings.normalizedBranchPrefix(" / Team Alpha // Release / ")
         #expect(normalized == "team-alpha/release")
+    }
+
+    @Test("worktree branch prefix normalization falls back when separators remove all content")
+    func normalizesBranchPrefixFallbacksWhenOnlySeparators() {
+        let normalized = WorktreeExecutionSettings.normalizedBranchPrefix(" /// ")
+        #expect(normalized == "openmac")
     }
 
     @Test("worktree branch prefix falls back to openmac when inputs are blank")
