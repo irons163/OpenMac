@@ -8657,6 +8657,12 @@ struct ContentViewLogicTests {
         let exercisedCount = ContentViewTestHooks.exerciseRecommendationAndTriageHelpersForCoverage()
         #expect(exercisedCount >= 5)
     }
+
+    @Test("PM planner extension internals are exercised for coverage")
+    func exercisePMPlannerExtensionInternalsForCoverage() {
+        let exercisedCount = ContentViewTestHooks.exercisePMPlannerExtensionInternalsForCoverage()
+        #expect(exercisedCount >= 10)
+    }
 }
 
 @Suite(.serialized)

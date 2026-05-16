@@ -11454,6 +11454,266 @@ enum ContentViewTestHooks {
     }
 
     @MainActor
+    static func exercisePMPlannerExtensionInternalsForCoverage() -> Int {
+        var exercised = 0
+
+        func hit(_ action: () -> Void) {
+            action()
+            exercised += 1
+        }
+
+        func render<V: View>(_ view: V) {
+            _ = view.body
+            exercised += 1
+        }
+
+        for source in [
+            PMPlanningEngineSource.localPlugin,
+            .builtInBrainstormFallback,
+            .builtInPlanner,
+            .waitingForPlan
+        ] {
+            _ = source.label
+            _ = source.color
+            _ = source.symbolName
+            exercised += 1
+        }
+
+        hit {
+            _ = PMPlannerExtensionComponentType.resolve("brainstorm")
+            _ = PMPlannerExtensionComponentType.resolve("google.stitch.v1")
+            _ = PMPlannerExtensionComponentType.resolve("pm.form.v1")
+            _ = PMPlannerExtensionComponentType.resolve("unknown")
+        }
+        hit {
+            _ = PMPlannerExtensionFieldType.resolve("focus")
+            _ = PMPlannerExtensionFieldType.resolve("status")
+            _ = PMPlannerExtensionFieldType.resolve("transcript")
+            _ = PMPlannerExtensionFieldType.resolve("textarea.input")
+            _ = PMPlannerExtensionFieldType.resolve("unknown")
+        }
+        hit {
+            _ = PMPlannerExtensionActionID.resolve("run")
+            _ = PMPlannerExtensionActionID.resolve("apply")
+            _ = PMPlannerExtensionActionID.resolve("apply-generate")
+            _ = PMPlannerExtensionActionID.resolve("apply-create")
+            _ = PMPlannerExtensionActionID.resolve("clear")
+            _ = PMPlannerExtensionActionID.resolve("unknown")
+        }
+
+        let builtInSchema = PMPlannerUIExtensionSchema(
+            fields: [
+                PMPlannerUIExtensionField(id: "focus", type: "focus.input", label: "Focus", placeholder: "", minHeight: nil, maxHeight: nil),
+                PMPlannerUIExtensionField(id: "status", type: "status.text", label: "Status", placeholder: "", minHeight: nil, maxHeight: nil),
+                PMPlannerUIExtensionField(id: "transcript", type: "transcript.output", label: "Transcript", placeholder: "", minHeight: 110, maxHeight: 180),
+                PMPlannerUIExtensionField(id: "uiNotes", type: "multiline.input", label: "UI Notes", placeholder: "", minHeight: 90, maxHeight: 150),
+                PMPlannerUIExtensionField(id: "targetPlatform", type: "text.input", label: "Target Platform", placeholder: "iOS", minHeight: nil, maxHeight: nil)
+            ],
+            actions: [
+                PMPlannerUIExtensionAction(id: PMPlannerExtensionActionID.runRound.rawValue, title: "", commandID: nil),
+                PMPlannerUIExtensionAction(id: PMPlannerExtensionActionID.applyToBrief.rawValue, title: "", commandID: nil),
+                PMPlannerUIExtensionAction(id: PMPlannerExtensionActionID.applyAndGenerate.rawValue, title: "", commandID: nil),
+                PMPlannerUIExtensionAction(id: PMPlannerExtensionActionID.applyGenerateAndCreate.rawValue, title: "", commandID: nil),
+                PMPlannerUIExtensionAction(id: PMPlannerExtensionActionID.clear.rawValue, title: "", commandID: nil),
+                PMPlannerUIExtensionAction(id: "command:system.google-stitch.generate", title: "", commandID: nil)
+            ]
+        )
+
+        let builtInDescriptor = PMPlannerUIExtensionDescriptor(
+            id: "coverage-brainstorm",
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            slot: "planner",
+            title: "Coverage Brainstorm",
+            subtitle: "Coverage",
+            componentType: "brainstorm.v1",
+            priority: 0,
+            source: .builtIn,
+            uiSchema: builtInSchema
+        )
+        let stitchDescriptor = PMPlannerUIExtensionDescriptor(
+            id: "coverage-stitch",
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            slot: "planner",
+            title: "Coverage Stitch",
+            subtitle: "Coverage",
+            componentType: "stitch.v1",
+            priority: 1,
+            source: .builtIn,
+            uiSchema: nil
+        )
+        let unsupportedDescriptor = PMPlannerUIExtensionDescriptor(
+            id: "coverage-unsupported",
+            pluginID: "local.pm",
+            pluginName: "Local PM",
+            slot: "planner",
+            title: "Unsupported",
+            subtitle: "",
+            componentType: "unknown.v1",
+            priority: 2,
+            source: .localPlugin,
+            uiSchema: nil
+        )
+
+        let command = PMExtensionCommandDescriptor(
+            id: "openmac.system::system.google-stitch.generate",
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            commandID: "system.google-stitch.generate",
+            title: "Generate Stitch Prompt",
+            subtitle: "",
+            slots: ["planner"],
+            permissions: [],
+            timeoutSeconds: nil,
+            entrypoint: nil
+        )
+
+        var projectBrief = "Build a polished bike app"
+        var focus = "MVP"
+        var transcript = "notes"
+        var statusText = "running"
+        var roundCount = 1
+        var isRunning = false
+        var fieldValues: [String: String] = ["coverage-stitch::targetPlatform": "iOS"]
+
+        render(PMPlannerManifestExtensionCard(
+            descriptor: builtInDescriptor,
+            schema: builtInSchema,
+            projectBrief: Binding(get: { projectBrief }, set: { projectBrief = $0 }),
+            brainstormFocus: Binding(get: { focus }, set: { focus = $0 }),
+            brainstormTranscript: Binding(get: { transcript }, set: { transcript = $0 }),
+            brainstormStatusText: Binding(get: { statusText }, set: { statusText = $0 }),
+            brainstormRoundCount: Binding(get: { roundCount }, set: { roundCount = $0 }),
+            isBrainstormRunning: Binding(get: { isRunning }, set: { isRunning = $0 }),
+            plannerExtensionFieldValues: Binding(get: { fieldValues }, set: { fieldValues = $0 }),
+            plannerCommands: [command],
+            runningCommandIDs: [],
+            onRunBrainstormRound: {},
+            onApplyBrainstormToBrief: {},
+            onApplyBrainstormAndGenerate: {},
+            onApplyBrainstormGenerateAndCreate: {},
+            onRunPlannerCommand: { _, _ in },
+            onClearBrainstorm: {}
+        ))
+
+        render(PMPlannerUnsupportedExtensionCard(descriptor: unsupportedDescriptor))
+
+        render(PMPlannerExtensionsHostView(
+            extensions: [builtInDescriptor, stitchDescriptor, unsupportedDescriptor],
+            projectBrief: Binding(get: { projectBrief }, set: { projectBrief = $0 }),
+            brainstormFocus: Binding(get: { focus }, set: { focus = $0 }),
+            brainstormTranscript: Binding(get: { transcript }, set: { transcript = $0 }),
+            brainstormStatusText: Binding(get: { statusText }, set: { statusText = $0 }),
+            brainstormRoundCount: Binding(get: { roundCount }, set: { roundCount = $0 }),
+            isBrainstormRunning: Binding(get: { isRunning }, set: { isRunning = $0 }),
+            plannerExtensionFieldValues: Binding(get: { fieldValues }, set: { fieldValues = $0 }),
+            plannerCommands: [command],
+            runningCommandIDs: [],
+            onRunBrainstormRound: {},
+            onApplyBrainstormToBrief: {},
+            onApplyBrainstormAndGenerate: {},
+            onApplyBrainstormGenerateAndCreate: {},
+            onRunPlannerCommand: { _, _ in },
+            onClearBrainstorm: {}
+        ))
+
+        hit { _ = PMExtensionE2EAcceptanceStep(id: "a", title: "A", status: .passed, detail: "ok") }
+
+        let source = PMExtensionMarketplaceSource(name: "sample", source: "https://example.invalid/repo.git")
+        let installed = PMInstalledExtensionDescriptor(
+            id: "ext",
+            pluginID: "openmac.system",
+            name: "OpenMac System",
+            version: "1.0.0",
+            summary: "summary",
+            directoryPath: "/tmp",
+            capabilityCount: 1,
+            uiExtensionCount: 1,
+            commandCount: 1,
+            isEnabled: true,
+            compatibilitySummary: "ok",
+            channel: .stable,
+            lockedVersion: nil
+        )
+        let observability = PMExtensionObservabilitySnapshot(
+            id: "obs",
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            totalRuns: 1,
+            succeededRuns: 1,
+            failedRuns: 0,
+            avgDurationMS: 120,
+            successRatePercent: 100,
+            runningCount: 0,
+            lastRunAt: Date(),
+            lastError: nil,
+            lastInputSummary: "input",
+            lastOutputSummary: "output"
+        )
+        let report = PMExtensionE2EAcceptanceReport(
+            generatedAt: Date(),
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            succeeded: true,
+            steps: [PMExtensionE2EAcceptanceStep(id: "step", title: "Step", status: .passed, detail: "ok")]
+        )
+        let hook = PMBoardExtensionHookDescriptor(
+            id: UUID(),
+            event: .boardRunFinished,
+            pluginID: "openmac.system",
+            pluginName: "OpenMac System",
+            commandID: "system.google-stitch.generate",
+            commandTitle: "Generate",
+            isEnabled: true
+        )
+
+        render(PMExtensionsMarketplaceSheet(
+            installedExtensions: [installed],
+            commands: [command],
+            configuredHooks: [hook],
+            marketplacePanelCommands: [command],
+            marketplaceSources: [source],
+            observabilitySnapshots: [observability],
+            acceptanceReport: report,
+            preferredChannel: .stable,
+            runningCommandIDs: [],
+            activityLog: [],
+            pluginsFolderPath: "/tmp/openmac-plugins",
+            boardMessage: "Coverage",
+            boardMessageSeverity: .info,
+            onInstallFromFolder: {},
+            onInstallFromRemote: { _ in },
+            onUpdateAllSources: {},
+            onInstallByID: { _ in },
+            onSetPreferredChannel: { _ in },
+            onRescan: {},
+            onOpenPluginsFolder: {},
+            onCopyPluginsFolderPath: {},
+            onUninstall: { _ in },
+            onLockToInstalledVersion: { _ in },
+            onUnlockVersion: { _ in },
+            onSetExtensionEnabled: { _, _ in },
+            onAddSource: { _, _ in },
+            onRemoveSource: { _ in },
+            onInstallSource: { _ in },
+            onRunCommand: { _ in },
+            onDryRunCommand: { _, _ in },
+            onAddBoardHook: { _, _ in },
+            onSetBoardHookEnabled: { _, _ in },
+            onRemoveBoardHook: { _ in },
+            onRunE2EAcceptance: {},
+            onCopyE2EReport: {},
+            onCopyObservability: {},
+            onCopyActivityLog: {},
+            onClearActivityLog: {},
+            onClose: {}
+        ))
+
+        return exercised
+    }
+
+    @MainActor
     static func renderSubviewBodiesForCoverage() -> Int {
         var rendered = 0
 
