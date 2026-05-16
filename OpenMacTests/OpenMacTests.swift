@@ -2330,6 +2330,20 @@ struct AgentTaskExecutorTests {
         #expect(isDirectory.boolValue)
     }
 
+    @Test("projects directory ensure expands tilde path input")
+    func projectsDirectoryEnsureExpandsTildePath() throws {
+        let tmpLeaf = "openmac-ensure-\(UUID().uuidString)"
+        let raw = "~/\(tmpLeaf)"
+        let expected = ("~/\(tmpLeaf)" as NSString).expandingTildeInPath
+        defer { try? FileManager.default.removeItem(atPath: expected) }
+
+        let created = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(at: raw)
+        #expect(created.path == expected)
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: expected, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
     @Test("projects directory resolver builds board-scoped folder names")
     func projectsDirectoryResolverBuildsBoardScopedFolder() {
         let base = "/tmp/openmac-projects-root"
@@ -2350,6 +2364,12 @@ struct AgentTaskExecutorTests {
             boardName: "__ iOS + macOS /// MVP (v2) __"
         )
         #expect(normalized == "/tmp/openmac-projects-root/iOS-macOS-MVP-v2")
+
+        let tildeScoped = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: "~/OpenMacProjects",
+            boardName: "Roadmap"
+        )
+        #expect(tildeScoped == ("~/OpenMacProjects/Roadmap" as NSString).expandingTildeInPath)
     }
 
     @Test("view model executes codex bridge under board-scoped projects directory")
@@ -18365,6 +18385,19 @@ struct WorktreeExecutionSettingsTests {
         let resolvedPrefix = WorktreeExecutionSettings.resolvedBranchPrefix(userDefaults: defaults)
         #expect(resolvedRepository == "/tmp/fallback-github-repo")
         #expect(resolvedPrefix == "codex/feature")
+    }
+
+    @Test("worktree settings fallback repository path also expands tilde")
+    func fallbackRepositoryPathExpandsTilde() {
+        let suiteName = "openmac.tests.worktree.repo.fallback.tilde.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("", forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        defaults.set(" ~/repo-fallback ", forKey: "githubRepositoryPath")
+
+        let resolvedRepository = WorktreeExecutionSettings.resolvedRepositoryPath(userDefaults: defaults)
+        #expect(resolvedRepository == ("~/repo-fallback" as NSString).expandingTildeInPath)
     }
 
     @Test("worktree branch prefix normalization keeps slash segments and lowercases")
