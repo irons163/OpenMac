@@ -2289,6 +2289,27 @@ struct AgentTaskExecutorTests {
         #expect(resolvedDefault.contains("Library/Application Support/OpenMac/Projects"))
     }
 
+    @Test("projects directory default URL uses provided home directory")
+    func projectsDirectoryDefaultURLUsesHomeDirectory() {
+        let home = URL(fileURLWithPath: "/tmp/openmac-home-\(UUID().uuidString)", isDirectory: true)
+        let resolved = CodexProjectsDirectorySettings.defaultProjectsDirectoryURL(homeDirectory: home)
+        #expect(resolved.path.hasPrefix(home.path))
+        #expect(resolved.path.hasSuffix("Library/Application Support/OpenMac/Projects"))
+    }
+
+    @Test("projects directory ensure creates directory and expands tilde")
+    func projectsDirectoryEnsureCreatesDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let target = root.appendingPathComponent("Nested/Projects", isDirectory: true)
+        let created = try CodexProjectsDirectorySettings.ensureProjectsDirectoryExists(at: target.path)
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: created.path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
     @Test("projects directory resolver builds board-scoped folder names")
     func projectsDirectoryResolverBuildsBoardScopedFolder() {
         let base = "/tmp/openmac-projects-root"
