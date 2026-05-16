@@ -9936,9 +9936,13 @@ private extension ContentView {
         hit { _ = view.codexSkillTemplateOptions.first?.requiredSkillsText }
         hit { view.openExecutionDetails(todoAssigned) }
         hit {
-            if let details = view.selectedExecutionDetails {
-                _ = view.executionDetailsSheetView(for: details)
-            }
+            let details = ExecutionDetailsPresentation(
+                taskTitle: todoAssigned.title,
+                assigneeName: "Coverage A",
+                executionRecord: successRecord,
+                timelineText: "timeline"
+            )
+            _ = view.executionDetailsSheetView(for: details)
         }
         hit { view.applyTaskEdits() }
         hit {
@@ -10052,6 +10056,7 @@ private extension ContentView {
         hit { _ = view.editAgentSheetView }
         hit { _ = view.worktreeSettingsSheetView }
         hit { _ = view.mcpServersSheetView }
+        hit { _ = view.wipSettingsSheetView }
         hit { _ = view.pmTemplateOptions.count }
         hit {
             view.developerModeEnabled = false
@@ -10320,6 +10325,7 @@ private extension ContentView {
             shouldFailCodexDirectoryEnsurer = false
         }
         hit { view.openManualTriage() }
+        hit { _ = view.manualTriageSheetView }
         hit { _ = view.hasManualTriageCandidates() }
         hit { view.closeManualTriageSheet() }
         hit { view.assignManually(taskID: UUID()) }
@@ -10430,6 +10436,26 @@ private extension ContentView {
         hit {
             view.selectedAssigneeFilterKey = "invalid"
             view.normalizeAssigneeFilterSelection()
+        }
+        hit { view.rememberPMGeneratedPlanSummary("  Coverage summary  ") }
+        hit {
+            view.pmProjectBrief = "Brainstorm a compact product strategy."
+            view.pmBrainstormFocus = "core flow"
+            view.runPMBrainstormRoundFromSheet()
+            view.applyPMBrainstormToBriefFromSheet()
+            view.clearPMBrainstormFromSheet()
+        }
+        hit {
+            view.pmProjectBrief = "Brainstorm and generate."
+            view.pmBrainstormTranscript = "idea A\nidea B"
+            view.pmProjectName = "Brainstorm Project"
+            view.applyPMBrainstormAndGeneratePlanFromSheet()
+            view.applyPMBrainstormGenerateAndCreateTicketsFromSheet()
+        }
+        hit {
+            view.discoveredCodexSkillNames = ["build-ios-apps", "testing"]
+            view.selectedCodexSkillTemplateID = "build-ios-apps"
+            view.applySelectedCodexSkillTemplateFromSheet()
         }
         hit {
             view.appLanguageOverrideRawValue = AppLanguageSettings.systemValue
