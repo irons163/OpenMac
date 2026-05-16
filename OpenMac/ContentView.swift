@@ -10190,6 +10190,10 @@ private extension ContentView {
         hit { view.openCodexProjectsDirectoryInFinder() }
         hit { view.chooseGitHubRepositoryDirectory() }
         hit { view.openGitHubRepositoryInFinder() }
+        hit { view.openWorktreeSettingsSheet() }
+        hit { view.closeWorktreeSettingsSheet() }
+        hit { view.chooseWorktreeRepositoryDirectory() }
+        hit { view.openWorktreeRepositoryInFinder() }
         hit { view.runGitHubPRFlowFromToolbar() }
         hit { view.clearExecutionCheckpointFromToolbar() }
         hit { view.resumeInterruptedExecutionFromToolbar() }
@@ -11642,6 +11646,23 @@ enum ContentViewTestHooks {
             reviewLimit: Binding(get: { reviewLimit }, set: { reviewLimit = $0 }),
             onCancel: {},
             onApply: {}
+        ))
+
+        var worktreeEnabled = true
+        var worktreeRepositoryPath = ""
+        var worktreeBranchPrefix = ""
+        render(WorktreeSettingsSheet(
+            isEnabled: Binding(get: { worktreeEnabled }, set: { worktreeEnabled = $0 }),
+            repositoryPath: Binding(get: { worktreeRepositoryPath }, set: { worktreeRepositoryPath = $0 }),
+            branchPrefix: Binding(get: { worktreeBranchPrefix }, set: { worktreeBranchPrefix = $0 }),
+            fallbackRepositoryPath: "/tmp/openmac-worktree-repository",
+            fallbackBranchPrefix: "codex/main",
+            onChooseRepository: {},
+            onUseGitHubRepository: {},
+            onUseDefaultBranchPrefix: {},
+            onOpenRepositoryInFinder: {},
+            onCopyRepositoryPath: {},
+            onClose: {}
         ))
 
         var runtimeEnabled = true

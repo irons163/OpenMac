@@ -13730,6 +13730,30 @@ private extension KanbanBoardViewModel {
             environment: environment
         )
     }
+
+    static func testPrepareWorktreeDirectoryForExecution(
+        task: WorkTask,
+        agent: AgentProfile,
+        boardName: String,
+        repositoryPath: String,
+        boardScopedPath: String,
+        branchPrefix: String,
+        environment: [String: String]
+    ) throws -> String {
+        try prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: boardName,
+            repositoryPath: repositoryPath,
+            boardScopedPath: boardScopedPath,
+            branchPrefix: branchPrefix,
+            environment: environment
+        )
+    }
+
+    static func testWorktreeSlug(_ rawValue: String, fallback: String) -> String {
+        worktreeSlug(rawValue, fallback: fallback)
+    }
 }
 
 enum KanbanBoardViewModelTestHooks {
@@ -13865,6 +13889,30 @@ enum KanbanBoardViewModelTestHooks {
             timeoutSeconds: timeoutSeconds,
             environment: environment
         )
+    }
+
+    static func prepareWorktreeDirectoryForExecution(
+        task: WorkTask,
+        agent: AgentProfile,
+        boardName: String,
+        repositoryPath: String,
+        boardScopedPath: String,
+        branchPrefix: String,
+        environment: [String: String]
+    ) throws -> String {
+        try KanbanBoardViewModel.testPrepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: boardName,
+            repositoryPath: repositoryPath,
+            boardScopedPath: boardScopedPath,
+            branchPrefix: branchPrefix,
+            environment: environment
+        )
+    }
+
+    static func worktreeSlug(_ rawValue: String, fallback: String) -> String {
+        KanbanBoardViewModel.testWorktreeSlug(rawValue, fallback: fallback)
     }
 
     static func xcodeSelectRepairCommandIfNeeded(

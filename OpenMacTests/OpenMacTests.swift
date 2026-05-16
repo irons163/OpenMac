@@ -469,6 +469,57 @@ struct AgentTaskExecutorTests {
         return scriptURL
     }
 
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
+    private func runShellInTests(_ command: String) throws -> (code: Int32, output: String, timedOut: Bool) {
+        let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        return try KanbanBoardViewModelTestHooks.runShellCommand(
+            command: command,
+            timeoutSeconds: 15,
+            environment: ["PATH": pathValue]
+        )
+    }
+
+    private func withWorktreeDefaults<T>(
+        enabled: Bool,
+        repositoryPath: String,
+        branchPrefix: String,
+        body: () throws -> T
+    ) rethrows -> T {
+        let defaults = UserDefaults.standard
+        let previousEnabled = defaults.object(forKey: WorktreeExecutionSettings.enabledUserDefaultsKey)
+        let previousRepository = defaults.object(forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        let previousPrefix = defaults.object(forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+
+        defaults.set(enabled, forKey: WorktreeExecutionSettings.enabledUserDefaultsKey)
+        defaults.set(repositoryPath, forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+        defaults.set(branchPrefix, forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+
+        defer {
+            if let previousEnabled {
+                defaults.set(previousEnabled, forKey: WorktreeExecutionSettings.enabledUserDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: WorktreeExecutionSettings.enabledUserDefaultsKey)
+            }
+
+            if let previousRepository {
+                defaults.set(previousRepository, forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: WorktreeExecutionSettings.repositoryPathUserDefaultsKey)
+            }
+
+            if let previousPrefix {
+                defaults.set(previousPrefix, forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: WorktreeExecutionSettings.branchPrefixUserDefaultsKey)
+            }
+        }
+
+        return try body()
+    }
+
     @Test("default executor local mock returns success summary")
     func localMockReturnsSuccessSummary() {
         let task = WorkTask(
@@ -1620,7 +1671,8 @@ struct AgentTaskExecutorTests {
             environment: ["CODEX_HOME": codexHome.path]
         )
 
-        #expect(prompt.contains("- [$build-ios-apps:ios-debugger-agent](\(skillFile.path))"))
+        #expect(prompt.contains("- [$build-ios-apps:ios-debugger-agent]("))
+        #expect(prompt.contains("/ios-debugger-agent/SKILL.md)"))
     }
 
     @Test("endpoint resolution normalizes configured and environment base URLs")
@@ -2315,6 +2367,400 @@ struct AgentTaskExecutorTests {
 
         #expect(executed)
         #expect(capturedWorkingDirectoryPath == expectedDirectoryPath)
+    }
+
+    @Test("view model execution uses git worktree path when worktree mode is enabled")
+    func viewModelExecutionUsesWorktreePathWhenEnabled() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-success-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let repositoryURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let projectsBaseURL = rootURL.appendingPathComponent("projects", isDirectory: true)
+
+        try fileManager.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: projectsBaseURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let initResult = try runShellInTests("git init \(shellQuoted(repositoryURL.path))")
+        #expect(initResult.code == 0)
+
+        let readmeURL = repositoryURL.appendingPathComponent("README.md")
+        try Data("seed\n".utf8).write(to: readmeURL)
+        let commitCommand = """
+        cd \(shellQuoted(repositoryURL.path)) && \
+        git add README.md && \
+        git -c user.name='OpenMac Tests' -c user.email='tests@openmac.local' commit -m 'seed'
+        """
+        let commitResult = try runShellInTests(commitCommand)
+        #expect(commitResult.code == 0)
+
+        var capturedWorkingDirectoryPath: String?
+        let task = WorkTask(
+            title: "Build MVP",
+            details: "Create project files and verify commands.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 2,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Builder Agent",
+            skills: ["swiftui"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var assignedTask = task
+        assignedTask.assignedAgentID = agent.id
+
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [CodexProjectsDirectorySettings.environmentOverrideKey: projectsBaseURL.path] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                capturedWorkingDirectoryPath = request.workingDirectoryPath
+                return "worktree execution complete"
+            }
+        )
+
+        let viewModel = KanbanBoardViewModel(
+            tasks: [assignedTask],
+            agents: [agent],
+            taskExecutor: executor
+        )
+        #expect(viewModel.renameBoard(viewModel.selectedBoardID, to: "Fitness MVP Board"))
+
+        let executed = withWorktreeDefaults(
+            enabled: true,
+            repositoryPath: repositoryURL.path,
+            branchPrefix: "codex/tests"
+        ) {
+            viewModel.runTaskExecution(assignedTask.id)
+        }
+
+        #expect(executed)
+        #expect(capturedWorkingDirectoryPath != nil)
+        guard let capturedWorkingDirectoryPath else { return }
+        #expect(capturedWorkingDirectoryPath.contains("/.worktrees/"))
+        var isDirectory: ObjCBool = false
+        #expect(fileManager.fileExists(atPath: capturedWorkingDirectoryPath, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+        #expect(fileManager.fileExists(atPath: "\(capturedWorkingDirectoryPath)/.git"))
+    }
+
+    @Test("view model execution falls back to board workspace when worktree setup fails")
+    func viewModelExecutionFallsBackWhenWorktreeSetupFails() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-fallback-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let invalidRepositoryURL = rootURL.appendingPathComponent("not-a-git-repo", isDirectory: true)
+        let projectsBaseURL = rootURL.appendingPathComponent("projects", isDirectory: true)
+        try fileManager.createDirectory(at: invalidRepositoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: projectsBaseURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        var capturedWorkingDirectoryPath: String?
+        let task = WorkTask(
+            title: "Fallback task",
+            details: "Use board workspace when worktree fails.",
+            requiredSkills: ["swiftui"],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(
+            name: "Fallback Agent",
+            skills: ["swiftui"],
+            runtimeProfile: AgentRuntimeProfile(
+                provider: .openAICompatible,
+                model: "gpt-5",
+                openAIAuthMode: .codexBridge
+            )
+        )
+        var assignedTask = task
+        assignedTask.assignedAgentID = agent.id
+
+        let executor = DefaultAgentTaskExecutor(
+            environmentProvider: { [CodexProjectsDirectorySettings.environmentOverrideKey: projectsBaseURL.path] },
+            urlSession: .shared,
+            timeoutSeconds: 1,
+            codexBridgePreflight: {},
+            codexBridgeRunner: { request, _ in
+                capturedWorkingDirectoryPath = request.workingDirectoryPath
+                return "fallback execution complete"
+            }
+        )
+
+        let viewModel = KanbanBoardViewModel(
+            tasks: [assignedTask],
+            agents: [agent],
+            taskExecutor: executor
+        )
+        #expect(viewModel.renameBoard(viewModel.selectedBoardID, to: "Fallback Board"))
+
+        let executed = withWorktreeDefaults(
+            enabled: true,
+            repositoryPath: invalidRepositoryURL.path,
+            branchPrefix: "codex/tests"
+        ) {
+            viewModel.runTaskExecution(assignedTask.id)
+        }
+
+        let expectedDirectoryPath = CodexProjectsDirectorySettings.boardScopedProjectsDirectoryPath(
+            baseDirectoryPath: projectsBaseURL.path,
+            boardName: "Fallback Board"
+        )
+        #expect(executed)
+        #expect(capturedWorkingDirectoryPath == expectedDirectoryPath)
+    }
+
+    @Test("worktree helper normalizes slug and fallback behavior")
+    func worktreeSlugNormalizationViaHook() {
+        #expect(
+            KanbanBoardViewModelTestHooks.worktreeSlug(
+                "  Fitness Board / Core Product !! ",
+                fallback: "board"
+            ) == "fitness-board-core-product"
+        )
+        #expect(
+            KanbanBoardViewModelTestHooks.worktreeSlug(" / :  ", fallback: "task") == "task"
+        )
+    }
+
+    @Test("worktree directory helper rejects missing and non-git repository paths")
+    func prepareWorktreeDirectoryRejectsInvalidRepositoryPath() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-invalid-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let boardScopedURL = rootURL.appendingPathComponent("projects/Board", isDirectory: true)
+        let nonGitRepositoryURL = rootURL.appendingPathComponent("repo-not-git", isDirectory: true)
+        try fileManager.createDirectory(at: nonGitRepositoryURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let task = WorkTask(
+            title: "Coverage Task",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Coverage Agent", skills: ["swiftui"])
+        let env = ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
+
+        do {
+            _ = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+                task: task,
+                agent: agent,
+                boardName: "Coverage",
+                repositoryPath: rootURL.appendingPathComponent("missing-repo", isDirectory: true).path,
+                boardScopedPath: boardScopedURL.path,
+                branchPrefix: "codex/tests",
+                environment: env
+            )
+            #expect(Bool(false), "Expected missing repository path failure")
+        } catch {
+            #expect(error.localizedDescription.contains("does not exist"))
+        }
+
+        do {
+            _ = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+                task: task,
+                agent: agent,
+                boardName: "Coverage",
+                repositoryPath: nonGitRepositoryURL.path,
+                boardScopedPath: boardScopedURL.path,
+                branchPrefix: "codex/tests",
+                environment: env
+            )
+            #expect(Bool(false), "Expected non-git repository failure")
+        } catch {
+            #expect(error.localizedDescription.contains("not a git repository"))
+        }
+    }
+
+    @Test("worktree helper reattaches existing branch when branch already exists")
+    func prepareWorktreeDirectoryReattachesExistingBranchWhenCreateBranchFails() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-attach-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let repositoryURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let boardScopedURL = rootURL.appendingPathComponent("projects/Board", isDirectory: true)
+        try fileManager.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: boardScopedURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let env = ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
+        #expect((try runShellInTests("git init \(shellQuoted(repositoryURL.path))")).code == 0)
+        try Data("seed\n".utf8).write(to: repositoryURL.appendingPathComponent("README.md"))
+        let commitCommand = """
+        cd \(shellQuoted(repositoryURL.path)) && \
+        git add README.md && \
+        git -c user.name='OpenMac Tests' -c user.email='tests@openmac.local' commit -m 'seed'
+        """
+        #expect((try runShellInTests(commitCommand)).code == 0)
+
+        let fixedTaskID = UUID(uuidString: "11111111-2222-3333-4444-555555555555") ?? UUID()
+        let task = WorkTask(
+            id: fixedTaskID,
+            title: "Core Product",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Executor", skills: ["swiftui"])
+
+        let firstPath = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: "Default Board",
+            repositoryPath: repositoryURL.path,
+            boardScopedPath: boardScopedURL.path,
+            branchPrefix: "codex/tests",
+            environment: env
+        )
+        #expect(fileManager.fileExists(atPath: firstPath))
+
+        #expect((try runShellInTests("git -C \(shellQuoted(repositoryURL.path)) worktree remove --force \(shellQuoted(firstPath))")).code == 0)
+        #expect(!fileManager.fileExists(atPath: firstPath))
+
+        let secondPath = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: "Default Board",
+            repositoryPath: repositoryURL.path,
+            boardScopedPath: boardScopedURL.path,
+            branchPrefix: "codex/tests",
+            environment: env
+        )
+
+        #expect(secondPath == firstPath)
+        #expect(fileManager.fileExists(atPath: secondPath))
+
+        let branchResult = try runShellInTests(
+            "git -C \(shellQuoted(secondPath)) rev-parse --abbrev-ref HEAD"
+        )
+        #expect(branchResult.code == 0)
+        #expect(branchResult.output.trimmingCharacters(in: .whitespacesAndNewlines).contains("codex/tests/default-board/executor-"))
+    }
+
+    @Test("worktree helper falls back to default openmac branch prefix when prefix is empty")
+    func prepareWorktreeDirectoryUsesDefaultBranchPrefixWhenBlank() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-default-prefix-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let repositoryURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let boardScopedURL = rootURL.appendingPathComponent("projects/Board", isDirectory: true)
+        try fileManager.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: boardScopedURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let env = ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
+        #expect((try runShellInTests("git init \(shellQuoted(repositoryURL.path))")).code == 0)
+        try Data("seed\n".utf8).write(to: repositoryURL.appendingPathComponent("README.md"))
+        let commitCommand = """
+        cd \(shellQuoted(repositoryURL.path)) && \
+        git add README.md && \
+        git -c user.name='OpenMac Tests' -c user.email='tests@openmac.local' commit -m 'seed'
+        """
+        #expect((try runShellInTests(commitCommand)).code == 0)
+
+        let task = WorkTask(
+            title: "Default Prefix Task",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Prefix Agent", skills: ["swiftui"])
+
+        let worktreePath = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: "Prefix Board",
+            repositoryPath: repositoryURL.path,
+            boardScopedPath: boardScopedURL.path,
+            branchPrefix: "   ",
+            environment: env
+        )
+        #expect(fileManager.fileExists(atPath: worktreePath))
+        let branchResult = try runShellInTests(
+            "git -C \(shellQuoted(worktreePath)) rev-parse --abbrev-ref HEAD"
+        )
+        #expect(branchResult.code == 0)
+        #expect(branchResult.output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("openmac/"))
+    }
+
+    @Test("worktree helper reuses existing worktree directory when git marker already exists")
+    func prepareWorktreeDirectoryReusesExistingWorktreeDirectory() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "openmac-worktree-reuse-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let repositoryURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let boardScopedURL = rootURL.appendingPathComponent("projects/Board", isDirectory: true)
+        try fileManager.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: boardScopedURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let env = ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
+        #expect((try runShellInTests("git init \(shellQuoted(repositoryURL.path))")).code == 0)
+        try Data("seed\n".utf8).write(to: repositoryURL.appendingPathComponent("README.md"))
+        let commitCommand = """
+        cd \(shellQuoted(repositoryURL.path)) && \
+        git add README.md && \
+        git -c user.name='OpenMac Tests' -c user.email='tests@openmac.local' commit -m 'seed'
+        """
+        #expect((try runShellInTests(commitCommand)).code == 0)
+
+        let task = WorkTask(
+            title: "Reuse Task",
+            details: "",
+            requiredSkills: [],
+            storyPoints: 1,
+            status: .todo,
+            assignedAgentID: nil
+        )
+        let agent = AgentProfile(name: "Reuse Agent", skills: ["swiftui"])
+
+        let firstPath = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: "Reuse Board",
+            repositoryPath: repositoryURL.path,
+            boardScopedPath: boardScopedURL.path,
+            branchPrefix: "codex/tests",
+            environment: env
+        )
+        let secondPath = try KanbanBoardViewModelTestHooks.prepareWorktreeDirectoryForExecution(
+            task: task,
+            agent: agent,
+            boardName: "Reuse Board",
+            repositoryPath: repositoryURL.path,
+            boardScopedPath: boardScopedURL.path,
+            branchPrefix: "codex/tests",
+            environment: env
+        )
+
+        #expect(firstPath == secondPath)
+        #expect(fileManager.fileExists(atPath: "\(secondPath)/.git"))
     }
 }
 
