@@ -5369,6 +5369,189 @@ struct KanbanSupportTypeTests {
         #expect(plan?.summary.contains("Built-in Brainstorm plugin") == true)
     }
 
+    @Test("extensible planner legacy wrappers return baseline plan and blueprint")
+    func extensiblePlannerLegacyWrappersReturnBaselineArtifacts() {
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (1, "", "not used")
+            }
+        )
+
+        let brief = """
+        Build a notes app with quick capture and sync.
+        """
+        let plan = planner.generatePlan(
+            projectName: "Legacy Wrapper",
+            projectBrief: brief,
+            availableAgents: []
+        )
+        #expect(plan != nil)
+        #expect(plan?.projectName == "Legacy Wrapper")
+        #expect((plan?.tickets.isEmpty ?? true) == false)
+
+        let blueprint = planner.generateBlueprint(
+            projectName: "Legacy Wrapper",
+            projectBrief: brief,
+            availableAgents: []
+        )
+        #expect(blueprint != nil)
+        #expect(blueprint?.projectName == "Legacy Wrapper")
+        #expect((blueprint?.tickets.isEmpty ?? true) == false)
+    }
+
+    @Test("extensible planner plugin blueprint infers dependency edges and unique roadmap metadata")
+    func extensiblePlannerPluginBlueprintInfersDependenciesAndMetadata() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let pluginDir = root.appendingPathComponent("edge-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+
+        try """
+        {
+          "id": "com.example.edge",
+          "name": "Edge Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "entrypoint": "./run.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: pluginDir.appendingPathComponent("plugin.json"))
+
+        let planner = ExtensibleProjectPlanner(
+            fallbackPlanner: RuleBasedProjectPlanner(),
+            pluginCommandRunner: { _, _, _, _ in
+                (
+                    0,
+                    """
+                    {
+                      "projectName": "Dependency Demo",
+                      "summary": "Plugin summary",
+                      "tickets": [
+                        {
+                          "title": "Scope",
+                          "details": "Acceptance:\\nDepends on: none\\n- define scope",
+                          "requiredSkills": ["planning"],
+                          "storyPoints": 2,
+                          "epic": "Planning",
+                          "milestone": "M1"
+                        },
+                        {
+                          "title": "Build",
+                          "details": "Acceptance:\\nDepends on: Scope, none, Scope\\n- implement",
+                          "requiredSkills": ["swiftui"],
+                          "storyPoints": 5,
+                          "epic": "Core",
+                          "milestone": "M2"
+                        },
+                        {
+                          "title": "QA",
+                          "details": "Acceptance:\\nDepends on: Build, Unknown\\n- verify",
+                          "requiredSkills": ["testing"],
+                          "storyPoints": 3,
+                          "epic": "Core",
+                          "milestone": "M2"
+                        }
+                      ]
+                    }
+                    """,
+                    ""
+                )
+            }
+        )
+
+        let blueprint = planner.generateBlueprint(
+            projectName: "Ignored",
+            projectBrief: "brief",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(
+                autoDiscoverLocalPlugins: true,
+                pluginsDirectoryPath: root.path
+            )
+        )
+
+        #expect(blueprint != nil)
+        #expect(blueprint?.epics == ["Planning", "Core"])
+        #expect(blueprint?.milestones == ["M1", "M2"])
+        #expect(blueprint?.dependencyEdges.count == 2)
+        #expect(
+            blueprint?.dependencyEdges.contains(where: {
+                $0.fromTicketTitle == "Scope" && $0.toTicketTitle == "Build"
+            }) == true
+        )
+        #expect(
+            blueprint?.dependencyEdges.contains(where: {
+                $0.fromTicketTitle == "Build" && $0.toTicketTitle == "QA"
+            }) == true
+        )
+    }
+
+    @Test("extensible planner default plugin runner executes local script and parses JSON from mixed logs")
+    func extensiblePlannerDefaultRunnerParsesMixedOutput() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let pluginDir = root.appendingPathComponent("script-plugin", isDirectory: true)
+        try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+
+        try """
+        {
+          "id": "com.example.script",
+          "name": "Script Plugin",
+          "capabilities": ["pm.plan.generate"],
+          "entrypoint": "./emit.sh",
+          "enabled": true
+        }
+        """.data(using: .utf8)?.write(to: pluginDir.appendingPathComponent("plugin.json"))
+
+        let script = """
+        #!/bin/zsh
+        cat >/dev/null
+        echo "plugin-log:start"
+        cat <<'JSON'
+        {
+          "projectName": "Script Plan",
+          "summary": "Script summary",
+          "tickets": [
+            {
+              "title": "Script Scope",
+              "details": "Acceptance:\\nDepends on: none\\n- define scope",
+              "requiredSkills": ["planning"],
+              "storyPoints": 2,
+              "epic": "Planning",
+              "milestone": "M1"
+            }
+          ]
+        }
+        JSON
+        echo "plugin-log:end"
+        """
+        let scriptURL = pluginDir.appendingPathComponent("emit.sh")
+        try script.data(using: .utf8)?.write(to: scriptURL)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let planner = ExtensibleProjectPlanner()
+        let plan = planner.generatePlan(
+            projectName: "Ignored",
+            projectBrief: "brief",
+            availableAgents: [],
+            mode: .brainstormPluginPreferred,
+            pluginPolicy: PMPlanningPluginPolicy(
+                autoDiscoverLocalPlugins: true,
+                pluginsDirectoryPath: root.path
+            )
+        )
+
+        #expect(plan?.projectName == "Script Plan")
+        #expect(plan?.summary.contains("Planning engine: Script Plugin") == true)
+        #expect(plan?.tickets.first?.title == "Script Scope")
+    }
+
     @Test("extensible planner prefers local plugin output when available")
     func extensiblePlannerUsesLocalPluginOutput() throws {
         let fileManager = FileManager.default
@@ -6349,6 +6532,88 @@ struct KanbanSupportTypeTests {
                 entry.outcome == .succeeded
         })
         #expect(hasSucceededSystemHook)
+    }
+
+    @Test("real artifact board hook can be removed safely")
+    func realArtifactBoardHookCanBeRemoved() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: true,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: true
+            ),
+            announce: false
+        )
+
+        guard let hook = viewModel.pmBoardExtensionHookDescriptors().first(where: {
+            $0.pluginID == "openmac.system" &&
+                $0.commandID == "system.real-artifact-verify" &&
+                $0.event == .boardRunFinished
+        }) else {
+            #expect(Bool(false), "Expected system real-artifact hook")
+            return
+        }
+
+        let removed = viewModel.removePMBoardExtensionHook(hookID: hook.id)
+        #expect(removed)
+        #expect(viewModel.pmBoardExtensionHookDescriptors().contains(where: { $0.id == hook.id }) == false)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+
+        let removedAgain = viewModel.removePMBoardExtensionHook(hookID: hook.id)
+        #expect(removedAgain == false)
+    }
+
+    @Test("policy update summaries cover PR gate real-artifact and MCP settings")
+    func policyUpdateSummaryCoverage() {
+        let viewModel = KanbanBoardViewModel(tasks: [], agents: [])
+
+        let existingCommands = viewModel.gitHubPRQualityGatePolicy.commands
+        viewModel.updateGitHubPRQualityGatePolicy(isEnabled: true, commands: nil)
+        #expect(viewModel.gitHubPRQualityGatePolicy.commands == existingCommands)
+        #expect(viewModel.gitHubPRQualityGateSummaryText().contains("\(existingCommands.count)"))
+
+        viewModel.updateGitHubPRQualityGatePolicy(isEnabled: false, commands: ["swift test", "xcodebuild test"])
+        #expect(viewModel.gitHubPRQualityGatePolicy.isEnabled == false)
+        #expect(viewModel.gitHubPRQualityGatePolicy.commands.count == 2)
+        #expect(viewModel.lastBoardMessageSeverity == .info)
+
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: false,
+                requireInfoPlistExecutableKey: false,
+                requireXcodeBuild: false,
+                runVerificationOnlyOnTerminalTask: false,
+                enableDeterministicRepairCycle: false
+            ),
+            announce: false
+        )
+        #expect(viewModel.executionRealArtifactVerificationSummaryText().localizedCaseInsensitiveContains("off"))
+
+        viewModel.updateSelectedBoardExecutionRealArtifactVerificationPolicy(
+            ExecutionRealArtifactVerificationPolicy(
+                isEnabled: true,
+                requireInfoPlistExecutableKey: true,
+                requireXcodeBuild: false,
+                runVerificationOnlyOnTerminalTask: true,
+                enableDeterministicRepairCycle: false
+            ),
+            announce: false
+        )
+        let enabledSummary = viewModel.executionRealArtifactVerificationSummaryText()
+        #expect(enabledSummary.localizedCaseInsensitiveContains("on"))
+        #expect(enabledSummary.localizedCaseInsensitiveContains("info.plist"))
+        #expect(enabledSummary.localizedCaseInsensitiveContains("final task"))
+
+        viewModel.updateMCPServerPolicy(
+            autoFetchEnabled: false,
+            registryURL: "https://example.invalid/openmac-registry.json"
+        )
+        #expect(viewModel.mcpServerPolicy.autoFetchEnabled == false)
+        #expect(viewModel.mcpServerPolicy.registryURL == "https://example.invalid/openmac-registry.json")
+        #expect(viewModel.lastBoardMessageSeverity == .info)
     }
 
     @Test("system Google Stitch command is available in PM planner panel")

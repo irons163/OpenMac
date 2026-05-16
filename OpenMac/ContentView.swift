@@ -9954,6 +9954,7 @@ private extension ContentView {
         hit { view.resetAgentDraftAndClose() }
 
         hit { view.openNewBoardSheet() }
+        hit { _ = view.newBoardSheetView }
         hit { view.closeNewBoardSheet() }
         hit {
             view.newBoardName = "Coverage Board"
@@ -9964,6 +9965,7 @@ private extension ContentView {
             view.createBoardFromSheet()
         }
         hit { view.openRenameBoardSheet() }
+        hit { _ = view.renameBoardSheetView }
         hit { view.closeRenameBoardSheet() }
         hit { view.createBoardFromSheet() }
         hit { view.closeNewBoardSheetAndHandleContext() }
@@ -9980,6 +9982,7 @@ private extension ContentView {
         hit { view.removeSelectedBoard() }
 
         hit { view.openGlobalTaskFinder() }
+        hit { _ = view.globalTaskFinderSheetView }
         hit {
             let validResult = GlobalTaskSearchResult(
                 taskID: todoAssigned.id,
@@ -10048,6 +10051,7 @@ private extension ContentView {
         }
 
         hit { view.openPMPlannerSheet() }
+        hit { _ = view.pmPlannerSheetView }
         hit {
             view.pmProjectName = "Coverage PM Project"
             view.pmProjectBrief = "Create an execution-ready PM plan for coverage validation."
