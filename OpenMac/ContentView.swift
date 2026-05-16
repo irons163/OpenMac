@@ -10040,6 +10040,12 @@ private extension ContentView {
         hit { view.openWIPSettings() }
         hit { fallbackWIPView.openWIPSettings() }
         hit { view.applyWIPSettings() }
+        hit { _ = view.newTaskSheetView }
+        hit { _ = view.editTaskSheetView }
+        hit { _ = view.newAgentSheetView }
+        hit { _ = view.editAgentSheetView }
+        hit { _ = view.worktreeSettingsSheetView }
+        hit { _ = view.mcpServersSheetView }
         hit { _ = view.pmTemplateOptions.count }
         hit {
             view.developerModeEnabled = false
@@ -10074,6 +10080,7 @@ private extension ContentView {
         hit { view.applyPMAutoAcceptanceCriteriaForTicket(0) }
         hit { view.applyPMAutoAcceptanceCriteriaForTicket(999) }
         hit { view.applyPMDependencyChainFromSheet() }
+        hit { view.copyPMBlueprintFromSheet() }
         hit { view.copyPMPlanFromSheet() }
         hit { view.copyPMTestPlanFromSheet() }
         hit { view.createMissingAgentsFromPMPlanFromSheet() }
@@ -10151,6 +10158,8 @@ private extension ContentView {
         hit { view.runAutoAssignFromToolbar() }
         hit { view.runAssignedExecutionsFromToolbar() }
         hit { view.cancelAssignedExecutionsFromToolbar() }
+        hit { view.runPMOneClickFromToolbar() }
+        hit { view.runDAGAutopilotFromToolbar() }
         hit {
             view.isBatchRunning = true
             view.cancelAssignedExecutionsFromToolbar()
@@ -10194,13 +10203,32 @@ private extension ContentView {
         hit { view.openCodexProjectsDirectoryInFinder() }
         hit { view.chooseGitHubRepositoryDirectory() }
         hit { view.openGitHubRepositoryInFinder() }
+        hit { view.syncMCPRegistryNowFromToolbar() }
         hit { view.openWorktreeSettingsSheet() }
         hit { view.closeWorktreeSettingsSheet() }
         hit { view.chooseWorktreeRepositoryDirectory() }
         hit { view.openWorktreeRepositoryInFinder() }
+        hit { view.choosePMPluginsDirectory() }
+        hit { view.openPMPluginsDirectoryInFinder() }
+        hit { view.installPMExtensionFromFolder() }
         hit { view.runGitHubPRFlowFromToolbar() }
         hit { view.clearExecutionCheckpointFromToolbar() }
         hit { view.resumeInterruptedExecutionFromToolbar() }
+        hit {
+            view.mcpManualServerName = "xcode"
+            view.mcpManualBootstrapCommand = "echo ok"
+            view.mcpManualKeywordHints = "xcode,mcp"
+            view.addManualMCPServerFromSheet()
+        }
+        hit {
+            view.dagSchedulerEnabled = true
+            view.dagSchedulerAutoAssignBeforeRun = true
+            view.dagSchedulerFallbackAutoAssignNoSkillMatch = true
+            view.dagSchedulerAutoRelaxWIPLimitsDuringRun = true
+            view.dagSchedulerAutoCreateDependencies = true
+            view.dagSchedulerMaxPasses = 2
+            view.applyDAGSchedulerSettings()
+        }
         hit {
             shouldFailCodexDirectoryEnsurer = true
             view.openCodexProjectsDirectoryInFinder()
