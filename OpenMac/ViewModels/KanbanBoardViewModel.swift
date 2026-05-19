@@ -154,8 +154,13 @@ enum WorktreeExecutionSettings {
         guard !trimmed.isEmpty else { return "openmac" }
         let normalized = trimmed
             .split(separator: "/")
-            .map { segment in
-                segment.lowercased().replacingOccurrences(of: " ", with: "-")
+            .compactMap { rawSegment -> String? in
+                let segment = rawSegment.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !segment.isEmpty else { return nil }
+                let words = segment.split(whereSeparator: { $0.isWhitespace })
+                let joined = words.joined(separator: "-").lowercased()
+                let cleaned = joined.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+                return cleaned.isEmpty ? nil : cleaned
             }
             .joined(separator: "/")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
