@@ -426,6 +426,7 @@ nonisolated enum StructuredDeliveryPlanParser {
             requestID: request.requestID,
             baseStoreRevision: request.baseStoreRevision,
             inputFingerprint: request.inputFingerprint,
+            repositoryIdentity: request.repositoryIdentity,
             plan: plan,
             generationIssues: issues
         )

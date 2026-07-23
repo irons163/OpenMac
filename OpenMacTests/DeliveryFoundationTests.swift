@@ -85,10 +85,20 @@ private enum DeliveryFoundationFixture {
         )
         if approved {
             let fingerprint = DeliveryPlanFingerprint.make(for: plan) ?? ""
+            let scopeFingerprint = DeliveryApprovalScopeFingerprint.make(
+                runID: runID,
+                runCreatedAt: date,
+                brief: brief(),
+                repositoryIdentity: repositoryIdentity(),
+                planFingerprint: fingerprint,
+                approvedAt: date,
+                approvedBy: "fixture-user"
+            ) ?? ""
             plan.approval = DeliveryPlanApproval(
                 planID: plan.id,
                 planRevision: plan.revision,
                 planFingerprint: fingerprint,
+                scopeFingerprint: scopeFingerprint,
                 approvedAt: date,
                 approvedBy: "fixture-user"
             )
@@ -107,6 +117,21 @@ private enum DeliveryFoundationFixture {
                 xcodeContainerRelativePath: "OpenMac.xcodeproj"
             ),
             createdAt: date
+        )
+    }
+
+    static func repositoryIdentity() -> DeliveryRepositoryIdentitySnapshot {
+        DeliveryRepositoryIdentitySnapshot(
+            repositoryRootPath: "/fixture/OpenMac",
+            resolvedRepositoryRootPath: "/fixture/OpenMac",
+            repositoryFileIdentity: "fixture-device:fixture-repository",
+            containerKind: .xcodeProject,
+            containerRelativePath: "OpenMac.xcodeproj",
+            resolvedContainerPath: "/fixture/OpenMac/OpenMac.xcodeproj",
+            containerFileIdentity: "fixture-device:fixture-container",
+            gitCommonDirectoryPath: "/fixture/OpenMac/.git",
+            gitCommonDirectoryFileIdentity: "fixture-device:fixture-git",
+            baseCommitIdentifier: String(repeating: "a", count: 40)
         )
     }
 
@@ -311,6 +336,7 @@ struct DeliveryFoundationTests {
         let run = DeliveryRun(
             id: DeliveryFoundationFixture.runID,
             brief: DeliveryFoundationFixture.brief(),
+            repositoryIdentity: DeliveryFoundationFixture.repositoryIdentity(),
             plan: DeliveryFoundationFixture.validPlan(approved: true),
             attempts: [DeliveryFoundationFixture.attempt(), secondAttempt],
             createdAt: DeliveryFoundationFixture.date,
@@ -356,6 +382,7 @@ struct DeliveryFoundationTests {
         let run = DeliveryRun(
             id: DeliveryFoundationFixture.runID,
             brief: DeliveryFoundationFixture.brief(),
+            repositoryIdentity: DeliveryFoundationFixture.repositoryIdentity(),
             plan: DeliveryFoundationFixture.validPlan(approved: true),
             attempts: [attempt],
             evidenceFacts: [first, second],
@@ -365,6 +392,91 @@ struct DeliveryFoundationTests {
 
         let codes = DeliveryRunValidator.validate(run).map(\.code)
         #expect(codes.contains(.cyclicEvidenceSupersession))
+    }
+
+    @Test("attempt and evidence chronology is fail closed")
+    func runRejectsInvalidFactChronology() {
+        let later = DeliveryFoundationFixture.date.addingTimeInterval(30)
+        let attempt = DeliveryFoundationFixture.attempt(
+            status: .succeeded
+        )
+        var invalidAttempt = attempt
+        invalidAttempt.dispatchRequestedAt = later
+        invalidAttempt.startedAt = DeliveryFoundationFixture.date
+            .addingTimeInterval(10)
+        let fact = EvidenceFact(
+            taskID: DeliveryFoundationFixture.firstTaskID,
+            attemptID: invalidAttempt.id,
+            requirementID: DeliveryFoundationFixture.firstRequirementID,
+            result: .passed,
+            source: .xcodeVerifier,
+            summary: "Out-of-order observation",
+            observedAt: later,
+            receivedAt: DeliveryFoundationFixture.date.addingTimeInterval(20)
+        )
+        let run = DeliveryRun(
+            id: DeliveryFoundationFixture.runID,
+            brief: DeliveryFoundationFixture.brief(),
+            repositoryIdentity: DeliveryFoundationFixture.repositoryIdentity(),
+            plan: DeliveryFoundationFixture.validPlan(approved: true),
+            attempts: [invalidAttempt],
+            evidenceFacts: [fact],
+            createdAt: DeliveryFoundationFixture.date,
+            updatedAt: later
+        )
+
+        let codes = DeliveryRunValidator.validate(run).map(\.code)
+        #expect(codes.contains(.invalidAttemptChronology))
+        #expect(codes.contains(.invalidEvidenceChronology))
+    }
+
+    @Test("snapshot time cannot precede persisted attempt facts")
+    func fileStoreRejectsSnapshotOlderThanAttempt() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "openmac-delivery-future-attempt-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let eventTime = DeliveryFoundationFixture.date.addingTimeInterval(10)
+        var attempt = DeliveryFoundationFixture.attempt(status: .running)
+        attempt.dispatchRequestedAt = eventTime
+        attempt.startedAt = eventTime
+        let run = DeliveryRun(
+            id: DeliveryFoundationFixture.runID,
+            brief: DeliveryFoundationFixture.brief(),
+            repositoryIdentity: DeliveryFoundationFixture.repositoryIdentity(),
+            plan: DeliveryFoundationFixture.validPlan(approved: true),
+            attempts: [attempt],
+            createdAt: DeliveryFoundationFixture.date,
+            updatedAt: eventTime
+        )
+        let store = FileDeliveryRunStore(
+            fileURL: directoryURL.appendingPathComponent("delivery-store.json")
+        )
+        let snapshot = DeliveryRunSnapshot(
+            storeRevision: 0,
+            savedAt: DeliveryFoundationFixture.date,
+            runs: [run],
+            selectedRunID: run.id
+        )
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        try encoder.encode(snapshot).write(
+            to: store.fileURL,
+            options: .atomic
+        )
+
+        do {
+            _ = try await store.load()
+            Issue.record("Expected snapshot time to cover attempt facts")
+        } catch let error as DeliveryRunStoreError {
+            #expect(error == .snapshotTimestampPrecedesRunState(run.id))
+        }
     }
 
     @Test("delivery snapshot encodes and decodes without derived status")
@@ -386,6 +498,7 @@ struct DeliveryFoundationTests {
         let run = DeliveryRun(
             id: DeliveryFoundationFixture.runID,
             brief: DeliveryFoundationFixture.brief(),
+            repositoryIdentity: DeliveryFoundationFixture.repositoryIdentity(),
             plan: DeliveryFoundationFixture.validPlan(approved: true),
             attempts: [attempt],
             evidenceFacts: [fact],

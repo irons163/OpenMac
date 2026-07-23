@@ -1,6 +1,6 @@
 import Foundation
 
-nonisolated enum DeliveryPlanValidationIssueCode: String, Equatable, Sendable {
+nonisolated enum DeliveryPlanValidationIssueCode: String, Equatable, Hashable, Sendable {
     case invalidRevision
     case noTasks
     case taskCountOutOfRange
@@ -121,7 +121,6 @@ nonisolated enum DeliveryPlanValidator {
 
         let taskIDs = Set(plan.tasks.map(\.id))
         var seenEdges: Set<DependencyEdge> = []
-        var validGraphEdges: Set<DependencyEdge> = []
 
         for edge in plan.dependencyEdges {
             if !seenEdges.insert(edge).inserted {
@@ -158,11 +157,10 @@ nonisolated enum DeliveryPlanValidator {
                 )
                 continue
             }
-
-            validGraphEdges.insert(edge)
         }
 
-        if hasCycle(taskIDs: taskIDs, edges: validGraphEdges) {
+        if DeliveryPlanGraphAnalyzer.analyze(plan)
+            .unavailableIssueCodes.contains(.cyclicDependency) {
             issues.append(
                 DeliveryPlanValidationIssue(
                     code: .cyclicDependency,
@@ -322,41 +320,6 @@ nonisolated enum DeliveryPlanValidator {
                 )
             )
         }
-    }
-
-    nonisolated private static func hasCycle(
-        taskIDs: Set<UUID>,
-        edges: Set<DependencyEdge>
-    ) -> Bool {
-        guard !taskIDs.isEmpty else { return false }
-
-        var indegree = Dictionary(uniqueKeysWithValues: taskIDs.map { ($0, 0) })
-        var dependentsByPrerequisite: [UUID: [UUID]] = [:]
-
-        for edge in edges {
-            indegree[edge.dependentTaskID, default: 0] += 1
-            dependentsByPrerequisite[edge.prerequisiteTaskID, default: []]
-                .append(edge.dependentTaskID)
-        }
-
-        var queue = indegree
-            .filter { $0.value == 0 }
-            .map(\.key)
-        var visitedCount = 0
-
-        while let taskID = queue.popLast() {
-            visitedCount += 1
-            for dependentID in dependentsByPrerequisite[taskID, default: []] {
-                guard let currentIndegree = indegree[dependentID] else { continue }
-                let nextIndegree = currentIndegree - 1
-                indegree[dependentID] = nextIndegree
-                if nextIndegree == 0 {
-                    queue.append(dependentID)
-                }
-            }
-        }
-
-        return visitedCount != taskIDs.count
     }
 
     nonisolated private static func isBlank(_ value: String) -> Bool {

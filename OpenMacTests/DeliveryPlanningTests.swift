@@ -7,10 +7,17 @@ private enum DeliveryPlanningFixture {
     static let requestID = UUID(uuidString: "a0000000-0000-0000-0000-000000000001")!
     static let planID = UUID(uuidString: "b0000000-0000-0000-0000-000000000001")!
     static let briefID = UUID(uuidString: "c0000000-0000-0000-0000-000000000001")!
-    static let repositoryRootPath = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .standardizedFileURL.path
+    static let repositoryRootPath =
+        DeliveryGitTestRepository.shared.rootURL.path
+    static let repositoryIdentity: DeliveryRepositoryIdentitySnapshot = {
+        do {
+            return try context().identitySnapshot(validatingBaseBranch: "main")
+        } catch {
+            preconditionFailure(
+                "Unable to capture shared planning Git identity: \(error)"
+            )
+        }
+    }()
 
     static func brief(
         title: String = "Add offline draft sync",
@@ -57,12 +64,29 @@ private enum DeliveryPlanningFixture {
         brief: FeatureBrief = brief(),
         context: DeliveryPlanningRepositoryContext = context()
     ) -> DeliveryPlanGenerationRequest {
-        DeliveryPlanGenerationRequest(
+        let identity: DeliveryRepositoryIdentitySnapshot
+        if context.repositoryRootPath == repositoryRootPath,
+           brief.repository.rootPath == repositoryRootPath,
+           brief.repository.baseBranch == "main" {
+            identity = repositoryIdentity
+        } else {
+            do {
+                identity = try context.identitySnapshot(
+                    validatingBaseBranch: brief.repository.baseBranch
+                )
+            } catch {
+                preconditionFailure(
+                    "Unable to capture planning fixture Git identity: \(error)"
+                )
+            }
+        }
+        return DeliveryPlanGenerationRequest(
             requestID: requestID,
             planID: planID,
             baseStoreRevision: baseStoreRevision,
             brief: brief,
             repositoryContext: context,
+            repositoryIdentity: identity,
             generatedAt: date
         )
     }
@@ -152,7 +176,7 @@ private actor RecordingPlanningResponseProvider: DeliveryPlanStructuredResponseP
     }
 }
 
-@Suite("Delivery v2 planning")
+@Suite("Delivery v2 planning", .serialized)
 struct DeliveryPlanningTests {
     @Test("fixture produces a reviewable Xcode-aware typed plan")
     func fixtureProducesReviewablePlan() async throws {
@@ -181,6 +205,118 @@ struct DeliveryPlanningTests {
             let criterionIDs = Set(task.acceptanceCriteria.map(\.id))
             let coveredIDs = Set(task.evidenceRequirements.flatMap(\.coveredCriterionIDs))
             #expect(criterionIDs.isSubset(of: coveredIDs))
+        }
+    }
+
+    @Test("planning rejects a result when its pinned base branch moves")
+    func planningPinsBaseCommitAcrossGeneration() async throws {
+        let repository = try DeliveryGitTestRepository.make(
+            label: "planning-branch-move"
+        )
+        defer { try? FileManager.default.removeItem(at: repository.rootURL) }
+        let context = DeliveryPlanningFixture.context(
+            rootPath: repository.rootURL.path
+        )
+        let request = DeliveryPlanningFixture.request(
+            requestID: UUID(),
+            planID: UUID(),
+            brief: DeliveryPlanningFixture.brief(
+                rootPath: repository.rootURL.path
+            ),
+            context: context
+        )
+        let planner = DeterministicFixtureDeliveryPlanner { _ in
+            try repository.commitFile(
+                named: "moved-during-planning.txt",
+                contents: "new base\n"
+            )
+        }
+
+        do {
+            _ = try await planner.generate(request)
+            Issue.record("Expected the pinned base commit to be rejected")
+        } catch let error as DeliveryPlanningRepositoryContextResolutionError {
+            #expect(error == .baseBranchIdentityChanged)
+        }
+        #expect(await planner.generationCount() == 0)
+    }
+
+    @Test("repository validation rejects replaced Git metadata")
+    func repositoryValidationPinsGitCommonDirectory() throws {
+        let repository = try DeliveryGitTestRepository.make(
+            label: "planning-git-common-dir"
+        )
+        defer { try? FileManager.default.removeItem(at: repository.rootURL) }
+        let context = DeliveryPlanningFixture.context(
+            rootPath: repository.rootURL.path
+        )
+        let identity = try context.identitySnapshot(
+            validatingBaseBranch: repository.baseBranch
+        )
+        let originalGitURL = repository.rootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                "\(repository.rootURL.lastPathComponent)-original-git"
+            )
+        defer { try? FileManager.default.removeItem(at: originalGitURL) }
+        try FileManager.default.moveItem(
+            at: repository.rootURL.appendingPathComponent(".git"),
+            to: originalGitURL
+        )
+        try DeliveryGitTestRepository.runGit(["init"], in: repository.rootURL)
+        try DeliveryGitTestRepository.runGit(
+            ["symbolic-ref", "HEAD", "refs/heads/main"],
+            in: repository.rootURL
+        )
+        try DeliveryGitTestRepository.runGit(
+            ["config", "user.email", "openmac-tests@example.invalid"],
+            in: repository.rootURL
+        )
+        try DeliveryGitTestRepository.runGit(
+            ["config", "user.name", "OpenMac Tests"],
+            in: repository.rootURL
+        )
+        try DeliveryGitTestRepository.runGit(
+            ["add", "--", "README.md", "OpenMac.xcodeproj"],
+            in: repository.rootURL
+        )
+        try DeliveryGitTestRepository.runGit(
+            ["commit", "-m", "Replacement fixture"],
+            in: repository.rootURL
+        )
+
+        do {
+            try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+                identity,
+                baseBranch: repository.baseBranch
+            )
+            Issue.record("Expected replaced Git metadata to be rejected")
+        } catch let error as DeliveryPlanningRepositoryContextResolutionError {
+            #expect(error == .gitCommonDirectoryIdentityChanged)
+        }
+    }
+
+    @Test("repository identity rejects dirty worktree input")
+    func repositoryIdentityRequiresCleanWorktree() throws {
+        let repository = try DeliveryGitTestRepository.make(
+            label: "planning-dirty-worktree"
+        )
+        defer { try? FileManager.default.removeItem(at: repository.rootURL) }
+        try Data("unreviewed\n".utf8).write(
+            to: repository.rootURL.appendingPathComponent("dirty.txt"),
+            options: .atomic
+        )
+        let context = DeliveryPlanningFixture.context(
+            rootPath: repository.rootURL.path
+        )
+
+        do {
+            _ = try context.identitySnapshot(
+                validatingBaseBranch: repository.baseBranch
+            )
+            Issue.record("Expected dirty worktree input to be rejected")
+        } catch let error as DeliveryPlanningRepositoryContextResolutionError {
+            #expect(error == .repositoryHasUncommittedChanges)
         }
     }
 
@@ -405,18 +541,26 @@ struct DeliveryPlanningTests {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("openmac-planning-root-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directoryURL) }
-        let firstRepositoryURL = directoryURL.appendingPathComponent("First", isDirectory: true)
-        let secondRepositoryURL = directoryURL.appendingPathComponent("Second", isDirectory: true)
-        let selectedRepositoryURL = directoryURL.appendingPathComponent("Selected", isDirectory: true)
-        for repositoryURL in [firstRepositoryURL, secondRepositoryURL] {
-            try FileManager.default.createDirectory(
-                at: repositoryURL.appendingPathComponent("OpenMac.xcodeproj", isDirectory: true),
-                withIntermediateDirectories: true
-            )
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        let firstRepository = try DeliveryGitTestRepository.make(
+            label: "planning-symlink-first"
+        )
+        defer {
+            try? FileManager.default.removeItem(at: firstRepository.rootURL)
         }
+        let secondRepository = try DeliveryGitTestRepository.make(
+            label: "planning-symlink-second"
+        )
+        defer {
+            try? FileManager.default.removeItem(at: secondRepository.rootURL)
+        }
+        let selectedRepositoryURL = directoryURL.appendingPathComponent("Selected", isDirectory: true)
         try FileManager.default.createSymbolicLink(
             at: selectedRepositoryURL,
-            withDestinationURL: firstRepositoryURL
+            withDestinationURL: firstRepository.rootURL
         )
         let context = try DeliveryPlanningRepositoryContext.resolving(
             repositoryRootPath: selectedRepositoryURL.path,
@@ -433,7 +577,7 @@ struct DeliveryPlanningTests {
         try FileManager.default.removeItem(at: selectedRepositoryURL)
         try FileManager.default.createSymbolicLink(
             at: selectedRepositoryURL,
-            withDestinationURL: secondRepositoryURL
+            withDestinationURL: secondRepository.rootURL
         )
 
         do {
@@ -837,15 +981,15 @@ struct DeliveryPlanningTests {
             .appendingPathComponent("openmac-planning-store-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directoryURL) }
         let store = FileDeliveryRunStore(
-            fileURL: directoryURL.appendingPathComponent("delivery-store.json")
+            fileURL: directoryURL.appendingPathComponent("delivery-store.json"),
+            reviewNow: { request.generatedAt.addingTimeInterval(2) }
         )
 
         try await store.save(snapshot)
         let applied = try await store.applyGeneratedPlanDraft(
             result,
             toRunID: run.id,
-            repositoryContext: request.repositoryContext,
-            activeRequestID: request.requestID,
+            request: request,
             appliedAt: request.generatedAt.addingTimeInterval(1)
         )
         let loaded = try await store.load()
@@ -920,8 +1064,7 @@ struct DeliveryPlanningTests {
         _ = try await store.applyGeneratedPlanDraft(
             secondResult,
             toRunID: run.id,
-            repositoryContext: secondRequest.repositoryContext,
-            activeRequestID: secondRequest.requestID,
+            request: secondRequest,
             appliedAt: secondRequest.generatedAt.addingTimeInterval(1)
         )
 
@@ -929,8 +1072,7 @@ struct DeliveryPlanningTests {
             _ = try await store.applyGeneratedPlanDraft(
                 firstResult,
                 toRunID: run.id,
-                repositoryContext: firstRequest.repositoryContext,
-                activeRequestID: firstRequest.requestID,
+                request: firstRequest,
                 appliedAt: firstRequest.generatedAt.addingTimeInterval(2)
             )
             Issue.record("Expected a stale store revision error")
@@ -972,8 +1114,7 @@ struct DeliveryPlanningTests {
             return try await store.applyGeneratedPlanDraft(
                 result,
                 toRunID: run.id,
-                repositoryContext: request.repositoryContext,
-                activeRequestID: request.requestID,
+                request: request,
                 appliedAt: request.generatedAt.addingTimeInterval(1)
             )
         }
@@ -1027,8 +1168,7 @@ struct DeliveryPlanningTests {
         _ = try await store.applyGeneratedPlanDraft(
             result,
             toRunID: run.id,
-            repositoryContext: request.repositoryContext,
-            activeRequestID: request.requestID,
+            request: request,
             appliedAt: request.generatedAt.addingTimeInterval(1)
         )
 
@@ -1075,16 +1215,15 @@ struct DeliveryPlanningTests {
         let applied = try await store.applyGeneratedPlanDraft(
             invalidResult,
             toRunID: run.id,
-            repositoryContext: request.repositoryContext,
-            activeRequestID: request.requestID,
+            request: request,
             appliedAt: request.generatedAt.addingTimeInterval(1)
         )
         #expect(applied.storeRevision == 1)
         #expect(!DeliveryPlanValidator.isValid(try #require(applied.runs.first?.plan)))
         #expect(DeliveryRunValidator.isValid(try #require(applied.runs.first)))
 
-        var loaded = try #require(try await store.load())
-        var loadedRun = try #require(loaded.runs.first)
+        let loaded = try #require(try await store.load())
+        let loadedRun = try #require(loaded.runs.first)
         var editedPlan = try #require(loadedRun.plan)
         let validCandidate = try StructuredDeliveryPlanParser.parse(
             DeliveryPlanningFixture.encoded(
@@ -1097,26 +1236,20 @@ struct DeliveryPlanningTests {
         editedPlan.dependencyEdges.append(validCandidate.dependencyEdges[1])
         #expect(DeliveryPlanValidator.isValid(editedPlan))
 
-        let fingerprint = try #require(DeliveryPlanFingerprint.make(for: editedPlan))
-        editedPlan.approval = DeliveryPlanApproval(
-            planID: editedPlan.id,
-            planRevision: editedPlan.revision,
-            planFingerprint: fingerprint,
-            approvedAt: request.generatedAt.addingTimeInterval(2),
+        let repairedSnapshot = try await store.approveReviewedPlan(
+            editedPlan,
+            inRunID: loadedRun.id,
+            expectedStoreRevision: loaded.storeRevision,
+            expectedPlanRevision: try #require(loadedRun.plan?.revision),
             approvedBy: "fixture-reviewer"
         )
-        loadedRun.plan = editedPlan
-        loaded.runs = [loadedRun]
-        loaded = DeliveryRunSnapshot(
-            storeRevision: 2,
-            savedAt: request.generatedAt.addingTimeInterval(2),
-            runs: loaded.runs,
-            selectedRunID: loaded.selectedRunID
-        )
-        try await store.save(loaded)
 
-        let repaired = try #require(try await store.load()?.runs.first?.plan)
+        let repairedRun = try #require(repairedSnapshot.runs.first)
+        let repaired = try #require(repairedRun.plan)
+        #expect(repairedSnapshot.storeRevision == 2)
         #expect(DeliveryPlanValidator.isValid(repaired))
+        #expect(DeliveryRunValidator.isValid(repairedRun))
         #expect(repaired.approval?.approvedBy == "fixture-reviewer")
+        #expect(repaired.approval?.scopeFingerprint.isEmpty == false)
     }
 }

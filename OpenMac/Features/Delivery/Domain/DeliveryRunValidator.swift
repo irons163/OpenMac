@@ -2,11 +2,17 @@ import Foundation
 
 nonisolated enum DeliveryRunValidationIssueCode: String, Equatable, Sendable {
     case invalidPlan
+    case missingRepositoryIdentity
+    case incompleteRepositoryIdentity
+    case repositoryIdentityMismatch
+    case staleApprovalScope
+    case invalidApprovalMetadata
     case attemptWithoutApproval
     case duplicateAttemptID
     case missingAttemptTask
     case attemptPlanMismatch
     case invalidAttemptSequence
+    case invalidAttemptChronology
     case duplicateAttemptSequence
     case duplicateAttemptIdempotencyKey
     case multipleActiveAttempts
@@ -18,6 +24,7 @@ nonisolated enum DeliveryRunValidationIssueCode: String, Equatable, Sendable {
     case missingEvidenceAttempt
     case evidenceAttemptTaskMismatch
     case missingEvidenceRequirement
+    case invalidEvidenceChronology
     case invalidSupersededEvidence
     case cyclicEvidenceSupersession
     case missingPullRequestTask
@@ -64,6 +71,24 @@ nonisolated enum DeliveryRunValidator {
         let hasDeliveryFacts = !run.attempts.isEmpty
             || !run.evidenceFacts.isEmpty
             || !run.pullRequests.isEmpty
+
+        if let identity = run.repositoryIdentity {
+            let briefRoot = standardizedPath(run.brief.repository.rootPath)
+            let identityRoot = standardizedPath(identity.repositoryRootPath)
+            let briefContainer = run.brief.repository.xcodeContainerRelativePath
+                .map(standardizedPath)
+            let identityContainer = standardizedPath(identity.containerRelativePath)
+            if briefRoot != identityRoot
+                || (briefContainer != nil && briefContainer != identityContainer) {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .repositoryIdentityMismatch,
+                        message: "The persisted repository identity does not match the feature brief."
+                    )
+                )
+            }
+        }
+
         if !DeliveryPlanValidator.isValid(plan)
             && (plan.approval != nil || hasDeliveryFacts) {
             issues.append(
@@ -72,6 +97,66 @@ nonisolated enum DeliveryRunValidator {
                     message: "Only an unapproved draft without delivery facts may contain an invalid plan."
                 )
             )
+        }
+
+        if let approval = plan.approval {
+            let reviewer = approval.approvedBy.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            if reviewer.isEmpty
+                || reviewer.utf8.count > DeliveryPlanApproval.maximumReviewerByteCount
+                || approval.scopeFingerprint
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || approval.approvedAt != plan.updatedAt
+                || approval.approvedAt < plan.createdAt
+                || approval.approvedAt < run.createdAt
+                || approval.approvedAt > run.updatedAt {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidApprovalMetadata,
+                        message: "Approval metadata, reviewer, and chronology must be valid."
+                    )
+                )
+            }
+
+            if let repositoryIdentity = run.repositoryIdentity {
+                if !hasCompleteRepositoryIdentity(repositoryIdentity) {
+                    issues.append(
+                        DeliveryRunValidationIssue(
+                            code: .incompleteRepositoryIdentity,
+                            message: "Approval requires repository, container, Git common-directory, and base-commit identities."
+                        )
+                    )
+                }
+                let planFingerprint = DeliveryPlanFingerprint.make(for: plan)
+                let scopeFingerprint = planFingerprint.flatMap {
+                    DeliveryApprovalScopeFingerprint.make(
+                        runID: run.id,
+                        runCreatedAt: run.createdAt,
+                        brief: run.brief,
+                        repositoryIdentity: repositoryIdentity,
+                        planFingerprint: $0,
+                        approvedAt: approval.approvedAt,
+                        approvedBy: approval.approvedBy
+                    )
+                }
+                if scopeFingerprint == nil
+                    || approval.scopeFingerprint != scopeFingerprint {
+                    issues.append(
+                        DeliveryRunValidationIssue(
+                            code: .staleApprovalScope,
+                            message: "The approval does not match the current brief and repository scope."
+                        )
+                    )
+                }
+            } else {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .missingRepositoryIdentity,
+                        message: "An approved plan requires a trusted repository identity."
+                    )
+                )
+            }
         }
 
         if !run.attempts.isEmpty && plan.approval == nil {
@@ -91,11 +176,15 @@ nonisolated enum DeliveryRunValidator {
         validateAttempts(
             run.attempts,
             plan: plan,
+            runCreatedAt: run.createdAt,
+            runUpdatedAt: run.updatedAt,
             tasksByID: tasksByID,
             issues: &issues
         )
         validateEvidence(
             run.evidenceFacts,
+            runCreatedAt: run.createdAt,
+            runUpdatedAt: run.updatedAt,
             tasksByID: tasksByID,
             attemptsByID: attemptsByID,
             issues: &issues
@@ -113,9 +202,41 @@ nonisolated enum DeliveryRunValidator {
         validate(run).isEmpty
     }
 
+    nonisolated private static func hasCompleteRepositoryIdentity(
+        _ identity: DeliveryRepositoryIdentitySnapshot
+    ) -> Bool {
+        let values = [
+            identity.repositoryRootPath,
+            identity.resolvedRepositoryRootPath,
+            identity.repositoryFileIdentity,
+            identity.containerRelativePath,
+            identity.resolvedContainerPath,
+            identity.containerFileIdentity,
+            identity.gitCommonDirectoryPath,
+            identity.gitCommonDirectoryFileIdentity,
+            identity.baseCommitIdentifier
+        ]
+        guard values.allSatisfy({
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            return false
+        }
+        let commit = identity.baseCommitIdentifier.lowercased()
+        let hexadecimal = CharacterSet(charactersIn: "0123456789abcdef")
+        return (commit.count == 40 || commit.count == 64)
+            && commit.unicodeScalars.allSatisfy(hexadecimal.contains)
+    }
+
+    nonisolated private static func standardizedPath(_ value: String) -> String {
+        (value.trimmingCharacters(in: .whitespacesAndNewlines) as NSString)
+            .standardizingPath
+    }
+
     nonisolated private static func validateAttempts(
         _ attempts: [ExecutionAttempt],
         plan: DeliveryPlan,
+        runCreatedAt: Date,
+        runUpdatedAt: Date,
         tasksByID: [UUID: DeliveryTask],
         issues: inout [DeliveryRunValidationIssue]
     ) {
@@ -126,6 +247,38 @@ nonisolated enum DeliveryRunValidator {
         var taskIDByExternalSession: [ExternalSessionRef: UUID] = [:]
 
         for attempt in attempts {
+            let eventDates = [
+                attempt.dispatchRequestedAt,
+                attempt.startedAt,
+                attempt.endedAt,
+                attempt.stopRequestedAt
+            ].compactMap { $0 }
+            let hasInvalidBounds = attempt.createdAt < runCreatedAt
+                || attempt.createdAt > runUpdatedAt
+                || eventDates.contains {
+                    $0 < attempt.createdAt || $0 > runUpdatedAt
+                }
+            let hasInvalidOrdering =
+                (attempt.dispatchRequestedAt != nil
+                    && attempt.startedAt != nil
+                    && attempt.dispatchRequestedAt! > attempt.startedAt!)
+                || (attempt.startedAt != nil
+                    && attempt.endedAt != nil
+                    && attempt.startedAt! > attempt.endedAt!)
+                || (attempt.dispatchRequestedAt != nil
+                    && attempt.endedAt != nil
+                    && attempt.dispatchRequestedAt! > attempt.endedAt!)
+            if hasInvalidBounds || hasInvalidOrdering {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidAttemptChronology,
+                        message: "Execution attempt timestamps must be ordered within the delivery run.",
+                        taskID: attempt.taskID,
+                        attemptID: attempt.id
+                    )
+                )
+            }
+
             if !seenAttemptIDs.insert(attempt.id).inserted {
                 issues.append(
                     DeliveryRunValidationIssue(
@@ -236,6 +389,8 @@ nonisolated enum DeliveryRunValidator {
 
     nonisolated private static func validateEvidence(
         _ facts: [EvidenceFact],
+        runCreatedAt: Date,
+        runUpdatedAt: Date,
         tasksByID: [UUID: DeliveryTask],
         attemptsByID: [UUID: ExecutionAttempt],
         issues: inout [DeliveryRunValidationIssue]
@@ -248,6 +403,19 @@ nonisolated enum DeliveryRunValidator {
         }
 
         for fact in facts {
+            if fact.observedAt > fact.receivedAt
+                || fact.observedAt < runCreatedAt
+                || fact.receivedAt > runUpdatedAt {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidEvidenceChronology,
+                        message: "Evidence must be observed before receipt and remain within the delivery run timeline.",
+                        taskID: fact.taskID,
+                        attemptID: fact.attemptID
+                    )
+                )
+            }
+
             if !seenFactIDs.insert(fact.id).inserted {
                 issues.append(
                     DeliveryRunValidationIssue(

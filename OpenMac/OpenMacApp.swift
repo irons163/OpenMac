@@ -71,6 +71,10 @@ struct OpenMacApp: App {
                 .environment(\.locale, appLocale)
         }
         .commands {
+#if DEBUG
+            DeliveryPlanReviewCommands()
+#endif
+
             CommandMenu(L10n.string("Appearance")) {
                 Button(
                     L10n.string("Cycle Appearance"),
@@ -98,6 +102,17 @@ struct OpenMacApp: App {
                 }
             }
         }
+
+#if DEBUG
+        Window(
+            L10n.string("Delivery Plan Review"),
+            id: DeliveryPlanReviewSceneConfiguration.windowID
+        ) {
+            DeliveryPlanReviewScene()
+                .environment(\.locale, appLocale)
+        }
+        .defaultSize(width: 1180, height: 780)
+#endif
     }
 
     private var appLocale: Locale {

@@ -4,14 +4,15 @@
 > 人力假設：1 位開發者
 > 目標：證明 Apple/Xcode 的 brief → approved plan → isolated sessions → verified PR 閉環
 
-## 目前進度（2026-07-19）
+## 目前進度（2026-07-23）
 
 - [x] VS-01：獨立 delivery domain、內容綁定 approval fingerprint、關聯驗證與具 compare-and-swap 的 versioned store。
 - [x] VS-02：backend-neutral execution contract、deterministic fixture、可重播 facts、游標／stop／fault／cancellation 行為。
 - [x] VS-03：backend-neutral planning contract、strict structured response、local keys → typed UUID edges、deterministic Apple/Xcode fixture、可信 repository identity snapshot、可保存並修正的 invalid draft、持久化 generation blockers，以及綁定 store revision 的 atomic stale-result apply guard。
-- [ ] 下一步 VS-04：Plan review 與 approval。
+- [x] VS-04：Debug-only 獨立 plan review window、完整 typed plan 編輯、deterministic waves／risk／session 摘要、原子 draft save／approval、store 與 plan 雙 CAS、跨程序 file lock、schema v1 → v2 fail-closed migration，以及零 execution backend calls 的 fixture bootstrap。Approval scope 綁定整份 brief、plan hash、reviewer/time、canonical Git common-directory 與 planning 前固定的 base commit；落盤與批准都會重新驗證 identity。
+- [ ] 下一步 VS-05：Idempotent dispatch。
 
-Day 1–2 基礎目前由 63 個隔離測試覆蓋；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
+Day 1–3 基礎目前由 90 個隔離測試覆蓋；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
 
 ## 1. Slice 完成畫面
 

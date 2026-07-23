@@ -41,6 +41,10 @@ actor DeterministicFixtureDeliveryPlanner: DeliveryPlanning {
         _ request: DeliveryPlanGenerationRequest
     ) async throws -> DeliveryPlanGenerationResult {
         try StructuredDeliveryPlanParser.validateInput(request)
+        try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+            request.repositoryIdentity,
+            baseBranch: request.brief.repository.baseBranch
+        )
 
         invocationCountValue += 1
         let invocation = invocationCountValue
@@ -82,6 +86,10 @@ actor DeterministicFixtureDeliveryPlanner: DeliveryPlanning {
             data,
             request: request,
             plannerID: plannerID
+        )
+        try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+            request.repositoryIdentity,
+            baseBranch: request.brief.repository.baseBranch
         )
         try Task.checkCancellation()
         cachedResultsByRequestID[request.requestID] = CachedResult(

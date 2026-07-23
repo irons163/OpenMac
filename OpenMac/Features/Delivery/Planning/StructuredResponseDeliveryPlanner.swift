@@ -17,7 +17,10 @@ nonisolated struct StructuredResponseDeliveryPlanner: DeliveryPlanning, Sendable
     ) async throws -> DeliveryPlanGenerationResult {
         try StructuredDeliveryPlanParser.validateInput(request)
         do {
-            try request.repositoryContext.validateCurrentResolvedIdentity()
+            try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+                request.repositoryIdentity,
+                baseBranch: request.brief.repository.baseBranch
+            )
         } catch let error as DeliveryPlanningRepositoryContextResolutionError {
             throw DeliveryPlanGenerationError.invalidInput(
                 fieldPath: error.fieldPath,
@@ -46,6 +49,17 @@ nonisolated struct StructuredResponseDeliveryPlanner: DeliveryPlanning, Sendable
             request: request,
             plannerID: plannerID
         )
+        do {
+            try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+                request.repositoryIdentity,
+                baseBranch: request.brief.repository.baseBranch
+            )
+        } catch let error as DeliveryPlanningRepositoryContextResolutionError {
+            throw DeliveryPlanGenerationError.invalidInput(
+                fieldPath: error.fieldPath,
+                reason: error.errorDescription ?? "Repository identity validation failed."
+            )
+        }
         try Task.checkCancellation()
         return result
     }

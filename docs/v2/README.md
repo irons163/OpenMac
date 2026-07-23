@@ -1,7 +1,7 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-03 已完成，下一步為 plan review／approval
-> 更新日期：2026-07-19
+> 狀態：VS-01～VS-04 已完成，下一步為 idempotent dispatch
+> 更新日期：2026-07-23
 
 OpenMac v2 的定位是：
 

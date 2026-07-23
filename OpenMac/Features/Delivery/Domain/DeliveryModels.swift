@@ -6,6 +6,12 @@ nonisolated enum DeliveryRiskLevel: String, CaseIterable, Codable, Sendable {
     case high
 }
 
+nonisolated enum DeliveryContainerKind: String, Codable, Sendable {
+    case xcodeProject
+    case xcodeWorkspace
+    case swiftPackage
+}
+
 nonisolated enum DeliveryPlanGenerationIssueSeverity: String, Equatable, Codable, Sendable {
     case warning
     case blocking
@@ -92,6 +98,100 @@ nonisolated struct DeliveryRepositoryReference: Equatable, Codable, Sendable {
         self.rootPath = rootPath
         self.baseBranch = baseBranch
         self.xcodeContainerRelativePath = xcodeContainerRelativePath
+    }
+}
+
+nonisolated struct DeliveryRepositoryIdentitySnapshot: Equatable, Codable, Sendable {
+    let repositoryRootPath: String
+    let resolvedRepositoryRootPath: String
+    let repositoryFileIdentity: String
+    let containerKind: DeliveryContainerKind
+    let containerRelativePath: String
+    let resolvedContainerPath: String
+    let containerFileIdentity: String
+    let gitCommonDirectoryPath: String
+    let gitCommonDirectoryFileIdentity: String
+    let baseCommitIdentifier: String
+
+    private enum CodingKeys: String, CodingKey {
+        case repositoryRootPath
+        case resolvedRepositoryRootPath
+        case repositoryFileIdentity
+        case containerKind
+        case containerRelativePath
+        case resolvedContainerPath
+        case containerFileIdentity
+        case gitCommonDirectoryPath
+        case gitCommonDirectoryFileIdentity
+        case baseCommitIdentifier
+    }
+
+    nonisolated init(
+        repositoryRootPath: String,
+        resolvedRepositoryRootPath: String,
+        repositoryFileIdentity: String,
+        containerKind: DeliveryContainerKind,
+        containerRelativePath: String,
+        resolvedContainerPath: String,
+        containerFileIdentity: String,
+        gitCommonDirectoryPath: String,
+        gitCommonDirectoryFileIdentity: String,
+        baseCommitIdentifier: String
+    ) {
+        self.repositoryRootPath = repositoryRootPath
+        self.resolvedRepositoryRootPath = resolvedRepositoryRootPath
+        self.repositoryFileIdentity = repositoryFileIdentity
+        self.containerKind = containerKind
+        self.containerRelativePath = containerRelativePath
+        self.resolvedContainerPath = resolvedContainerPath
+        self.containerFileIdentity = containerFileIdentity
+        self.gitCommonDirectoryPath = gitCommonDirectoryPath
+        self.gitCommonDirectoryFileIdentity = gitCommonDirectoryFileIdentity
+        self.baseCommitIdentifier = baseCommitIdentifier
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        repositoryRootPath = try container.decode(
+            String.self,
+            forKey: .repositoryRootPath
+        )
+        resolvedRepositoryRootPath = try container.decode(
+            String.self,
+            forKey: .resolvedRepositoryRootPath
+        )
+        repositoryFileIdentity = try container.decodeIfPresent(
+            String.self,
+            forKey: .repositoryFileIdentity
+        ) ?? ""
+        containerKind = try container.decode(
+            DeliveryContainerKind.self,
+            forKey: .containerKind
+        )
+        containerRelativePath = try container.decode(
+            String.self,
+            forKey: .containerRelativePath
+        )
+        resolvedContainerPath = try container.decode(
+            String.self,
+            forKey: .resolvedContainerPath
+        )
+        containerFileIdentity = try container.decodeIfPresent(
+            String.self,
+            forKey: .containerFileIdentity
+        ) ?? ""
+        gitCommonDirectoryPath = try container.decodeIfPresent(
+            String.self,
+            forKey: .gitCommonDirectoryPath
+        ) ?? ""
+        gitCommonDirectoryFileIdentity = try container.decodeIfPresent(
+            String.self,
+            forKey: .gitCommonDirectoryFileIdentity
+        ) ?? ""
+        baseCommitIdentifier = try container.decodeIfPresent(
+            String.self,
+            forKey: .baseCommitIdentifier
+        ) ?? ""
     }
 }
 
@@ -202,24 +302,51 @@ nonisolated struct DependencyEdge: Equatable, Hashable, Codable, Sendable {
 }
 
 nonisolated struct DeliveryPlanApproval: Equatable, Codable, Sendable {
+    nonisolated static let maximumReviewerByteCount = 1_024
+
     let planID: UUID
     let planRevision: Int
     let planFingerprint: String
+    let scopeFingerprint: String
     let approvedAt: Date
     let approvedBy: String
+
+    private enum CodingKeys: String, CodingKey {
+        case planID
+        case planRevision
+        case planFingerprint
+        case scopeFingerprint
+        case approvedAt
+        case approvedBy
+    }
 
     nonisolated init(
         planID: UUID,
         planRevision: Int,
         planFingerprint: String,
+        scopeFingerprint: String,
         approvedAt: Date = Date(),
         approvedBy: String
     ) {
         self.planID = planID
         self.planRevision = planRevision
         self.planFingerprint = planFingerprint
+        self.scopeFingerprint = scopeFingerprint
         self.approvedAt = approvedAt
         self.approvedBy = approvedBy
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        planID = try container.decode(UUID.self, forKey: .planID)
+        planRevision = try container.decode(Int.self, forKey: .planRevision)
+        planFingerprint = try container.decode(String.self, forKey: .planFingerprint)
+        scopeFingerprint = try container.decodeIfPresent(
+            String.self,
+            forKey: .scopeFingerprint
+        ) ?? ""
+        approvedAt = try container.decode(Date.self, forKey: .approvedAt)
+        approvedBy = try container.decode(String.self, forKey: .approvedBy)
     }
 }
 
@@ -483,6 +610,7 @@ nonisolated enum DerivedDeliveryState: String, CaseIterable, Codable, Sendable {
 nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var brief: FeatureBrief
+    var repositoryIdentity: DeliveryRepositoryIdentitySnapshot?
     var plan: DeliveryPlan?
     var attempts: [ExecutionAttempt]
     var evidenceFacts: [EvidenceFact]
@@ -491,9 +619,23 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
     var updatedAt: Date
     var stoppedAt: Date?
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case brief
+        case repositoryIdentity
+        case plan
+        case attempts
+        case evidenceFacts
+        case pullRequests
+        case createdAt
+        case updatedAt
+        case stoppedAt
+    }
+
     nonisolated init(
         id: UUID = UUID(),
         brief: FeatureBrief,
+        repositoryIdentity: DeliveryRepositoryIdentitySnapshot? = nil,
         plan: DeliveryPlan? = nil,
         attempts: [ExecutionAttempt] = [],
         evidenceFacts: [EvidenceFact] = [],
@@ -504,6 +646,7 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
     ) {
         self.id = id
         self.brief = brief
+        self.repositoryIdentity = repositoryIdentity
         self.plan = plan
         self.attempts = attempts
         self.evidenceFacts = evidenceFacts
@@ -511,5 +654,22 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.stoppedAt = stoppedAt
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        brief = try container.decode(FeatureBrief.self, forKey: .brief)
+        repositoryIdentity = try container.decodeIfPresent(
+            DeliveryRepositoryIdentitySnapshot.self,
+            forKey: .repositoryIdentity
+        )
+        plan = try container.decodeIfPresent(DeliveryPlan.self, forKey: .plan)
+        attempts = try container.decode([ExecutionAttempt].self, forKey: .attempts)
+        evidenceFacts = try container.decode([EvidenceFact].self, forKey: .evidenceFacts)
+        pullRequests = try container.decode([PullRequestRef].self, forKey: .pullRequests)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        stoppedAt = try container.decodeIfPresent(Date.self, forKey: .stoppedAt)
     }
 }
