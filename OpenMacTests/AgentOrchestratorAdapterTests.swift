@@ -328,6 +328,58 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("a discovered connection rejects a replacement daemon")
+    func discoveredConnectionRejectsReplacementDaemon() async throws {
+        let replacementHealth = Data(
+            """
+            {
+              "status": "ok",
+              "service": "agent-orchestrator-daemon",
+              "pid": 9812
+            }
+            """.utf8
+        )
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub("/healthz", data: replacementHealth),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs,
+                expectedDaemonPID: 4812
+            )
+
+        _ = try await backend.health()
+        do {
+            _ = try await backend.listProjects()
+            Issue.record("Expected replacement daemon rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed health response, got \(error)")
+                return
+            }
+            #expect(operation == .health)
+            #expect(reason.contains("9812"))
+            #expect(reason.contains("4812"))
+            #expect(reason.contains("Discover"))
+        }
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path) == [
+                "/healthz",
+                "/readyz",
+                "/api/v1/openapi.yaml",
+                "/healthz"
+            ]
+        )
+        #expect(!requests.contains { $0.path == "/api/v1/projects" })
+    }
+
     @Test("discovered PID must match the responding daemon")
     func discoveredPIDMismatchFailsClosed() async throws {
         let (backend, transport) =

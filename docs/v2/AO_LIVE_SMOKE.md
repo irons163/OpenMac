@@ -27,8 +27,10 @@ read the served OpenAPI contract until both probes pass, and accepts it only
 when the version and every project/session operation used by the adapter are
 present. Before using that cached compatibility result, each project or session
 operation rechecks the lightweight daemon probes. A changed PID must pass the
-full OpenAPI probe again. A missing or rejected run file never causes a remote
-connection; users can still enter a loopback URL manually.
+full OpenAPI probe again for a manually entered URL. A discovered connection
+rejects a changed PID and requires discovery to run again against the updated
+run file. A missing or rejected run file never causes a remote connection;
+users can still enter a loopback URL manually.
 
 ## Explicit isolated-session probe
 
