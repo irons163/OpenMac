@@ -18,7 +18,7 @@ window.
 
    ```bash
    cd ~/Downloads
-   shasum -a 256 -c OpenMac-0.1.0-test.1-macOS.zip.sha256
+   shasum -a 256 -c OpenMac-0.1.0-test.2-macOS.zip.sha256
    ```
 
 3. Unzip the archive and drag `OpenMac.app` to `/Applications`.
@@ -42,18 +42,20 @@ confirming the checksum and source. Do not disable Gatekeeper globally.
 
 ## Agent Orchestrator connection
 
-Choose **Delivery → Agent Orchestrator Connection…** and enter the loopback
-daemon URL. The captured development contract uses
-`http://127.0.0.1:3001`.
+Start the AO desktop app or daemon, then choose
+**Delivery → Agent Orchestrator Connection…**. OpenMac securely attempts to
+discover the running daemon from `~/.ao/running.json`; choose
+**Discover Running AO** to retry. You can also enter a loopback URL manually.
+The captured development contract uses `http://127.0.0.1:3001`.
 
-The connection screen verifies AO health, served API compatibility, and
-project discovery. It does not enable live dispatch yet: the captured AO
-contract does not expose a verifiable workspace permission or verification
-path, so OpenMac intentionally fails closed.
+The connection screen verifies the discovered process identity, AO health,
+served API compatibility, and project discovery. It does not enable live
+dispatch yet: the captured AO contract does not expose a verifiable workspace
+permission or verification path, so OpenMac intentionally fails closed.
 
 ## Package status
 
-- Version: `0.1.0 (1)`.
+- Version: `0.1.0 (2)`.
 - Minimum macOS: 14.0.
 - Architectures: arm64 and x86_64.
 - Signature: ad-hoc with hardened runtime.
