@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成；VS-11 封裝與本機 launch smoke 已完成，待 clean-source／乾淨測試機 smoke
+> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成；VS-11 clean-source test.2 與本機 launch smoke 已完成，待乾淨測試機 smoke
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -12,8 +12,12 @@ OpenMac v2 的定位是：
 目前 AO adapter 只依賴 slice 所需的 daemon contract，並將相容版本固定在
 `0.1.0-route-shell`。Captured fixtures 取自
 [`Untrivial-ai/agent-orchestrator`](https://github.com/Untrivial-ai/agent-orchestrator)
-revision `9caafbee89383c9bf7e904936eb88c48add2fa88`；本機尚未安裝或啟動 AO，
-因此不宣稱已完成真實 session smoke test。
+revision `9caafbee89383c9bf7e904936eb88c48add2fa88`。另已對 upstream revision
+`b58bae51bac08c9e48bded4c636e504863a93c21` 的隔離 daemon 通過 health、
+served OpenAPI 與 project discovery；session spawn 因缺少 AO runtime 要求的
+`tmux` 而在 upstream preflight 停止，未建立 session，因此不宣稱已完成真實
+session smoke test。Connection screen 會安全讀取 `~/.ao/running.json`，並將
+run-file PID 綁定到 health response；手動 URL 仍只接受 loopback。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
@@ -34,20 +38,22 @@ Control Center 也可匯出本機 funnel JSON；檔案只含里程碑 duration�
 計數，明確排除 brief／prompt、repository path、branch／commit、command／log
 及 PR URL。
 
-VS-11 將測試版本固定為 `0.1.0 (1)`、最低 macOS 14，產出 arm64／x86_64
-universal zip 與 SHA-256。Release build 以獨立 feature flag 開啟 v2 畫面，
-另有只接受 loopback URL 的 AO compatibility／project discovery probe。測試包
-使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章且未 notarized；
-封裝工具會拒絕未 commit 的 source。開放給受測者前仍須用 clean-source 包在
-乾淨 Mac 驗證 Gatekeeper onboarding。
+VS-11 的目前測試版本為 `0.1.0 (2)`、最低 macOS 14，產出 arm64／x86_64
+universal zip 與 SHA-256。由 clean commit
+`84610a2db899926939271193a37e2e70a2efa2b0` 產生的 archive 已通過 checksum、
+封裝前後簽章、架構與本機 launch smoke。Release build 以獨立 feature flag
+開啟 v2 畫面，另有安全 AO discovery 與 compatibility／project discovery
+probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章
+且未 notarized；開放給受測者前仍須在乾淨 Mac 驗證 Gatekeeper onboarding。
 
-本目錄包含五份執行文件：
+本目錄包含六份執行文件：
 
 - [產品規格](PRODUCT_SPEC.md)：目標使用者、核心流程、資料邊界、MVP 與驗證指標。
 - [功能凍結清單](FEATURE_FREEZE.md)：哪些既有能力保留、凍結、替換、延後或列為移除候選。
 - [兩週 vertical slice backlog](VERTICAL_SLICE_BACKLOG.md)：單人、十個工作日的交付順序與決策閘門。
 - [測試 build 安裝指南](TEST_BUILD_INSTALL.md)：checksum、Gatekeeper、五分鐘 fixture walkthrough 與 AO connection probe。
 - [AO live smoke](AO_LIVE_SMOKE.md)：對既有 loopback daemon 執行 opt-in adapter compatibility 與明確授權的 isolated-session smoke。
+- [Concierge validation](CONCIERGE_VALIDATION.md)：test.2 招募條件、30 分鐘觀察腳本、紀錄模板與早期停止條件。
 
 在 Day 10 決策閘門通過前：
 

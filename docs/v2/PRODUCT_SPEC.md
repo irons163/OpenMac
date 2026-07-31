@@ -238,11 +238,13 @@ read/write，或回報 `danger-full-access`，都不得建立 session。MVP funn
 只在本機由使用者主動存檔，且不包含 feature／task 內容、repository identity、
 commands、logs 或外部 URL。
 
-VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程，固定版本
-`0.1.0 (1)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
-build metadata。封裝前後的簽章、架構、最低系統版本與本機 launch smoke 已
-通過；目前仍是 ad-hoc signed、未 notarized，且尚待乾淨測試機完成首次啟動，
-因此安裝條件維持未勾選。
+VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程。目前版本
+`0.1.0 (2)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
+build metadata。由 clean commit
+`84610a2db899926939271193a37e2e70a2efa2b0` 產生的 test.2 已通過封裝前後
+簽章、架構、最低系統版本、checksum 與本機 launch smoke；目前仍是 ad-hoc
+signed、未 notarized，且尚待乾淨測試機完成首次啟動，因此安裝條件維持
+未勾選。
 
 ## 10. 安全與信任原則
 
