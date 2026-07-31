@@ -16,6 +16,14 @@ tools/test-agent-orchestrator-live.sh \
 The default probe calls AO health, reads the served OpenAPI version, and lists
 projects. OpenMac accepts only a loopback daemon URL.
 
+The in-app connection screen also attempts to discover the current upstream
+daemon through `~/.ao/running.json`. Discovery accepts only a regular file
+owned by the current user that is not group- or world-writable, does not follow
+a symbolic link, bounds the file size, validates the recorded PID is live, and
+constructs the URL from the recorded port using `127.0.0.1`. The subsequent
+health request must report the same PID. A missing or rejected run file never
+causes a remote connection; users can still enter a loopback URL manually.
+
 ## Explicit isolated-session probe
 
 Starting a session is opt-in because it creates an AO-managed worktree and
@@ -42,6 +50,9 @@ letting OpenMac mutate the system.
 On 2026-07-31, OpenMac was checked against upstream revision
 `b58bae51bac08c9e48bded4c636e504863a93c21`:
 
+- The upstream `running.json` shape and CLI daemon-identity check were captured
+  for secure local discovery without persisting the optional browser runtime
+  token.
 - `/healthz`, `/readyz`, served OpenAPI `0.1.0-route-shell`, and project
   discovery passed on an isolated daemon at `127.0.0.1:33001`.
 - AO project registration against a disposable Git repository passed.

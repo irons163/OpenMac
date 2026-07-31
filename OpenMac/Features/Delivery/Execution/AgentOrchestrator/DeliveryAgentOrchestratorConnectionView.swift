@@ -19,7 +19,7 @@ nonisolated enum DeliveryAgentOrchestratorConnectionState:
 @MainActor
 final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
     typealias BackendFactory =
-        @Sendable (URL) throws -> any ExecutionBackend
+        @Sendable (URL, Int?) throws -> any ExecutionBackend
 
     static let baseURLDefaultsKey =
         "delivery.agentOrchestrator.baseURL"
@@ -29,15 +29,22 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
     @Published private(set) var state:
         DeliveryAgentOrchestratorConnectionState = .idle
     @Published private(set) var projectNames: [String] = []
+    @Published private(set) var discoveryMessage: String?
 
     private let backendFactory: BackendFactory
     private let defaults: UserDefaults
+    private let discovery: AgentOrchestratorDaemonDiscovery
+    private var discoveredEndpoint: AgentOrchestratorDaemonEndpoint?
 
     init(
         defaults: UserDefaults = .standard,
-        backendFactory: @escaping BackendFactory = { baseURL in
+        discovery: AgentOrchestratorDaemonDiscovery = .init(),
+        backendFactory: @escaping BackendFactory = {
+            baseURL,
+            expectedDaemonPID in
             let configuration = try AgentOrchestratorBackendConfiguration(
-                baseURL: baseURL
+                baseURL: baseURL,
+                expectedDaemonPID: expectedDaemonPID
             )
             return AgentOrchestratorExecutionBackend(
                 configuration: configuration
@@ -46,9 +53,33 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
     ) {
         self.defaults = defaults
         self.backendFactory = backendFactory
-        baseURLText = defaults.string(
+        self.discovery = discovery
+
+        let savedBaseURL = defaults.string(
             forKey: Self.baseURLDefaultsKey
-        ) ?? Self.defaultBaseURL
+        )
+        do {
+            let endpoint = try discovery.discover()
+            discoveredEndpoint = endpoint
+            baseURLText = savedBaseURL
+                ?? endpoint?.baseURL.absoluteString
+                ?? Self.defaultBaseURL
+            if let endpoint {
+                if let savedBaseURL,
+                   let savedURL = URL(string: savedBaseURL),
+                   !Self.sameEndpoint(savedURL, endpoint.baseURL) {
+                    discoveryMessage =
+                        "Discovered a running AO daemon on port \(endpoint.baseURL.port ?? 0). Choose Discover Running AO to use it."
+                } else {
+                    discoveryMessage =
+                        "Discovered a running AO daemon on port \(endpoint.baseURL.port ?? 0)."
+                }
+            }
+        } catch {
+            discoveredEndpoint = nil
+            baseURLText = savedBaseURL ?? Self.defaultBaseURL
+            discoveryMessage = Self.errorMessage(error)
+        }
     }
 
     var isConnecting: Bool {
@@ -68,6 +99,26 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
         }
     }
 
+    func discoverDaemon() {
+        state = .idle
+        projectNames = []
+        do {
+            guard let endpoint = try discovery.discover() else {
+                discoveredEndpoint = nil
+                discoveryMessage =
+                    "No running AO daemon was discovered. Start AO or enter its loopback URL."
+                return
+            }
+            discoveredEndpoint = endpoint
+            baseURLText = endpoint.baseURL.absoluteString
+            discoveryMessage =
+                "Discovered a running AO daemon on port \(endpoint.baseURL.port ?? 0)."
+        } catch {
+            discoveredEndpoint = nil
+            discoveryMessage = Self.errorMessage(error)
+        }
+    }
+
     func connect() async {
         guard !isConnecting else { return }
         state = .connecting
@@ -82,7 +133,17 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
                         URL(fileURLWithPath: trimmedURL)
                     )
             }
-            let backend = try backendFactory(baseURL)
+            let expectedPID: Int?
+            if let discoveredEndpoint,
+               Self.sameEndpoint(
+                   baseURL,
+                   discoveredEndpoint.baseURL
+               ) {
+                expectedPID = discoveredEndpoint.pid
+            } else {
+                expectedPID = nil
+            }
+            let backend = try backendFactory(baseURL, expectedPID)
             let health = try await backend.health()
             guard health.state == .ready else {
                 throw ExecutionBackendError.unavailable(
@@ -113,6 +174,20 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
             )
         }
     }
+
+    private static func sameEndpoint(_ lhs: URL, _ rhs: URL) -> Bool {
+        func normalized(_ url: URL) -> String {
+            url.absoluteString.hasSuffix("/")
+                ? String(url.absoluteString.dropLast())
+                : url.absoluteString
+        }
+        return normalized(lhs) == normalized(rhs)
+    }
+
+    private static func errorMessage(_ error: any Error) -> String {
+        (error as? any LocalizedError)?.errorDescription
+            ?? error.localizedDescription
+    }
 }
 
 struct DeliveryAgentOrchestratorConnectionScene: View {
@@ -142,6 +217,12 @@ struct DeliveryAgentOrchestratorConnectionScene: View {
             .disabled(model.isConnecting)
 
             HStack {
+                Button(L10n.string("Discover Running AO")) {
+                    model.discoverDaemon()
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isConnecting)
+
                 Button(
                     model.isConnecting
                         ? L10n.string("Connecting…")
@@ -154,6 +235,13 @@ struct DeliveryAgentOrchestratorConnectionScene: View {
 
                 Text(model.statusMessage)
                     .foregroundStyle(statusColor)
+                    .textSelection(.enabled)
+            }
+
+            if let discoveryMessage = model.discoveryMessage {
+                Text(discoveryMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
 

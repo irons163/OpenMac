@@ -143,7 +143,8 @@ private enum AgentOrchestratorAdapterTestFixture {
         stubs: [CapturedAOStub],
         supportedVersions: Set<String> = [
             AgentOrchestratorBackendConfiguration.capturedAPIVersion
-        ]
+        ],
+        expectedDaemonPID: Int? = nil
     ) throws -> (
         AgentOrchestratorExecutionBackend,
         CapturedAOTransport
@@ -151,7 +152,8 @@ private enum AgentOrchestratorAdapterTestFixture {
         let transport = CapturedAOTransport(stubs: stubs)
         let configuration = try AgentOrchestratorBackendConfiguration(
             baseURL: URL(string: "http://127.0.0.1:3001")!,
-            supportedAPIVersions: supportedVersions
+            supportedAPIVersions: supportedVersions,
+            expectedDaemonPID: expectedDaemonPID
         )
         return (
             AgentOrchestratorExecutionBackend(
@@ -193,7 +195,8 @@ struct AgentOrchestratorAdapterTests {
     @Test("captured health and OpenAPI version produce ready health")
     func compatibleHealth() async throws {
         let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
-            stubs: try AgentOrchestratorAdapterTestFixture.commonStubs()
+            stubs: try AgentOrchestratorAdapterTestFixture.commonStubs(),
+            expectedDaemonPID: 4812
         )
 
         let health = try await backend.health()
@@ -205,6 +208,31 @@ struct AgentOrchestratorAdapterTests {
                 == AgentOrchestratorBackendConfiguration.capturedAPIVersion
         )
         #expect(health.message == nil)
+    }
+
+    @Test("discovered PID must match the responding daemon")
+    func discoveredPIDMismatchFailsClosed() async throws {
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: try AgentOrchestratorAdapterTestFixture
+                    .commonStubs(),
+                expectedDaemonPID: 9999
+            )
+
+        do {
+            _ = try await backend.health()
+            Issue.record("Expected discovered PID mismatch")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed health response, got \(error)")
+                return
+            }
+            #expect(operation == .health)
+            #expect(reason.contains("does not match"))
+            #expect(reason.contains("9999"))
+        }
+        let requests = await transport.requests()
+        #expect(requests.map(\.path) == ["/healthz"])
     }
 
     @Test("unsupported served API version degrades with an actionable message")
@@ -664,6 +692,12 @@ struct AgentOrchestratorAdapterTests {
         #expect(throws: AgentOrchestratorAdapterConfigurationError.self) {
             _ = try AgentOrchestratorBackendConfiguration(
                 baseURL: URL(string: "https://ao.example.com")!
+            )
+        }
+        #expect(throws: AgentOrchestratorAdapterConfigurationError.self) {
+            _ = try AgentOrchestratorBackendConfiguration(
+                baseURL: URL(string: "http://127.0.0.1:3001")!,
+                expectedDaemonPID: 0
             )
         }
     }

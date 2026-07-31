@@ -11,6 +11,7 @@ nonisolated enum AgentOrchestratorAdapterConfigurationError:
     case nonLoopbackBaseURL(URL)
     case missingSupportedAPIVersion
     case invalidHarness
+    case invalidExpectedDaemonPID(Int)
 
     nonisolated var errorDescription: String? {
         switch self {
@@ -22,6 +23,8 @@ nonisolated enum AgentOrchestratorAdapterConfigurationError:
             return "At least one supported Agent Orchestrator API version is required."
         case .invalidHarness:
             return "The Agent Orchestrator harness identifier is empty."
+        case let .invalidExpectedDaemonPID(pid):
+            return "The expected Agent Orchestrator process ID is invalid: \(pid)."
         }
     }
 }
@@ -35,12 +38,14 @@ nonisolated struct AgentOrchestratorBackendConfiguration: Sendable {
     let supportedAPIVersions: Set<String>
     let harness: String
     let requestTimeout: TimeInterval
+    let expectedDaemonPID: Int?
 
     nonisolated init(
         baseURL: URL,
         supportedAPIVersions: Set<String> = [capturedAPIVersion],
         harness: String = "codex",
-        requestTimeout: TimeInterval = 10
+        requestTimeout: TimeInterval = 10,
+        expectedDaemonPID: Int? = nil
     ) throws {
         guard let components = URLComponents(
             url: baseURL,
@@ -73,11 +78,17 @@ nonisolated struct AgentOrchestratorBackendConfiguration: Sendable {
         guard !normalizedHarness.isEmpty else {
             throw AgentOrchestratorAdapterConfigurationError.invalidHarness
         }
+        if let expectedDaemonPID,
+           expectedDaemonPID <= 0 {
+            throw AgentOrchestratorAdapterConfigurationError
+                .invalidExpectedDaemonPID(expectedDaemonPID)
+        }
 
         self.baseURL = baseURL
         self.supportedAPIVersions = supportedAPIVersions
         self.harness = normalizedHarness
         self.requestTimeout = max(1, requestTimeout)
+        self.expectedDaemonPID = expectedDaemonPID
     }
 }
 
@@ -684,6 +695,13 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             throw ExecutionBackendError.malformedResponse(
                 operation: .health,
                 reason: "The daemon identity or liveness payload is invalid."
+            )
+        }
+        if let expectedPID = configuration.expectedDaemonPID,
+           probe.pid != expectedPID {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .health,
+                reason: "The AO daemon process ID \(probe.pid) does not match the discovered process ID \(expectedPID). Discover the running daemon again."
             )
         }
 
