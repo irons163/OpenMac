@@ -234,6 +234,53 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("concurrent first operations share one compatibility probe")
+    func concurrentColdStartCoalescesCompatibilityProbe() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs,
+                responseDelayNanoseconds: 5_000_000
+            )
+
+        async let first = backend.listProjects()
+        async let second = backend.listProjects()
+        let projectLists = try await (first, second)
+
+        #expect(!projectLists.0.isEmpty)
+        #expect(projectLists.0 == projectLists.1)
+        let requests = await transport.requests()
+        #expect(
+            requests.filter { $0.path == "/healthz" }.count == 1
+        )
+        #expect(
+            requests.filter { $0.path == "/readyz" }.count == 1
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/openapi.yaml"
+            }.count == 1
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/projects"
+            }.count == 2
+        )
+    }
+
     @Test("cached API compatibility revalidates the daemon identity")
     func cachedCompatibilityRevalidatesIdentity() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
