@@ -59,22 +59,31 @@ nonisolated struct ExecutionBackendHealth: Equatable, Sendable {
     }
 }
 
+nonisolated enum ExecutionProjectIsolation: String, Sendable {
+    case isolatedWorkspace
+    case sharedWorkspace
+    case unknown
+}
+
 nonisolated struct ExecutionProject: Identifiable, Equatable, Sendable {
     let id: ExecutionProjectID
     let name: String
     let repositoryURL: URL?
     let workspaceHint: String?
+    let isolation: ExecutionProjectIsolation
 
     nonisolated init(
         id: ExecutionProjectID,
         name: String,
         repositoryURL: URL? = nil,
-        workspaceHint: String? = nil
+        workspaceHint: String? = nil,
+        isolation: ExecutionProjectIsolation = .unknown
     ) {
         self.id = id
         self.name = name
         self.repositoryURL = repositoryURL
         self.workspaceHint = workspaceHint
+        self.isolation = isolation
     }
 }
 
@@ -89,6 +98,7 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
     let title: String
     let instructions: String
     let baseBranch: String
+    let baseCommitIdentifier: String
 
     nonisolated init(
         requestID: UUID,
@@ -100,7 +110,8 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
         approvalFingerprint: String,
         title: String,
         instructions: String,
-        baseBranch: String
+        baseBranch: String,
+        baseCommitIdentifier: String
     ) {
         self.requestID = requestID
         self.projectID = projectID
@@ -112,6 +123,7 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
         self.title = title
         self.instructions = instructions
         self.baseBranch = baseBranch
+        self.baseCommitIdentifier = baseCommitIdentifier
     }
 }
 
@@ -309,7 +321,12 @@ nonisolated enum ExecutionBackendOperation: String, Hashable, Sendable {
     case stop
 }
 
-nonisolated enum ExecutionBackendError: Error, Equatable, Sendable {
+nonisolated enum ExecutionBackendError:
+    Error,
+    Equatable,
+    LocalizedError,
+    Sendable
+{
     case unavailable(String)
     case unauthorized
     case projectNotFound(ExecutionProjectID)
@@ -318,6 +335,25 @@ nonisolated enum ExecutionBackendError: Error, Equatable, Sendable {
     case conflict(String)
     case malformedResponse(operation: ExecutionBackendOperation, reason: String)
     case timedOut(ExecutionBackendOperation)
+
+    nonisolated var errorDescription: String? {
+        switch self {
+        case let .unavailable(message), let .rejected(message):
+            return message
+        case .unauthorized:
+            return "The execution backend rejected authorization."
+        case let .projectNotFound(projectID):
+            return "Execution project \(projectID.rawValue) was not found."
+        case let .executionNotFound(executionID):
+            return "Execution \(executionID.rawValue) was not found."
+        case let .conflict(message):
+            return message
+        case let .malformedResponse(operation, reason):
+            return "The \(operation.rawValue) response was malformed: \(reason)"
+        case let .timedOut(operation):
+            return "The execution backend timed out during \(operation.rawValue)."
+        }
+    }
 }
 
 nonisolated protocol ExecutionBackend: Sendable {

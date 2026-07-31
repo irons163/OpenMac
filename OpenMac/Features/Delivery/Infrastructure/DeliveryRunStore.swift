@@ -175,9 +175,47 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
             fileURL: fileURL
         )
     }
+
+    nonisolated func prepareReadyDispatch(
+        runID: UUID,
+        backendID: String,
+        projectID: ExecutionProjectID,
+        requestedAt: Date
+    ) async throws -> DeliveryDispatchPreparation {
+        try await Self.coordinator.prepareReadyDispatch(
+            runID: runID,
+            backendID: backendID,
+            projectID: projectID,
+            requestedAt: requestedAt,
+            fileURL: fileURL
+        )
+    }
+
+    nonisolated func recordDispatchOutcomes(
+        _ outcomes: [DeliveryDispatchAttemptOutcome],
+        runID: UUID
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.recordDispatchOutcomes(
+            outcomes,
+            runID: runID,
+            fileURL: fileURL
+        )
+    }
+
+    nonisolated func stopFutureDispatch(
+        runID: UUID,
+        stoppedAt: Date
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.stopFutureDispatch(
+            runID: runID,
+            stoppedAt: stoppedAt,
+            fileURL: fileURL
+        )
+    }
 }
 
 extension FileDeliveryRunStore: DeliveryPlanReviewPersisting {}
+extension FileDeliveryRunStore: DeliveryDispatchPersisting {}
 
 private actor DeliveryRunFileCoordinator {
     func load(from fileURL: URL) throws -> DeliveryRunSnapshot? {
@@ -344,6 +382,366 @@ private actor DeliveryRunFileCoordinator {
             savedAt: approvedAt,
             fileURL: fileURL
         )
+    }
+
+    func prepareReadyDispatch(
+        runID: UUID,
+        backendID: String,
+        projectID: ExecutionProjectID,
+        requestedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryDispatchPreparation {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard requestedAt >= latest.savedAt else {
+            throw DeliveryDispatchError.dispatchTimestampPrecedesPersistedState
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+
+        let trimmedBackendID = backendID.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let trimmedProjectID = projectID.rawValue.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !trimmedBackendID.isEmpty, !trimmedProjectID.isEmpty else {
+            throw DeliveryDispatchError.backendIdentifierUnavailable
+        }
+
+        var run = latest.runs[runIndex]
+        guard run.stoppedAt == nil else {
+            throw DeliveryDispatchError.runStopped(runID)
+        }
+        guard let plan = run.plan,
+              let approval = plan.approval else {
+            throw DeliveryDispatchError.planNotApproved(runID)
+        }
+        let validationIssues = DeliveryRunValidator.validate(run)
+        guard validationIssues.isEmpty else {
+            throw DeliveryDispatchError.invalidRun(
+                runID: runID,
+                issueCodes: validationIssues.map(\.code)
+            )
+        }
+        guard let repositoryIdentity = run.repositoryIdentity else {
+            throw DeliveryDispatchError.missingRepositoryIdentity(runID)
+        }
+        try DeliveryPlanningRepositoryContext.validateCurrentResolvedIdentity(
+            repositoryIdentity,
+            baseBranch: run.brief.repository.baseBranch
+        )
+
+        let resumableAttempts = run.attempts.filter {
+            $0.externalSession == nil
+                && ($0.status == .queued || $0.status == .unknown)
+        }
+        if !resumableAttempts.isEmpty {
+            let reservations = try resumableAttempts.map { attempt in
+                guard attempt.backendID == trimmedBackendID,
+                      attempt.projectID == trimmedProjectID,
+                      let task = plan.tasks.first(where: {
+                          $0.id == attempt.taskID
+                      }) else {
+                    throw DeliveryDispatchError.attemptReservationConflict(
+                        attempt.id
+                    )
+                }
+                return DeliveryDispatchReservation(
+                    runID: runID,
+                    attemptID: attempt.id,
+                    request: makeStartRequest(
+                        run: run,
+                        plan: plan,
+                        approval: approval,
+                        repositoryIdentity: repositoryIdentity,
+                        task: task,
+                        attempt: attempt,
+                        projectID: projectID
+                    )
+                )
+            }
+            return DeliveryDispatchPreparation(
+                snapshot: latest,
+                reservations: reservations.sorted {
+                    taskOrder(
+                        $0.request.taskID,
+                        in: plan
+                    ) < taskOrder(
+                        $1.request.taskID,
+                        in: plan
+                    )
+                }
+            )
+        }
+
+        let readyTaskIDs = DeliveryDispatchStateReducer.readyTaskIDs(in: run)
+        guard !readyTaskIDs.isEmpty else {
+            return DeliveryDispatchPreparation(
+                snapshot: latest,
+                reservations: []
+            )
+        }
+
+        var reservations: [DeliveryDispatchReservation] = []
+        for taskID in readyTaskIDs {
+            guard let task = plan.tasks.first(where: { $0.id == taskID }) else {
+                continue
+            }
+            let sequence = run.attempts
+                .filter { $0.taskID == taskID }
+                .map(\.sequence)
+                .max()
+                .map { $0 + 1 } ?? 1
+            let attempt = ExecutionAttempt(
+                taskID: taskID,
+                planID: plan.id,
+                planRevision: plan.revision,
+                sequence: sequence,
+                backendID: trimmedBackendID,
+                projectID: trimmedProjectID,
+                status: .queued,
+                createdAt: requestedAt,
+                dispatchRequestedAt: requestedAt
+            )
+            run.attempts.append(attempt)
+            reservations.append(
+                DeliveryDispatchReservation(
+                    runID: runID,
+                    attemptID: attempt.id,
+                    request: makeStartRequest(
+                        run: run,
+                        plan: plan,
+                        approval: approval,
+                        repositoryIdentity: repositoryIdentity,
+                        task: task,
+                        attempt: attempt,
+                        projectID: projectID
+                    )
+                )
+            )
+        }
+        run.updatedAt = requestedAt
+
+        var runs = latest.runs
+        runs[runIndex] = run
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: requestedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return DeliveryDispatchPreparation(
+            snapshot: updated,
+            reservations: reservations
+        )
+    }
+
+    func recordDispatchOutcomes(
+        _ outcomes: [DeliveryDispatchAttemptOutcome],
+        runID: UUID,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+        guard !outcomes.isEmpty else {
+            return latest
+        }
+
+        var seenAttemptIDs: Set<UUID> = []
+        for outcome in outcomes
+        where !seenAttemptIDs.insert(outcome.attemptID).inserted {
+            throw DeliveryDispatchError.duplicateOutcome(outcome.attemptID)
+        }
+
+        var run = latest.runs[runIndex]
+        var changed = false
+        var latestOutcomeAt = latest.savedAt
+        for outcome in outcomes {
+            guard let attemptIndex = run.attempts.firstIndex(where: {
+                $0.id == outcome.attemptID
+            }) else {
+                throw DeliveryDispatchError.missingAttempt(outcome.attemptID)
+            }
+            var attempt = run.attempts[attemptIndex]
+            guard attempt.idempotencyKey == outcome.requestID else {
+                throw DeliveryDispatchError.attemptReservationConflict(
+                    attempt.id
+                )
+            }
+            guard outcome.recordedAt >= attempt.createdAt,
+                  outcome.recordedAt >= (attempt.dispatchRequestedAt
+                      ?? attempt.createdAt) else {
+                throw DeliveryDispatchError
+                    .dispatchTimestampPrecedesPersistedState
+            }
+            latestOutcomeAt = max(latestOutcomeAt, outcome.recordedAt)
+
+            switch outcome {
+            case let .started(_, _, receipt, recordedAt):
+                guard receipt.requestID == attempt.idempotencyKey,
+                      !receipt.executionID.rawValue.trimmingCharacters(
+                          in: .whitespacesAndNewlines
+                      ).isEmpty,
+                      let projectID = attempt.projectID else {
+                    throw DeliveryDispatchError.malformedStartReceipt(
+                        attempt.id
+                    )
+                }
+                let session = ExternalSessionRef(
+                    backendID: attempt.backendID,
+                    projectID: projectID,
+                    sessionID: receipt.executionID.rawValue
+                )
+                if let existingSession = attempt.externalSession {
+                    guard existingSession == session else {
+                        throw DeliveryDispatchError.attemptReservationConflict(
+                            attempt.id
+                        )
+                    }
+                    continue
+                }
+                attempt.externalSession = session
+                attempt.status = .running
+                attempt.dispatchFailureReason = nil
+                attempt.startedAt = recordedAt
+                changed = true
+            case let .failed(_, _, reason, _):
+                guard attempt.externalSession == nil else {
+                    continue
+                }
+                let normalizedReason = normalizedDispatchFailure(reason)
+                if attempt.dispatchFailureReason != normalizedReason
+                    || attempt.status != .queued {
+                    attempt.status = .queued
+                    attempt.dispatchFailureReason = normalizedReason
+                    changed = true
+                }
+            }
+            run.attempts[attemptIndex] = attempt
+        }
+
+        guard changed else {
+            return latest
+        }
+        run.updatedAt = max(run.updatedAt, latestOutcomeAt)
+        var runs = latest.runs
+        runs[runIndex] = run
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: latestOutcomeAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
+    func stopFutureDispatch(
+        runID: UUID,
+        stoppedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+        if latest.runs[runIndex].stoppedAt != nil {
+            return latest
+        }
+        guard stoppedAt >= latest.savedAt else {
+            throw DeliveryDispatchError.dispatchTimestampPrecedesPersistedState
+        }
+
+        var runs = latest.runs
+        runs[runIndex].stoppedAt = stoppedAt
+        runs[runIndex].updatedAt = stoppedAt
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: stoppedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
+    private func makeStartRequest(
+        run: DeliveryRun,
+        plan: DeliveryPlan,
+        approval: DeliveryPlanApproval,
+        repositoryIdentity: DeliveryRepositoryIdentitySnapshot,
+        task: DeliveryTask,
+        attempt: ExecutionAttempt,
+        projectID: ExecutionProjectID
+    ) -> ExecutionStartRequest {
+        ExecutionStartRequest(
+            requestID: attempt.idempotencyKey,
+            projectID: projectID,
+            deliveryRunID: run.id,
+            taskID: task.id,
+            planID: plan.id,
+            planRevision: plan.revision,
+            approvalFingerprint: approval.scopeFingerprint,
+            title: task.title,
+            instructions: task.workerPrompt,
+            baseBranch: run.brief.repository.baseBranch,
+            baseCommitIdentifier: repositoryIdentity.baseCommitIdentifier
+        )
+    }
+
+    private func taskOrder(_ taskID: UUID, in plan: DeliveryPlan) -> Int {
+        plan.tasks.firstIndex(where: { $0.id == taskID }) ?? Int.max
+    }
+
+    private func normalizedDispatchFailure(_ reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Unknown backend start failure."
+        }
+        return String(trimmed.prefix(2_048))
     }
 
     private func loadReviewSnapshot(

@@ -436,6 +436,7 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
     let planRevision: Int
     let sequence: Int
     let backendID: String
+    let projectID: String?
     let idempotencyKey: UUID
     var status: ExecutionAttemptStatus
     var externalSession: ExternalSessionRef?
@@ -453,6 +454,7 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         planRevision: Int,
         sequence: Int,
         backendID: String,
+        projectID: String? = nil,
         idempotencyKey: UUID = UUID(),
         status: ExecutionAttemptStatus = .queued,
         externalSession: ExternalSessionRef? = nil,
@@ -469,6 +471,7 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         self.planRevision = planRevision
         self.sequence = sequence
         self.backendID = backendID
+        self.projectID = projectID
         self.idempotencyKey = idempotencyKey
         self.status = status
         self.externalSession = externalSession

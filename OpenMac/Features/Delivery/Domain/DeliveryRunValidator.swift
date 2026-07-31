@@ -16,8 +16,10 @@ nonisolated enum DeliveryRunValidationIssueCode: String, Equatable, Sendable {
     case duplicateAttemptSequence
     case duplicateAttemptIdempotencyKey
     case multipleActiveAttempts
+    case invalidAttemptDispatchBinding
     case reusedExternalSession
     case sessionBackendMismatch
+    case sessionProjectMismatch
     case duplicateEvidenceFactID
     case duplicateRawObservationID
     case missingEvidenceTask
@@ -312,6 +314,42 @@ nonisolated enum DeliveryRunValidator {
                 )
             }
 
+            let backendID = attempt.backendID.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let projectID = attempt.projectID?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let sessionIdentityIsEmpty = attempt.externalSession.map {
+                $0.backendID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || $0.projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || $0.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            } ?? false
+            let statusRequiresSession: Bool
+            switch attempt.status {
+            case .running, .blocked, .succeeded, .failed, .stopped:
+                statusRequiresSession = true
+            case .queued, .unknown:
+                statusRequiresSession = false
+            }
+            if backendID.isEmpty
+                || projectID?.isEmpty != false
+                || attempt.dispatchRequestedAt == nil
+                || sessionIdentityIsEmpty
+                || (statusRequiresSession && attempt.externalSession == nil)
+                || (attempt.status == .queued && attempt.externalSession != nil)
+                || (attempt.dispatchFailureReason != nil
+                    && attempt.externalSession != nil) {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidAttemptDispatchBinding,
+                        message: "Execution attempts must bind a dispatch request, backend project, status, and external session consistently.",
+                        taskID: attempt.taskID,
+                        attemptID: attempt.id
+                    )
+                )
+            }
+
             if attempt.sequence < 1 {
                 issues.append(
                     DeliveryRunValidationIssue(
@@ -356,6 +394,16 @@ nonisolated enum DeliveryRunValidator {
                         DeliveryRunValidationIssue(
                             code: .sessionBackendMismatch,
                             message: "The external session backend does not match its execution attempt.",
+                            taskID: attempt.taskID,
+                            attemptID: attempt.id
+                        )
+                    )
+                }
+                if session.projectID != attempt.projectID {
+                    issues.append(
+                        DeliveryRunValidationIssue(
+                            code: .sessionProjectMismatch,
+                            message: "The external session project does not match its execution attempt.",
                             taskID: attempt.taskID,
                             attemptID: attempt.id
                         )

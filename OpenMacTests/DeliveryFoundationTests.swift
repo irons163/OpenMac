@@ -153,6 +153,7 @@ private enum DeliveryFoundationFixture {
             planRevision: 1,
             sequence: sequence,
             backendID: "fixture",
+            projectID: "fixture-project",
             idempotencyKey: requestID,
             status: status,
             externalSession: session,
@@ -178,7 +179,8 @@ private enum DeliveryFoundationFixture {
             approvalFingerprint: "fixture-plan-sha256",
             title: title,
             instructions: "Implement the approved task and return facts.",
-            baseBranch: "main"
+            baseBranch: "main",
+            baseCommitIdentifier: String(repeating: "a", count: 40)
         )
     }
 }
