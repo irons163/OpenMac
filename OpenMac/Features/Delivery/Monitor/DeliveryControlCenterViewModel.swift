@@ -7,6 +7,7 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         case idle
         case runningFixture
         case reconciling
+        case verifyingXcode
         case retrying
         case stopping
     }
@@ -23,6 +24,8 @@ final class DeliveryControlCenterViewModel: ObservableObject {
     private let persistence: FileDeliveryRunStore
     private let backendFactory: BackendFactory
     private let now: @Sendable () -> Date
+    private let xcodeVerificationCoordinator:
+        DeliveryXcodeVerificationCoordinator
     private var configuredRunID: UUID?
     private var dispatcher: DeliveryDispatcher?
     private var reconciler: DeliveryExecutionReconciler?
@@ -33,11 +36,18 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         backendFactory: @escaping BackendFactory = {
             try DeliveryControlCenterViewModel.makeFixtureBackend(for: $0)
         },
+        xcodeVerifier: XcodeVerifier = XcodeVerifier(),
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.persistence = persistence
         self.backendFactory = backendFactory
         self.now = now
+        xcodeVerificationCoordinator =
+            DeliveryXcodeVerificationCoordinator(
+                store: persistence,
+                verifier: xcodeVerifier,
+                now: now
+            )
     }
 
     var isBusy: Bool {
@@ -67,6 +77,10 @@ final class DeliveryControlCenterViewModel: ObservableObject {
                 && !$0.isFactStreamExhausted
                 && [.queued, .running, .blocked, .unknown].contains($0.status)
         }
+    }
+
+    var canVerifyXcode: Bool {
+        !isBusy && nextXcodeVerificationTarget() != nil
     }
 
     func load() async {
@@ -102,6 +116,35 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         do {
             try configureServicesIfNeeded()
             try await reconcileSelectedRun(runID: runID)
+        } catch {
+            errorMessage = error.localizedDescription
+            try? await reloadSelectedRun()
+        }
+    }
+
+    func verifyXcode() async {
+        guard canVerifyXcode,
+              let runID = run?.id,
+              let target = nextXcodeVerificationTarget() else {
+            return
+        }
+        activity = .verifyingXcode
+        errorMessage = nil
+        statusMessage = nil
+        defer { activity = .idle }
+        do {
+            let report = try await xcodeVerificationCoordinator.verify(
+                runID: runID,
+                taskID: target.taskID,
+                kind: target.kind
+            )
+            try await apply(snapshot: report.snapshot)
+            statusMessage =
+                "Xcode \(target.kind.rawValue) for \(target.title) "
+                + (report.record.exitCode == 0
+                    && !report.record.timedOut
+                    ? "passed."
+                    : "failed with exit \(report.record.exitCode).")
         } catch {
             errorMessage = error.localizedDescription
             try? await reloadSelectedRun()
@@ -272,6 +315,60 @@ final class DeliveryControlCenterViewModel: ObservableObject {
                 "Reconcile completed with "
                 + "\(report.failuresByAttemptID.count) session(s) needing attention."
         }
+    }
+
+    private struct XcodeVerificationTarget {
+        let taskID: UUID
+        let title: String
+        let kind: XcodeVerificationKind
+    }
+
+    private func nextXcodeVerificationTarget()
+        -> XcodeVerificationTarget?
+    {
+        guard let run, let plan = run.plan else { return nil }
+        let attempts = DeliveryDispatchStateReducer
+            .latestAttemptsByTaskID(in: run)
+        var latestEvidence: [String: EvidenceFact] = [:]
+        for fact in run.evidenceFacts {
+            let key =
+                "\(fact.attemptID.uuidString):\(fact.requirementID.uuidString)"
+            if let current = latestEvidence[key],
+               current.receivedAt > fact.receivedAt
+                    || (current.receivedAt == fact.receivedAt
+                        && current.id.uuidString > fact.id.uuidString) {
+                continue
+            }
+            latestEvidence[key] = fact
+        }
+        for task in plan.tasks {
+            guard let attempt = attempts[task.id],
+                  attempt.status == .succeeded else {
+                continue
+            }
+            for kind in [
+                XcodeVerificationKind.build,
+                XcodeVerificationKind.test
+            ] {
+                let requirements = task.evidenceRequirements.filter {
+                    $0.kind == kind.evidenceKind
+                }
+                guard !requirements.isEmpty,
+                      requirements.contains(where: { requirement in
+                          latestEvidence[
+                              "\(attempt.id.uuidString):\(requirement.id.uuidString)"
+                          ]?.result != .passed
+                      }) else {
+                    continue
+                }
+                return XcodeVerificationTarget(
+                    taskID: task.id,
+                    title: task.title,
+                    kind: kind
+                )
+            }
+        }
+        return nil
     }
 
     private func configureServicesIfNeeded() throws {

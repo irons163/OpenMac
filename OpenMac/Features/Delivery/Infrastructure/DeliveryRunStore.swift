@@ -247,6 +247,23 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
         )
     }
 
+    nonisolated func recordXcodeVerification(
+        _ record: XcodeVerificationRecord,
+        runID: UUID,
+        attemptID: UUID,
+        requirementIDs: [UUID],
+        receivedAt: Date
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.recordXcodeVerification(
+            record,
+            runID: runID,
+            attemptID: attemptID,
+            requirementIDs: requirementIDs,
+            receivedAt: receivedAt,
+            fileURL: fileURL
+        )
+    }
+
     nonisolated func stopFutureDispatch(
         runID: UUID,
         stoppedAt: Date
@@ -262,6 +279,7 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
 extension FileDeliveryRunStore: DeliveryPlanReviewPersisting {}
 extension FileDeliveryRunStore: DeliveryDispatchPersisting {}
 extension FileDeliveryRunStore: DeliveryExecutionFactPersisting {}
+extension FileDeliveryRunStore: DeliveryXcodeVerificationPersisting {}
 
 private actor DeliveryRunFileCoordinator {
     func load(from fileURL: URL) throws -> DeliveryRunSnapshot? {
@@ -655,7 +673,14 @@ private actor DeliveryRunFileCoordinator {
                       !receipt.executionID.rawValue.trimmingCharacters(
                           in: .whitespacesAndNewlines
                       ).isEmpty,
-                      let projectID = attempt.projectID else {
+                      let projectID = attempt.projectID,
+                      receipt.branch?.trimmingCharacters(
+                          in: .whitespacesAndNewlines
+                      ).isEmpty != true,
+                      receipt.verificationWorkspaceURL.map({
+                          $0.isFileURL
+                              && ($0.path as NSString).isAbsolutePath
+                      }) != false else {
                     throw DeliveryDispatchError.malformedStartReceipt(
                         attempt.id
                     )
@@ -663,7 +688,10 @@ private actor DeliveryRunFileCoordinator {
                 let session = ExternalSessionRef(
                     backendID: attempt.backendID,
                     projectID: projectID,
-                    sessionID: receipt.executionID.rawValue
+                    sessionID: receipt.executionID.rawValue,
+                    branch: receipt.branch,
+                    verificationWorkspacePath:
+                        receipt.verificationWorkspaceURL?.standardizedFileURL.path
                 )
                 if let existingSession = attempt.externalSession {
                     guard existingSession == session else {
@@ -869,6 +897,165 @@ private actor DeliveryRunFileCoordinator {
             schemaVersion: latest.schemaVersion,
             storeRevision: latest.storeRevision + 1,
             savedAt: requestedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
+    func recordXcodeVerification(
+        _ record: XcodeVerificationRecord,
+        runID: UUID,
+        attemptID: UUID,
+        requirementIDs: [UUID],
+        receivedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard receivedAt >= latest.savedAt,
+              record.startedAt <= record.endedAt,
+              record.endedAt <= receivedAt else {
+            throw DeliveryExecutionReconcileError
+                .timestampPrecedesPersistedState
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryXcodeVerificationError.missingRun(runID)
+        }
+        guard let plan = latest.runs[runIndex].plan,
+              let attemptIndex = latest.runs[runIndex].attempts.firstIndex(
+                  where: { $0.id == attemptID }
+              ) else {
+            throw DeliveryDispatchError.missingAttempt(attemptID)
+        }
+        let attempt = latest.runs[runIndex].attempts[attemptIndex]
+        guard attempt.status == .succeeded,
+              let task = plan.tasks.first(where: {
+                  $0.id == attempt.taskID
+              }) else {
+            throw DeliveryXcodeVerificationError
+                .missingSucceededAttempt(attempt.taskID)
+        }
+        guard let session = attempt.externalSession,
+              let expectedWorkspacePath =
+                  session.verificationWorkspacePath,
+              URL(
+                  fileURLWithPath: expectedWorkspacePath,
+                  isDirectory: true
+              ).standardizedFileURL.path
+                  == URL(
+                      fileURLWithPath: record.workingDirectoryPath,
+                      isDirectory: true
+                  ).standardizedFileURL.path,
+              task.schemeHints.contains(where: {
+                  $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                      == record.scheme.trimmingCharacters(
+                          in: .whitespacesAndNewlines
+                      )
+              }),
+              record.startedAt >= (
+                  attempt.endedAt
+                      ?? attempt.startedAt
+                      ?? attempt.createdAt
+              ) else {
+            throw DeliveryXcodeVerificationError.invalidRecord(
+                "The record does not match the succeeded attempt workspace, scheme, or chronology."
+            )
+        }
+        let uniqueRequirementIDs = Array(Set(requirementIDs)).sorted {
+            $0.uuidString < $1.uuidString
+        }
+        guard !uniqueRequirementIDs.isEmpty,
+              uniqueRequirementIDs.allSatisfy({ requirementID in
+                  task.evidenceRequirements.contains {
+                      $0.id == requirementID
+                          && $0.kind == record.kind.evidenceKind
+                  }
+              }) else {
+            throw DeliveryXcodeVerificationError.invalidRecord(
+                "The record does not match the task evidence requirements."
+            )
+        }
+        let normalizedScheme = record.scheme.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let normalizedCommand = record.command.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let normalizedSummary = record.summary.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let normalizedWorkspace = record.workingDirectoryPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedScheme.isEmpty,
+              !normalizedCommand.isEmpty,
+              !normalizedSummary.isEmpty,
+              !normalizedWorkspace.isEmpty,
+              normalizedSummary.utf8.count <= 4_096 else {
+            throw DeliveryXcodeVerificationError.invalidRecord(
+                "Scheme, command, workspace, and bounded summary are required."
+            )
+        }
+
+        var runs = latest.runs
+        var changed = false
+        let passed = record.exitCode == 0 && !record.timedOut
+        for requirementID in uniqueRequirementIDs {
+            let rawObservationID =
+                "xcode-verifier:\(record.id.uuidString):\(requirementID.uuidString)"
+            guard !runs[runIndex].evidenceFacts.contains(where: {
+                $0.rawObservationID == rawObservationID
+            }) else {
+                continue
+            }
+            let latestFact = runs[runIndex].evidenceFacts
+                .filter {
+                    $0.attemptID == attempt.id
+                        && $0.requirementID == requirementID
+                }
+                .max {
+                    if $0.receivedAt != $1.receivedAt {
+                        return $0.receivedAt < $1.receivedAt
+                    }
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+            runs[runIndex].evidenceFacts.append(
+                EvidenceFact(
+                    taskID: attempt.taskID,
+                    attemptID: attempt.id,
+                    requirementID: requirementID,
+                    result: passed ? .passed : .failed,
+                    source: .xcodeVerifier,
+                    summary: normalizedSummary,
+                    sourceReference:
+                        record.resultBundlePath ?? normalizedCommand,
+                    observedAt: record.endedAt,
+                    receivedAt: receivedAt,
+                    rawObservationID: rawObservationID,
+                    supersedesFactID: latestFact?.id,
+                    xcodeVerification: record
+                )
+            )
+            changed = true
+        }
+        guard changed else { return latest }
+        runs[runIndex].updatedAt = receivedAt
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: receivedAt,
             runs: runs,
             selectedRunID: latest.selectedRunID
         )

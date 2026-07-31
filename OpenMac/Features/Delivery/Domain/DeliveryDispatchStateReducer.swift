@@ -87,13 +87,13 @@ nonisolated enum DeliveryDispatchStateReducer {
         }) {
             return .needsYou
         }
+        if hasFailedVerification(in: run) {
+            return .needsYou
+        }
         if states.contains(.dispatching) || states.contains(.running) {
             return .running
         }
         if !states.isEmpty && states.allSatisfy({ $0 == .succeeded }) {
-            if hasFailedVerification(in: run) {
-                return .needsYou
-            }
             if hasCompleteVerification(in: run),
                hasReadyPullRequest(in: run) {
                 return .readyToMerge

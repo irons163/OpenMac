@@ -213,10 +213,10 @@ Execution backend 負責：
 - [x] 未批准的 plan 不會建立 session 或修改 repo。
 - [x] fixture backend 可重現 running、blocked、failed、ready 等情境。
 - [ ] 至少一個真實 backend 可建立隔離 session；AO 是第一個候選。
-- [ ] 每個 task 可追蹤 session、attempt、branch 與 PR identity。
+- [x] 每個 task 可追蹤 session、attempt、branch 與 PR identity。
 - [x] 只 dispatch dependencies 已滿足的 task，重啟後不重複 dispatch。
 - [x] 主畫面能區分 `Running` 與 `Needs You`，並顯示原因與下一步。
-- [ ] 至少可保存一筆真實 `xcodebuild` build/test evidence。
+- [x] 至少可保存一筆真實 `xcodebuild` build/test evidence。
 - [x] session 結束不會自動成為 verified。
 - [x] 缺少必要 evidence 或 PR checks 時不能成為 `Ready to Merge`。
 - [x] 使用者可停止後續 dispatch，產品不會自動 merge。
@@ -225,6 +225,11 @@ Execution backend 負責：
 AO reference adapter 的 captured contract coverage 已完成，但目前開發機沒有 AO CLI
 或 running daemon；在建立一個真實隔離 session 並核對回傳 identity 前，
 「至少一個真實 backend」維持未勾選。
+
+Xcode verifier 已以真實 Swift package 執行 `xcodebuild` build，保存並
+round-trip 驗證 command、scheme、exit status、summary、timestamps 與
+`.xcresult` reference。AO captured API 尚未提供 session workspace path，因此
+AO local verification 仍 fail closed，不以原始 repository 假冒隔離 workspace。
 
 ## 10. 安全與信任原則
 

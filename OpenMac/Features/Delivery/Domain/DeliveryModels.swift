@@ -421,11 +421,21 @@ nonisolated struct ExternalSessionRef: Equatable, Hashable, Codable, Sendable {
     let backendID: String
     let projectID: String
     let sessionID: String
+    let branch: String?
+    let verificationWorkspacePath: String?
 
-    nonisolated init(backendID: String, projectID: String, sessionID: String) {
+    nonisolated init(
+        backendID: String,
+        projectID: String,
+        sessionID: String,
+        branch: String? = nil,
+        verificationWorkspacePath: String? = nil
+    ) {
         self.backendID = backendID
         self.projectID = projectID
         self.sessionID = sessionID
+        self.branch = branch
+        self.verificationWorkspacePath = verificationWorkspacePath
     }
 }
 
@@ -645,6 +655,65 @@ nonisolated enum EvidenceSource: String, Codable, Sendable {
     case human
 }
 
+nonisolated enum XcodeVerificationKind: String, Codable, Sendable {
+    case build
+    case test
+
+    nonisolated var evidenceKind: EvidenceKind {
+        switch self {
+        case .build:
+            return .xcodeBuild
+        case .test:
+            return .xcodeTest
+        }
+    }
+}
+
+nonisolated struct XcodeVerificationRecord:
+    Identifiable,
+    Equatable,
+    Codable,
+    Sendable
+{
+    let id: UUID
+    let kind: XcodeVerificationKind
+    let scheme: String
+    let command: String
+    let workingDirectoryPath: String
+    let exitCode: Int32
+    let timedOut: Bool
+    let summary: String
+    let resultBundlePath: String?
+    let startedAt: Date
+    let endedAt: Date
+
+    nonisolated init(
+        id: UUID = UUID(),
+        kind: XcodeVerificationKind,
+        scheme: String,
+        command: String,
+        workingDirectoryPath: String,
+        exitCode: Int32,
+        timedOut: Bool,
+        summary: String,
+        resultBundlePath: String? = nil,
+        startedAt: Date,
+        endedAt: Date
+    ) {
+        self.id = id
+        self.kind = kind
+        self.scheme = scheme
+        self.command = command
+        self.workingDirectoryPath = workingDirectoryPath
+        self.exitCode = exitCode
+        self.timedOut = timedOut
+        self.summary = summary
+        self.resultBundlePath = resultBundlePath
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+    }
+}
+
 nonisolated struct EvidenceFact: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     let taskID: UUID
@@ -658,6 +727,7 @@ nonisolated struct EvidenceFact: Identifiable, Equatable, Codable, Sendable {
     let receivedAt: Date
     let rawObservationID: String?
     let supersedesFactID: UUID?
+    let xcodeVerification: XcodeVerificationRecord?
 
     nonisolated init(
         id: UUID = UUID(),
@@ -671,7 +741,8 @@ nonisolated struct EvidenceFact: Identifiable, Equatable, Codable, Sendable {
         observedAt: Date = Date(),
         receivedAt: Date = Date(),
         rawObservationID: String? = nil,
-        supersedesFactID: UUID? = nil
+        supersedesFactID: UUID? = nil,
+        xcodeVerification: XcodeVerificationRecord? = nil
     ) {
         self.id = id
         self.taskID = taskID
@@ -685,6 +756,7 @@ nonisolated struct EvidenceFact: Identifiable, Equatable, Codable, Sendable {
         self.receivedAt = receivedAt
         self.rawObservationID = rawObservationID
         self.supersedesFactID = supersedesFactID
+        self.xcodeVerification = xcodeVerification
     }
 }
 

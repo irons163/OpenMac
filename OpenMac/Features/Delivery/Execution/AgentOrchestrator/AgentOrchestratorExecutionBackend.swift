@@ -649,7 +649,8 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         return ExecutionStartReceipt(
             requestID: request.requestID,
             executionID: ExecutionID(spawned.session.id),
-            acceptedAt: acceptedAt
+            acceptedAt: acceptedAt,
+            branch: spawned.session.branch
         )
     }
 
@@ -742,7 +743,8 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         return ExecutionStartReceipt(
             requestID: request.requestID,
             executionID: ExecutionID(session.id),
-            acceptedAt: acceptedAt
+            acceptedAt: acceptedAt,
+            branch: session.branch
         )
     }
 

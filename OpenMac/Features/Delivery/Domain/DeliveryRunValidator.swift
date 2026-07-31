@@ -34,6 +34,7 @@ nonisolated enum DeliveryRunValidationIssueCode: String, Equatable, Sendable {
     case evidenceAttemptTaskMismatch
     case missingEvidenceRequirement
     case invalidEvidenceChronology
+    case invalidXcodeVerification
     case invalidSupersededEvidence
     case cyclicEvidenceSupersession
     case missingPullRequestTask
@@ -346,6 +347,18 @@ nonisolated enum DeliveryRunValidator {
                     || $0.projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || $0.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             } ?? false
+            let sessionVerificationIdentityIsInvalid =
+                attempt.externalSession.map {
+                    $0.branch?.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty == true
+                        || $0.verificationWorkspacePath.map {
+                            !$0.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty
+                                && ($0 as NSString).isAbsolutePath
+                        } == false
+                } ?? false
             let reconcileFailureIsEmpty = attempt.lastReconcileFailureReason?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty == true
@@ -363,6 +376,7 @@ nonisolated enum DeliveryRunValidator {
                 || projectID?.isEmpty != false
                 || attempt.dispatchRequestedAt == nil
                 || sessionIdentityIsEmpty
+                || sessionVerificationIdentityIsInvalid
                 || (statusRequiresSession && attempt.externalSession == nil)
                 || (attempt.status == .queued && attempt.externalSession != nil)
                 || (attempt.dispatchFailureReason != nil
@@ -676,11 +690,59 @@ nonisolated enum DeliveryRunValidator {
                 )
             }
 
-            if !task.evidenceRequirements.contains(where: { $0.id == fact.requirementID }) {
+            let requirement = task.evidenceRequirements.first {
+                $0.id == fact.requirementID
+            }
+            if requirement == nil {
                 issues.append(
                     DeliveryRunValidationIssue(
                         code: .missingEvidenceRequirement,
                         message: "Evidence references a requirement outside its task.",
+                        taskID: fact.taskID,
+                        attemptID: fact.attemptID
+                    )
+                )
+            }
+
+            let xcodeRecordIsValid: Bool
+            switch (fact.source, fact.xcodeVerification, requirement) {
+            case let (.xcodeVerifier, .some(record), .some(requirement)):
+                let expectedResult: EvidenceResult =
+                    record.exitCode == 0 && !record.timedOut
+                        ? .passed
+                        : .failed
+                xcodeRecordIsValid =
+                    record.kind.evidenceKind == requirement.kind
+                        && fact.result == expectedResult
+                        && fact.summary == record.summary
+                        && fact.observedAt == record.endedAt
+                        && record.startedAt <= record.endedAt
+                        && record.endedAt <= fact.receivedAt
+                        && !record.scheme.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                        && !record.command.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                        && !record.workingDirectoryPath.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                        && !record.summary.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                        && record.summary.utf8.count <= 4_096
+            case (.xcodeVerifier, .none, _):
+                xcodeRecordIsValid = false
+            case (_, .some, _):
+                xcodeRecordIsValid = false
+            case (_, .none, _):
+                xcodeRecordIsValid = true
+            }
+            if !xcodeRecordIsValid {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidXcodeVerification,
+                        message: "Xcode verifier evidence must preserve a matching command, exit status, scheme, workspace, summary, and chronology.",
                         taskID: fact.taskID,
                         attemptID: fact.attemptID
                     )

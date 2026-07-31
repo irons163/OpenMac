@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06 已完成；VS-07 adapter 與 VS-08 reconcile contracts 已完成，待真實 AO daemon／dashboard deep-link smoke test
+> 狀態：VS-01～VS-06 已完成；VS-07～VS-09 本機 contracts 已完成，待真實 AO daemon／dashboard／workspace identity smoke test
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -19,6 +19,12 @@ VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
 acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位址可能由
 部署設定改變；在取得可驗證設定前不猜測 deep-link。
+
+VS-09 的 `XcodeVerifier` 只接受 backend-confirmed workspace，並在執行前核對
+Git common directory、branch 與 container identity。它不經 shell 拼接參數，
+會保存 scheme、command、exit status、摘要、時間與 `.xcresult`；真實 Swift
+package smoke 已產生可 round-trip 的 build record。Captured AO API 尚未提供
+workspace path，因此 AO session 不會被錯誤地拿原始 repo 代替驗證。
 
 本目錄包含三份執行文件：
 

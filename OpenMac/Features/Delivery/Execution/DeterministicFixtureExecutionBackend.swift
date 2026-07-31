@@ -217,7 +217,9 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
             return existingRecord.receipt
         }
 
-        guard configuration.projects.contains(where: { $0.id == request.projectID }) else {
+        guard let project = configuration.projects.first(
+            where: { $0.id == request.projectID }
+        ) else {
             throw ExecutionBackendError.projectNotFound(request.projectID)
         }
 
@@ -235,7 +237,9 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
                 ? Date()
                 : configuration.baseTime.addingTimeInterval(
                     TimeInterval(executionCounter)
-                )
+                ),
+            branch: request.baseBranch,
+            verificationWorkspaceURL: project.repositoryURL
         )
         let record = ExecutionRecord(
             request: request,

@@ -195,6 +195,15 @@ struct DeliveryControlCenterView: View {
             .disabled(!model.canReconcile)
 
             Button(
+                model.activity == .verifyingXcode
+                    ? L10n.string("Verifying Xcode…")
+                    : L10n.string("Verify Xcode")
+            ) {
+                Task { await model.verifyXcode() }
+            }
+            .disabled(!model.canVerifyXcode)
+
+            Button(
                 model.activity == .stopping
                     ? L10n.string("Stopping…")
                     : L10n.string("Stop")

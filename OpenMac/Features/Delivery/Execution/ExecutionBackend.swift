@@ -131,11 +131,21 @@ nonisolated struct ExecutionStartReceipt: Equatable, Sendable {
     let requestID: UUID
     let executionID: ExecutionID
     let acceptedAt: Date
+    let branch: String?
+    let verificationWorkspaceURL: URL?
 
-    nonisolated init(requestID: UUID, executionID: ExecutionID, acceptedAt: Date) {
+    nonisolated init(
+        requestID: UUID,
+        executionID: ExecutionID,
+        acceptedAt: Date,
+        branch: String? = nil,
+        verificationWorkspaceURL: URL? = nil
+    ) {
         self.requestID = requestID
         self.executionID = executionID
         self.acceptedAt = acceptedAt
+        self.branch = branch
+        self.verificationWorkspaceURL = verificationWorkspaceURL
     }
 }
 
