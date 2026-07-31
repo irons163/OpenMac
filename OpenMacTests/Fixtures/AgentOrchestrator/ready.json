@@ -1,0 +1,7 @@
+{
+  "status": "ready",
+  "service": "agent-orchestrator-daemon",
+  "pid": 4812,
+  "executablePath": "/opt/test/bin/ao",
+  "workingDirectory": "/Volumes/Test/agent-orchestrator"
+}

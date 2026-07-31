@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated enum AgentOrchestratorWire {
-    struct Health: Decodable, Sendable {
+    struct DaemonProbe: Decodable, Sendable {
         let status: String
         let service: String
         let pid: Int

@@ -16,8 +16,9 @@ revision `9caafbee89383c9bf7e904936eb88c48add2fa88`。另已對 upstream revisio
 `b58bae51bac08c9e48bded4c636e504863a93c21` 的隔離 daemon 通過 health、
 served OpenAPI 與 project discovery；session spawn 因缺少 AO runtime 要求的
 `tmux` 而在 upstream preflight 停止，未建立 session，因此不宣稱已完成真實
-session smoke test。Connection screen 會安全讀取 `~/.ao/running.json`，並將
-run-file PID 綁定到 health response；手動 URL 仍只接受 loopback。
+session smoke test。Connection screen 會安全讀取 `~/.ao/running.json`，依序
+檢查 health、readiness 與 served OpenAPI，並要求兩個 daemon probes 回報相同
+PID；有 run-file 時也必須與其 PID 相符。手動 URL 仍只接受 loopback。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop

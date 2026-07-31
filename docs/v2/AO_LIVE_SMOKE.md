@@ -13,16 +13,19 @@ tools/test-agent-orchestrator-live.sh \
   --url http://127.0.0.1:3001
 ```
 
-The default probe calls AO health, reads the served OpenAPI version, and lists
-projects. OpenMac accepts only a loopback daemon URL.
+The default probe calls AO health and readiness, reads the served OpenAPI
+version, and lists projects. OpenMac accepts only a loopback daemon URL.
 
 The in-app connection screen also attempts to discover the current upstream
 daemon through `~/.ao/running.json`. Discovery accepts only a regular file
 owned by the current user that is not group- or world-writable, does not follow
 a symbolic link, bounds the file size, validates the recorded PID is live, and
 constructs the URL from the recorded port using `127.0.0.1`. The subsequent
-health request must report the same PID. A missing or rejected run file never
-causes a remote connection; users can still enter a loopback URL manually.
+health and readiness requests must identify the AO daemon and report the same
+PID; a discovered connection must also match the run-file PID. OpenMac does not
+read the served OpenAPI contract until both probes pass. A missing or rejected
+run file never causes a remote connection; users can still enter a loopback URL
+manually.
 
 ## Explicit isolated-session probe
 
@@ -61,6 +64,11 @@ On 2026-07-31, OpenMac was checked against upstream revision
 - The current AO session response deliberately omits the absolute worktree path.
   OpenMac therefore continues to reject local Xcode verification for AO
   sessions instead of running commands in the original repository.
+
+The CLI probe sequence and identity checks were also re-audited at upstream
+revision `25c9c96b74b57a9c0d4c0c4efb468eb4847ef74b`. It still checks
+`/healthz` before `/readyz` and requires both responses to identify the
+run-file process.
 
 This record is evidence of live protocol compatibility, not completion of
 VS-07 or Gate B. Those still require an isolated session, verifiable workspace

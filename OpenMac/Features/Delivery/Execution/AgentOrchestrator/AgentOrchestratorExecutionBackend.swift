@@ -685,7 +685,7 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             expected: [200],
             operation: .health
         )
-        let probe: AgentOrchestratorWire.Health = try decode(
+        let probe: AgentOrchestratorWire.DaemonProbe = try decode(
             probeResponse.data,
             operation: .health
         )
@@ -702,6 +702,50 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             throw ExecutionBackendError.malformedResponse(
                 operation: .health,
                 reason: "The AO daemon process ID \(probe.pid) does not match the discovered process ID \(expectedPID). Discover the running daemon again."
+            )
+        }
+
+        let readinessRequest = makeRequest(
+            configuration: configuration,
+            pathComponents: ["readyz"],
+            operation: .health
+        )
+        let readinessResponse = try await send(
+            readinessRequest,
+            operation: .health,
+            transport: transport
+        )
+        try requireStatus(
+            readinessResponse,
+            expected: [200],
+            operation: .health
+        )
+        let readiness: AgentOrchestratorWire.DaemonProbe = try decode(
+            readinessResponse.data,
+            operation: .health
+        )
+        guard !readiness.status.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty,
+        readiness.service == "agent-orchestrator-daemon",
+        readiness.pid > 0 else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .health,
+                reason: "The daemon identity or readiness payload is invalid."
+            )
+        }
+        guard readiness.pid == probe.pid else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .health,
+                reason: "The AO readiness process ID \(readiness.pid) does not match its health process ID \(probe.pid). Discover the running daemon again."
+            )
+        }
+        guard readiness.status == "ready" else {
+            return ExecutionBackendHealth(
+                state: .degraded,
+                backendName: "Agent Orchestrator",
+                checkedAt: checkedAt,
+                message: "AO is healthy but not ready (readyz: \(readiness.status)). Wait for startup to finish or inspect AO."
             )
         }
 

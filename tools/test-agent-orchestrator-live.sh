@@ -99,7 +99,7 @@ if [[ -n "$project_id" ]]; then
     export OPENMAC_AO_LIVE_BASE_COMMIT="$base_commit"
     echo "Authorized live AO session start for project $project_id."
 else
-    echo "Running read-only AO health and project discovery smoke."
+    echo "Running read-only AO health, readiness, and project discovery smoke."
 fi
 
 xcrun xctest \

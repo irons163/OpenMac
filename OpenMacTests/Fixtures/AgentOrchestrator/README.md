@@ -6,6 +6,7 @@ revision `9caafbee89383c9bf7e904936eb88c48add2fa88` on 2026-07-31.
 The covered surface is deliberately limited to:
 
 - `GET /healthz`
+- `GET /readyz`
 - `GET /api/v1/openapi.yaml`
 - `GET /api/v1/projects`
 - `GET /api/v1/projects/{id}`

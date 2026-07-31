@@ -133,6 +133,10 @@ private enum AgentOrchestratorAdapterTestFixture {
                 data: try data("health.json")
             ),
             CapturedAOStub(
+                "/readyz",
+                data: try data("ready.json")
+            ),
+            CapturedAOStub(
                 "/api/v1/openapi.yaml",
                 data: try data("openapi.yaml")
             )
@@ -192,12 +196,13 @@ private enum AgentOrchestratorAdapterTestFixture {
 
 @Suite("Agent Orchestrator reference adapter", .serialized)
 struct AgentOrchestratorAdapterTests {
-    @Test("captured health and OpenAPI version produce ready health")
+    @Test("captured daemon probes and OpenAPI version produce ready health")
     func compatibleHealth() async throws {
-        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
-            stubs: try AgentOrchestratorAdapterTestFixture.commonStubs(),
-            expectedDaemonPID: 4812
-        )
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: try AgentOrchestratorAdapterTestFixture.commonStubs(),
+                expectedDaemonPID: 4812
+            )
 
         let health = try await backend.health()
 
@@ -208,6 +213,11 @@ struct AgentOrchestratorAdapterTests {
                 == AgentOrchestratorBackendConfiguration.capturedAPIVersion
         )
         #expect(health.message == nil)
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path)
+                == ["/healthz", "/readyz", "/api/v1/openapi.yaml"]
+        )
     }
 
     @Test("discovered PID must match the responding daemon")
@@ -235,6 +245,83 @@ struct AgentOrchestratorAdapterTests {
         #expect(requests.map(\.path) == ["/healthz"])
     }
 
+    @Test("healthy daemon that is not ready degrades before OpenAPI")
+    func notReadyDaemonDegradesBeforeCompatibilityProbe() async throws {
+        let notReady = Data(
+            """
+            {
+              "status": "not_ready",
+              "service": "agent-orchestrator-daemon",
+              "pid": 4812
+            }
+            """.utf8
+        )
+        let stubs = [
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub("/readyz", data: notReady)
+        ]
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs,
+                expectedDaemonPID: 4812
+            )
+
+        let health = try await backend.health()
+
+        #expect(health.state == .degraded)
+        #expect(health.version == nil)
+        #expect(health.message?.contains("not ready") == true)
+        #expect(health.message?.contains("not_ready") == true)
+        let requests = await transport.requests()
+        #expect(requests.map(\.path) == ["/healthz", "/readyz"])
+    }
+
+    @Test("health and readiness probes must identify the same daemon")
+    func readinessPIDMismatchFailsClosed() async throws {
+        let mismatchedReadiness = Data(
+            """
+            {
+              "status": "ready",
+              "service": "agent-orchestrator-daemon",
+              "pid": 9812
+            }
+            """.utf8
+        )
+        let stubs = [
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub("/readyz", data: mismatchedReadiness)
+        ]
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
+
+        do {
+            _ = try await backend.health()
+            Issue.record("Expected readiness PID mismatch")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed health response, got \(error)")
+                return
+            }
+            #expect(operation == .health)
+            #expect(reason.contains("9812"))
+            #expect(reason.contains("4812"))
+        }
+        let requests = await transport.requests()
+        #expect(requests.map(\.path) == ["/healthz", "/readyz"])
+    }
+
     @Test("unsupported served API version degrades with an actionable message")
     func incompatibleVersionFailsClosed() async throws {
         let incompatibleSpec = Data(
@@ -251,6 +338,12 @@ struct AgentOrchestratorAdapterTests {
                 "/healthz",
                 data: try AgentOrchestratorAdapterTestFixture.data(
                     "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
                 )
             ),
             CapturedAOStub(
@@ -353,6 +446,9 @@ struct AgentOrchestratorAdapterTests {
         let healthCount = requests.filter {
             $0.method == "GET" && $0.path == "/healthz"
         }.count
+        let readinessCount = requests.filter {
+            $0.method == "GET" && $0.path == "/readyz"
+        }.count
         let specCount = requests.filter {
             $0.method == "GET"
                 && $0.path == "/api/v1/openapi.yaml"
@@ -363,6 +459,7 @@ struct AgentOrchestratorAdapterTests {
         #expect(receipts.0.executionID == ExecutionID("openmac-7"))
         #expect(spawnCount == 1)
         #expect(healthCount == 1)
+        #expect(readinessCount == 1)
         #expect(specCount == 1)
         #expect((json["projectId"] as? String) == "openmac")
         #expect((json["kind"] as? String) == "worker")
