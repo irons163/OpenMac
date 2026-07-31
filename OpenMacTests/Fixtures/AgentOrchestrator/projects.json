@@ -1,0 +1,26 @@
+{
+  "projects": [
+    {
+      "id": "openmac",
+      "name": "OpenMac",
+      "path": "/Volumes/M2SSD/OpenMac",
+      "kind": "single_repo",
+      "sessionPrefix": "openmac"
+    },
+    {
+      "id": "scratch",
+      "name": "Scratch",
+      "path": "/Users/tester/.ao/scratch",
+      "kind": "scratch",
+      "sessionPrefix": "scratch"
+    },
+    {
+      "id": "broken",
+      "name": "Broken Project",
+      "path": "/Volumes/M2SSD/Broken",
+      "kind": "single_repo",
+      "sessionPrefix": "broken",
+      "resolveError": "default branch is missing"
+    }
+  ]
+}

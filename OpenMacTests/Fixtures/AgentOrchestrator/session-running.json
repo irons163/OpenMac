@@ -1,0 +1,32 @@
+{
+  "session": {
+    "id": "openmac-7",
+    "projectId": "openmac",
+    "kind": "worker",
+    "harness": "codex",
+    "displayName": "Login button",
+    "activity": {
+      "state": "idle",
+      "lastActivityAt": "2026-07-31T05:10:00Z"
+    },
+    "isTerminated": false,
+    "terminateOnPrMerge": false,
+    "createdAt": "2026-07-31T05:00:00Z",
+    "updatedAt": "2026-07-31T05:10:00Z",
+    "status": "mergeable",
+    "scmStatus": "mergeable",
+    "branch": "openmac/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "prs": [
+      {
+        "url": "https://github.com/example/OpenMac/pull/17",
+        "number": 17,
+        "state": "open",
+        "ci": "passing",
+        "review": "approved",
+        "mergeability": "mergeable",
+        "reviewComments": false,
+        "updatedAt": "2026-07-31T05:09:00Z"
+      }
+    ]
+  }
+}

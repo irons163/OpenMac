@@ -1,0 +1,22 @@
+{
+  "sessionId": "openmac-7",
+  "files": [
+    {
+      "path": "OpenMac/Features/LoginButton.swift",
+      "status": "added",
+      "additions": 48,
+      "deletions": 0,
+      "size": 1337,
+      "binary": false
+    },
+    {
+      "path": "OpenMacTests/LoginButtonTests.swift",
+      "status": "modified",
+      "additions": 35,
+      "deletions": 2,
+      "size": 2048,
+      "binary": false
+    }
+  ],
+  "truncated": false
+}

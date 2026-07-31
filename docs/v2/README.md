@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06 已完成，下一步為 AO reference adapter spike
+> 狀態：VS-01～VS-06 已完成；VS-07 adapter 與 captured contracts 已完成，待真實 AO daemon smoke test
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -8,6 +8,12 @@ OpenMac v2 的定位是：
 > **Apple/Xcode 開發的 spec-to-verified-PR 交付層。**
 
 它不複製 Agent Orchestrator（AO），也不再以通用 Kanban／PM 工具作為主產品。OpenMac 負責把 feature brief 轉成可批准的 typed dependency plan，交給隔離的 coding-agent sessions 執行，再用 Xcode build/test 與 PR facts 驗證結果。AO 是第一個可選的 reference backend，不是產品硬依賴。
+
+目前 AO adapter 只依賴 slice 所需的 daemon contract，並將相容版本固定在
+`0.1.0-route-shell`。Captured fixtures 取自
+[`Untrivial-ai/agent-orchestrator`](https://github.com/Untrivial-ai/agent-orchestrator)
+revision `9caafbee89383c9bf7e904936eb88c48add2fa88`；本機尚未安裝或啟動 AO，
+因此不宣稱已完成真實 session smoke test。
 
 本目錄包含三份執行文件：
 

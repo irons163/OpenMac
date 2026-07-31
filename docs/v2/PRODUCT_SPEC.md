@@ -1,7 +1,7 @@
 # OpenMac v2 產品規格
 
 > 狀態：Draft for validation
-> 更新日期：2026-07-18
+> 更新日期：2026-07-31
 > 決策：建立 Apple/Xcode 的 spec-to-verified-PR 交付層；不做 AO clone
 
 ## 1. 產品摘要
@@ -221,6 +221,10 @@ Execution backend 負責：
 - [x] 缺少必要 evidence 或 PR checks 時不能成為 `Ready to Merge`。
 - [x] 使用者可停止後續 dispatch，產品不會自動 merge。
 - [ ] 有不需 Xcode 編譯即可安裝的 macOS 測試 build，並有明確 license。
+
+AO reference adapter 的 captured contract coverage 已完成，但目前開發機沒有 AO CLI
+或 running daemon；在建立一個真實隔離 session 並核對回傳 identity 前，
+「至少一個真實 backend」維持未勾選。
 
 ## 10. 安全與信任原則
 

@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "service": "agent-orchestrator-daemon",
+  "pid": 4812,
+  "executablePath": "/Applications/Agent Orchestrator.app/Contents/MacOS/ao-daemon",
+  "workingDirectory": "/Users/tester"
+}

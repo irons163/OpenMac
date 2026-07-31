@@ -1,0 +1,11 @@
+{
+  "status": "ok",
+  "project": {
+    "id": "openmac",
+    "name": "OpenMac",
+    "kind": "single_repo",
+    "path": "/Volumes/M2SSD/OpenMac",
+    "repo": "https://github.com/example/OpenMac.git",
+    "defaultBranch": "main"
+  }
+}
