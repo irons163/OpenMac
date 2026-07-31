@@ -10,9 +10,11 @@
 
 # Build artifacts
 DerivedData/
+dist/
 .build/
 .swiftpm/
 *.xcresult
+*.profraw
 *.profdata
 *.xccovreport
 *.xccovarchive

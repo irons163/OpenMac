@@ -31,7 +31,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
-	<string></string>
+	<string>Copyright © 2026 OpenMac contributors. All rights reserved.</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

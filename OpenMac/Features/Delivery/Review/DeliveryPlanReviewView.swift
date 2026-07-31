@@ -21,6 +21,15 @@ struct DeliveryPlanReviewCommands: Commands {
                 openWindow(id: DeliveryPlanReviewSceneConfiguration.windowID)
             }
             .keyboardShortcut("r", modifiers: [.command, .option])
+
+            Divider()
+
+            Button(L10n.string("Agent Orchestrator Connection…")) {
+                openWindow(
+                    id: DeliveryAgentOrchestratorConnectionSceneConfiguration
+                        .windowID
+                )
+            }
         }
     }
 }

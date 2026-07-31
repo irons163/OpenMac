@@ -71,7 +71,7 @@ struct OpenMacApp: App {
                 .environment(\.locale, appLocale)
         }
         .commands {
-#if DEBUG
+#if DEBUG || OPENMAC_DELIVERY_V2
             DeliveryPlanReviewCommands()
 #endif
 
@@ -103,7 +103,7 @@ struct OpenMacApp: App {
             }
         }
 
-#if DEBUG
+#if DEBUG || OPENMAC_DELIVERY_V2
         Window(
             L10n.string("Delivery Plan Review"),
             id: DeliveryPlanReviewSceneConfiguration.windowID
@@ -121,6 +121,15 @@ struct OpenMacApp: App {
                 .environment(\.locale, appLocale)
         }
         .defaultSize(width: 1120, height: 760)
+
+        Window(
+            L10n.string("Agent Orchestrator Connection"),
+            id: DeliveryAgentOrchestratorConnectionSceneConfiguration.windowID
+        ) {
+            DeliveryAgentOrchestratorConnectionScene()
+                .environment(\.locale, appLocale)
+        }
+        .defaultSize(width: 620, height: 420)
 #endif
     }
 

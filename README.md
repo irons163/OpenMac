@@ -86,6 +86,20 @@ OpenMacUITests/   # UI tests
 3. Select scheme `OpenMac`.
 4. Run on `My Mac`.
 
+## V2 Invited Test Build
+
+OpenMac v2 is being validated as an Apple/Xcode spec-to-verified-PR delivery
+layer. To create the macOS 14+ universal test package from a clean commit:
+
+```bash
+tools/package-test-build.sh --launch-smoke
+```
+
+The script writes an ad-hoc signed, non-notarized zip and SHA-256 file to
+`dist/`. Invited builds use the included OpenMac Evaluation License. See the
+[test build install guide](docs/v2/TEST_BUILD_INSTALL.md) for Gatekeeper,
+fixture, and Agent Orchestrator connection steps.
+
 ## AI Runtime Setup
 
 ### Option A: API Key

@@ -238,6 +238,12 @@ read/write，或回報 `danger-full-access`，都不得建立 session。MVP funn
 只在本機由使用者主動存檔，且不包含 feature／task 內容、repository identity、
 commands、logs 或外部 URL。
 
+VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程，固定版本
+`0.1.0 (1)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
+build metadata。封裝前後的簽章、架構、最低系統版本與本機 launch smoke 已
+通過；目前仍是 ad-hoc signed、未 notarized，且尚待乾淨測試機完成首次啟動，
+因此安裝條件維持未勾選。
+
 ## 10. 安全與信任原則
 
 1. 預設 workspace-scoped；不得以 `danger-full-access` 作為 v2 預設。
@@ -274,7 +280,9 @@ commands、logs 或外部 URL。
 
 ## 12. 尚待產品負責人決定
 
-- 開源 license（必須在公開測試 build 前決定）。
-- macOS 最低支援版本與簽章／notarization 方式。
+- 公開 source release 要採用哪一種 open-source license；受邀測試包目前使用
+  all-rights-reserved 的 OpenMac Evaluation License。
+- 公開測試前要使用哪個 Developer ID 與 notarization 流程；目前的受邀測試包
+  明確標示為 ad-hoc signed、未 notarized。
 - 第一批受測者是否以 AO 使用者、Codex 使用者或 Apple indie developers 為主。
 - 真實 backend 若無法穩定提供 worktree 與 PR identity，是否改做 direct Codex adapter；不得同時開發兩條 integration。

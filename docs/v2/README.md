@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成，待真實 AO daemon／dashboard／permission／workspace identity smoke test
+> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成；VS-11 封裝與本機 launch smoke 已完成，待 clean-source／乾淨測試機 smoke
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -34,11 +34,19 @@ Control Center 也可匯出本機 funnel JSON；檔案只含里程碑 duration�
 計數，明確排除 brief／prompt、repository path、branch／commit、command／log
 及 PR URL。
 
-本目錄包含三份執行文件：
+VS-11 將測試版本固定為 `0.1.0 (1)`、最低 macOS 14，產出 arm64／x86_64
+universal zip 與 SHA-256。Release build 以獨立 feature flag 開啟 v2 畫面，
+另有只接受 loopback URL 的 AO compatibility／project discovery probe。測試包
+使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章且未 notarized；
+封裝工具會拒絕未 commit 的 source。開放給受測者前仍須用 clean-source 包在
+乾淨 Mac 驗證 Gatekeeper onboarding。
+
+本目錄包含四份執行文件：
 
 - [產品規格](PRODUCT_SPEC.md)：目標使用者、核心流程、資料邊界、MVP 與驗證指標。
 - [功能凍結清單](FEATURE_FREEZE.md)：哪些既有能力保留、凍結、替換、延後或列為移除候選。
 - [兩週 vertical slice backlog](VERTICAL_SLICE_BACKLOG.md)：單人、十個工作日的交付順序與決策閘門。
+- [測試 build 安裝指南](TEST_BUILD_INSTALL.md)：checksum、Gatekeeper、五分鐘 fixture walkthrough 與 AO connection probe。
 
 在 Day 10 決策閘門通過前：
 
