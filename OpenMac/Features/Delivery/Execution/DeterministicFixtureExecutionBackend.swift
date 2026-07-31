@@ -2,6 +2,11 @@ import Foundation
 
 typealias FixtureDelayHook = @Sendable (ExecutionBackendOperation, Int) async throws -> Void
 
+nonisolated enum FixtureExecutionTimestampMode: Sendable {
+    case deterministic
+    case wallClock
+}
+
 nonisolated struct FixtureExecutionScript: Equatable, Sendable {
     var factBatches: [[ExecutionFactBody]]
     var startError: ExecutionBackendError?
@@ -19,6 +24,13 @@ nonisolated struct FixtureExecutionScript: Equatable, Sendable {
             factBatches: [
                 [.phase(.accepted)],
                 [.phase(.running)],
+                [
+                    .changedFilesEvidence(
+                        ExecutionChangedFilesEvidence(
+                            paths: ["Sources/FixtureFeature.swift"]
+                        )
+                    )
+                ],
                 [
                     .commandEvidence(
                         ExecutionCommandEvidence(
@@ -108,6 +120,7 @@ nonisolated struct FixtureExecutionBackendConfiguration: Sendable {
     var health: ExecutionBackendHealth
     var projects: [ExecutionProject]
     var baseTime: Date
+    var timestampMode: FixtureExecutionTimestampMode
     var defaultScript: FixtureExecutionScript
     var scriptsByTaskID: [UUID: FixtureExecutionScript]
     var faultsByOperationAndInvocation: [ExecutionBackendOperation: [Int: ExecutionBackendError]]
@@ -117,6 +130,7 @@ nonisolated struct FixtureExecutionBackendConfiguration: Sendable {
         health: ExecutionBackendHealth,
         projects: [ExecutionProject],
         baseTime: Date,
+        timestampMode: FixtureExecutionTimestampMode = .deterministic,
         defaultScript: FixtureExecutionScript = .happyXcodePullRequest,
         scriptsByTaskID: [UUID: FixtureExecutionScript] = [:],
         faultsByOperationAndInvocation: [ExecutionBackendOperation: [Int: ExecutionBackendError]] = [:]
@@ -125,6 +139,7 @@ nonisolated struct FixtureExecutionBackendConfiguration: Sendable {
         self.health = health
         self.projects = projects
         self.baseTime = baseTime
+        self.timestampMode = timestampMode
         self.defaultScript = defaultScript
         self.scriptsByTaskID = scriptsByTaskID
         self.faultsByOperationAndInvocation = faultsByOperationAndInvocation
@@ -216,7 +231,11 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
         let receipt = ExecutionStartReceipt(
             requestID: request.requestID,
             executionID: executionID,
-            acceptedAt: configuration.baseTime.addingTimeInterval(TimeInterval(executionCounter))
+            acceptedAt: configuration.timestampMode == .wallClock
+                ? Date()
+                : configuration.baseTime.addingTimeInterval(
+                    TimeInterval(executionCounter)
+                )
         )
         let record = ExecutionRecord(
             request: request,
@@ -269,6 +288,7 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
             .prefix(batchIndex)
             .reduce(0) { $0 + $1.count }
         let bodies = record.script.factBatches[batchIndex]
+        let wallClockFactTime = Date()
         let facts = bodies.enumerated().map { bodyIndex, body in
             let sequence = UInt64(sequenceOffset + bodyIndex + 1)
             return ExecutionFact(
@@ -277,7 +297,11 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
                 ),
                 executionID: executionID,
                 sequence: sequence,
-                occurredAt: configuration.baseTime.addingTimeInterval(TimeInterval(sequence)),
+                occurredAt: configuration.timestampMode == .wallClock
+                    ? wallClockFactTime
+                    : record.receipt.acceptedAt.addingTimeInterval(
+                        TimeInterval(sequence)
+                    ),
                 body: body
             )
         }
@@ -420,9 +444,11 @@ actor DeterministicFixtureExecutionBackend: ExecutionBackend {
         ExecutionStopReceipt(
             executionID: executionID,
             disposition: disposition,
-            acknowledgedAt: configuration.baseTime.addingTimeInterval(
-                TimeInterval(10_000 + invocation)
-            )
+            acknowledgedAt: configuration.timestampMode == .wallClock
+                ? Date()
+                : configuration.baseTime.addingTimeInterval(
+                    TimeInterval(10_000 + invocation)
+                )
         )
     }
 }

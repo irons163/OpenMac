@@ -437,6 +437,7 @@ final class DeliveryPlanReviewViewModel: ObservableObject {
         } else if run.stoppedAt != nil {
             readOnlyReason = L10n.string("This delivery run is stopped and cannot be reviewed.")
         } else if !run.attempts.isEmpty
+            || !run.executionObservations.isEmpty
             || !run.evidenceFacts.isEmpty
             || !run.pullRequests.isEmpty {
             readOnlyReason = L10n.string("Delivery facts already exist, so this plan is locked.")

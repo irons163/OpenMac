@@ -177,6 +177,14 @@ nonisolated struct ExecutionCommandEvidence: Equatable, Sendable {
     }
 }
 
+nonisolated struct ExecutionChangedFilesEvidence: Equatable, Sendable {
+    let paths: [String]
+
+    nonisolated init(paths: [String]) {
+        self.paths = paths
+    }
+}
+
 nonisolated enum ExecutionPullRequestState: String, Sendable {
     case open
     case merged
@@ -248,6 +256,7 @@ nonisolated enum ExecutionFactBody: Equatable, Sendable {
     case phase(ExecutionPhase)
     case inputRequested(prompt: String)
     case commandEvidence(ExecutionCommandEvidence)
+    case changedFilesEvidence(ExecutionChangedFilesEvidence)
     case pullRequestEvidence(ExecutionPullRequestEvidence)
     case diagnostic(ExecutionDiagnostic)
     case unknown(kind: String, rawPayload: String?)

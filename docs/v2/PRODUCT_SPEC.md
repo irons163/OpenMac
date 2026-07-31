@@ -208,18 +208,18 @@ Execution backend 負責：
 ## 9. MVP 驗收條件
 
 - [ ] 使用者可開啟一個 Apple/Xcode Git repository 並輸入 brief。
-- [ ] 可產生、編輯並驗證 3–7 個 typed dependency tasks。
-- [ ] 循環依賴或缺少 acceptance／evidence 時不能批准。
-- [ ] 未批准的 plan 不會建立 session 或修改 repo。
-- [ ] fixture backend 可重現 running、blocked、failed、ready 等情境。
+- [x] 可產生、編輯並驗證 3–7 個 typed dependency tasks。
+- [x] 循環依賴或缺少 acceptance／evidence 時不能批准。
+- [x] 未批准的 plan 不會建立 session 或修改 repo。
+- [x] fixture backend 可重現 running、blocked、failed、ready 等情境。
 - [ ] 至少一個真實 backend 可建立隔離 session；AO 是第一個候選。
 - [ ] 每個 task 可追蹤 session、attempt、branch 與 PR identity。
-- [ ] 只 dispatch dependencies 已滿足的 task，重啟後不重複 dispatch。
-- [ ] 主畫面能區分 `Running` 與 `Needs You`，並顯示原因與下一步。
+- [x] 只 dispatch dependencies 已滿足的 task，重啟後不重複 dispatch。
+- [x] 主畫面能區分 `Running` 與 `Needs You`，並顯示原因與下一步。
 - [ ] 至少可保存一筆真實 `xcodebuild` build/test evidence。
-- [ ] session 結束不會自動成為 verified。
-- [ ] 缺少必要 evidence 或 PR checks 時不能成為 `Ready to Merge`。
-- [ ] 使用者可停止後續 dispatch，產品不會自動 merge。
+- [x] session 結束不會自動成為 verified。
+- [x] 缺少必要 evidence 或 PR checks 時不能成為 `Ready to Merge`。
+- [x] 使用者可停止後續 dispatch，產品不會自動 merge。
 - [ ] 有不需 Xcode 編譯即可安裝的 macOS 測試 build，並有明確 license。
 
 ## 10. 安全與信任原則

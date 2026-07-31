@@ -17,9 +17,16 @@ nonisolated enum DeliveryRunValidationIssueCode: String, Equatable, Sendable {
     case duplicateAttemptIdempotencyKey
     case multipleActiveAttempts
     case invalidAttemptDispatchBinding
+    case invalidAttemptFactCursor
     case reusedExternalSession
     case sessionBackendMismatch
     case sessionProjectMismatch
+    case duplicateExecutionObservationID
+    case duplicateExecutionObservationSequence
+    case missingExecutionObservationTask
+    case missingExecutionObservationAttempt
+    case executionObservationAttemptTaskMismatch
+    case invalidExecutionObservationChronology
     case duplicateEvidenceFactID
     case duplicateRawObservationID
     case missingEvidenceTask
@@ -59,7 +66,10 @@ nonisolated enum DeliveryRunValidator {
         var issues: [DeliveryRunValidationIssue] = []
 
         guard let plan = run.plan else {
-            if !run.attempts.isEmpty || !run.evidenceFacts.isEmpty || !run.pullRequests.isEmpty {
+            if !run.attempts.isEmpty
+                || !run.executionObservations.isEmpty
+                || !run.evidenceFacts.isEmpty
+                || !run.pullRequests.isEmpty {
                 issues.append(
                     DeliveryRunValidationIssue(
                         code: .invalidPlan,
@@ -71,6 +81,7 @@ nonisolated enum DeliveryRunValidator {
         }
 
         let hasDeliveryFacts = !run.attempts.isEmpty
+            || !run.executionObservations.isEmpty
             || !run.evidenceFacts.isEmpty
             || !run.pullRequests.isEmpty
 
@@ -181,6 +192,15 @@ nonisolated enum DeliveryRunValidator {
             runCreatedAt: run.createdAt,
             runUpdatedAt: run.updatedAt,
             tasksByID: tasksByID,
+            issues: &issues
+        )
+        validateExecutionObservations(
+            run.executionObservations,
+            attempts: run.attempts,
+            runCreatedAt: run.createdAt,
+            runUpdatedAt: run.updatedAt,
+            tasksByID: tasksByID,
+            attemptsByID: attemptsByID,
             issues: &issues
         )
         validateEvidence(
@@ -349,6 +369,21 @@ nonisolated enum DeliveryRunValidator {
                     )
                 )
             }
+            if attempt.nextFactCursor?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty == true
+                || (attempt.nextFactCursor != nil
+                    && attempt.lastFactSequence == nil)
+                || attempt.lastFactSequence == 0 {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidAttemptFactCursor,
+                        message: "Execution fact cursors require a non-empty cursor and a positive last sequence.",
+                        taskID: attempt.taskID,
+                        attemptID: attempt.id
+                    )
+                )
+            }
 
             if attempt.sequence < 1 {
                 issues.append(
@@ -432,6 +467,114 @@ nonisolated enum DeliveryRunValidator {
                     taskID: taskID
                 )
             )
+        }
+    }
+
+    nonisolated private static func validateExecutionObservations(
+        _ observations: [ExecutionBackendObservation],
+        attempts: [ExecutionAttempt],
+        runCreatedAt: Date,
+        runUpdatedAt: Date,
+        tasksByID: [UUID: DeliveryTask],
+        attemptsByID: [UUID: ExecutionAttempt],
+        issues: inout [DeliveryRunValidationIssue]
+    ) {
+        var seenIDs: Set<String> = []
+        var seenSequences: Set<String> = []
+        var maximumSequenceByAttemptID: [UUID: UInt64] = [:]
+
+        for observation in observations {
+            if observation.id.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty
+                || observation.summary.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty
+                || observation.sequence < 1
+                || observation.occurredAt < runCreatedAt
+                || observation.occurredAt > observation.receivedAt
+                || observation.receivedAt > runUpdatedAt {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .invalidExecutionObservationChronology,
+                        message: "Execution observations require stable identities, summaries, sequences, and timestamps within the run.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+            }
+            if !seenIDs.insert(observation.id).inserted {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .duplicateExecutionObservationID,
+                        message: "Execution observation IDs must be unique.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+            }
+            let sequenceKey = "\(observation.attemptID.uuidString):\(observation.sequence)"
+            if !seenSequences.insert(sequenceKey).inserted {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .duplicateExecutionObservationSequence,
+                        message: "Execution observation sequences must be unique within an attempt.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+            }
+            if tasksByID[observation.taskID] == nil {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .missingExecutionObservationTask,
+                        message: "An execution observation references a task outside the active plan.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+            }
+            guard let attempt = attemptsByID[observation.attemptID] else {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .missingExecutionObservationAttempt,
+                        message: "An execution observation references a missing attempt.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+                continue
+            }
+            if attempt.taskID != observation.taskID {
+                issues.append(
+                    DeliveryRunValidationIssue(
+                        code: .executionObservationAttemptTaskMismatch,
+                        message: "Execution observation task and attempt identities do not match.",
+                        taskID: observation.taskID,
+                        attemptID: observation.attemptID
+                    )
+                )
+            }
+            maximumSequenceByAttemptID[attempt.id] = max(
+                maximumSequenceByAttemptID[attempt.id] ?? 0,
+                observation.sequence
+            )
+        }
+
+        for attempt in attempts {
+            let maximumSequence = maximumSequenceByAttemptID[attempt.id]
+            if maximumSequence != attempt.lastFactSequence {
+                if maximumSequence != nil || attempt.lastFactSequence != nil {
+                    issues.append(
+                        DeliveryRunValidationIssue(
+                            code: .invalidAttemptFactCursor,
+                            message: "The persisted fact sequence does not match its observations.",
+                            taskID: attempt.taskID,
+                            attemptID: attempt.id
+                        )
+                    )
+                }
+            }
         }
     }
 

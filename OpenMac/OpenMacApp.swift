@@ -112,6 +112,15 @@ struct OpenMacApp: App {
                 .environment(\.locale, appLocale)
         }
         .defaultSize(width: 1180, height: 780)
+
+        Window(
+            L10n.string("Delivery Control Center"),
+            id: DeliveryControlCenterSceneConfiguration.windowID
+        ) {
+            DeliveryControlCenterScene()
+                .environment(\.locale, appLocale)
+        }
+        .defaultSize(width: 1120, height: 760)
 #endif
     }
 

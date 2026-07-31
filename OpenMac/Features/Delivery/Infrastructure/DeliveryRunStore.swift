@@ -202,6 +202,23 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
         )
     }
 
+    nonisolated func recordExecutionFactPage(
+        _ page: ExecutionFactPage,
+        runID: UUID,
+        attemptID: UUID,
+        expectedCursor: ExecutionFactCursor?,
+        receivedAt: Date
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.recordExecutionFactPage(
+            page,
+            runID: runID,
+            attemptID: attemptID,
+            expectedCursor: expectedCursor,
+            receivedAt: receivedAt,
+            fileURL: fileURL
+        )
+    }
+
     nonisolated func stopFutureDispatch(
         runID: UUID,
         stoppedAt: Date
@@ -216,6 +233,7 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
 
 extension FileDeliveryRunStore: DeliveryPlanReviewPersisting {}
 extension FileDeliveryRunStore: DeliveryDispatchPersisting {}
+extension FileDeliveryRunStore: DeliveryExecutionFactPersisting {}
 
 private actor DeliveryRunFileCoordinator {
     func load(from fileURL: URL) throws -> DeliveryRunSnapshot? {
@@ -666,6 +684,54 @@ private actor DeliveryRunFileCoordinator {
         return updated
     }
 
+    func recordExecutionFactPage(
+        _ page: ExecutionFactPage,
+        runID: UUID,
+        attemptID: UUID,
+        expectedCursor: ExecutionFactCursor?,
+        receivedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard receivedAt >= latest.savedAt else {
+            throw DeliveryExecutionReconcileError
+                .timestampPrecedesPersistedState
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+
+        var runs = latest.runs
+        runs[runIndex] = try DeliveryExecutionFactReducer.applying(
+            page,
+            to: runs[runIndex],
+            attemptID: attemptID,
+            expectedCursor: expectedCursor,
+            receivedAt: receivedAt
+        )
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: receivedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
     func stopFutureDispatch(
         runID: UUID,
         stoppedAt: Date,
@@ -1013,6 +1079,10 @@ nonisolated private enum DeliveryRunSnapshotFileCodec {
                     ].compactMap { $0 }
                 )
             }
+            for observation in run.executionObservations {
+                runStateDates.append(observation.occurredAt)
+                runStateDates.append(observation.receivedAt)
+            }
             for fact in run.evidenceFacts {
                 runStateDates.append(fact.observedAt)
                 runStateDates.append(fact.receivedAt)
@@ -1081,6 +1151,7 @@ nonisolated private enum DeliveryRunSnapshotFileCodec {
                 continue
             }
             guard runs[index].attempts.isEmpty,
+                  runs[index].executionObservations.isEmpty,
                   runs[index].evidenceFacts.isEmpty,
                   runs[index].pullRequests.isEmpty,
                   runs[index].stoppedAt == nil else {

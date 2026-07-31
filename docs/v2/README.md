@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-05 已完成，下一步為 attention-first fixture loop
+> 狀態：VS-01～VS-06 已完成，下一步為 AO reference adapter spike
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：

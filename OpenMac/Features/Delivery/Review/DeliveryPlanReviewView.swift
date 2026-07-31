@@ -10,6 +10,13 @@ struct DeliveryPlanReviewCommands: Commands {
 
     var body: some Commands {
         CommandMenu(L10n.string("Delivery")) {
+            Button(L10n.string("Open Delivery Control Center")) {
+                openWindow(id: DeliveryControlCenterSceneConfiguration.windowID)
+            }
+            .keyboardShortcut("d", modifiers: [.command, .option])
+
+            Divider()
+
             Button(L10n.string("Open Plan Review")) {
                 openWindow(id: DeliveryPlanReviewSceneConfiguration.windowID)
             }

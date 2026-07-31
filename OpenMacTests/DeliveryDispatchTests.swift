@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import OpenMac
 
-private final class DeliveryDispatchTestClock: @unchecked Sendable {
+final class DeliveryDispatchTestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Date
 
@@ -36,7 +36,7 @@ private actor DeliveryDispatchConcurrencyProbe {
     }
 }
 
-private enum DeliveryDispatchFixture {
+enum DeliveryDispatchFixture {
     static let createdAt = Date(timeIntervalSince1970: 1_784_371_200)
     static let approvedAt = createdAt.addingTimeInterval(10)
     static let runID = UUID(uuidString: "91000000-0000-0000-0000-000000000001")!

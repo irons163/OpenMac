@@ -560,6 +560,7 @@ nonisolated enum DeliveryPlanReviewApplicator {
             throw DeliveryPlanReviewError.stoppedRunCannotBeEdited
         }
         guard run.attempts.isEmpty,
+              run.executionObservations.isEmpty,
               run.evidenceFacts.isEmpty,
               run.pullRequests.isEmpty else {
             throw DeliveryPlanReviewError.deliveryFactsAlreadyExist

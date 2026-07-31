@@ -446,6 +446,31 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
     var startedAt: Date?
     var endedAt: Date?
     var stopRequestedAt: Date?
+    var nextFactCursor: String?
+    var lastFactSequence: UInt64?
+    var isFactStreamExhausted: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case taskID
+        case planID
+        case planRevision
+        case sequence
+        case backendID
+        case projectID
+        case idempotencyKey
+        case status
+        case externalSession
+        case createdAt
+        case dispatchRequestedAt
+        case dispatchFailureReason
+        case startedAt
+        case endedAt
+        case stopRequestedAt
+        case nextFactCursor
+        case lastFactSequence
+        case isFactStreamExhausted
+    }
 
     nonisolated init(
         id: UUID = UUID(),
@@ -463,7 +488,10 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         dispatchFailureReason: String? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
-        stopRequestedAt: Date? = nil
+        stopRequestedAt: Date? = nil,
+        nextFactCursor: String? = nil,
+        lastFactSequence: UInt64? = nil,
+        isFactStreamExhausted: Bool = false
     ) {
         self.id = id
         self.taskID = taskID
@@ -481,6 +509,108 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.stopRequestedAt = stopRequestedAt
+        self.nextFactCursor = nextFactCursor
+        self.lastFactSequence = lastFactSequence
+        self.isFactStreamExhausted = isFactStreamExhausted
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        taskID = try container.decode(UUID.self, forKey: .taskID)
+        planID = try container.decode(UUID.self, forKey: .planID)
+        planRevision = try container.decode(Int.self, forKey: .planRevision)
+        sequence = try container.decode(Int.self, forKey: .sequence)
+        backendID = try container.decode(String.self, forKey: .backendID)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
+        idempotencyKey = try container.decode(UUID.self, forKey: .idempotencyKey)
+        status = try container.decode(
+            ExecutionAttemptStatus.self,
+            forKey: .status
+        )
+        externalSession = try container.decodeIfPresent(
+            ExternalSessionRef.self,
+            forKey: .externalSession
+        )
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        dispatchRequestedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .dispatchRequestedAt
+        )
+        dispatchFailureReason = try container.decodeIfPresent(
+            String.self,
+            forKey: .dispatchFailureReason
+        )
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        stopRequestedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .stopRequestedAt
+        )
+        nextFactCursor = try container.decodeIfPresent(
+            String.self,
+            forKey: .nextFactCursor
+        )
+        lastFactSequence = try container.decodeIfPresent(
+            UInt64.self,
+            forKey: .lastFactSequence
+        )
+        isFactStreamExhausted = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .isFactStreamExhausted
+        ) ?? false
+    }
+}
+
+nonisolated enum ExecutionBackendObservationKind: String, Codable, Sendable {
+    case phase
+    case inputRequested
+    case commandEvidence
+    case changedFilesEvidence
+    case pullRequestEvidence
+    case diagnostic
+    case unknown
+}
+
+nonisolated struct ExecutionBackendObservation:
+    Identifiable,
+    Equatable,
+    Codable,
+    Sendable
+{
+    let id: String
+    let taskID: UUID
+    let attemptID: UUID
+    let sequence: UInt64
+    let occurredAt: Date
+    let receivedAt: Date
+    let kind: ExecutionBackendObservationKind
+    let summary: String
+    let rawPayload: String?
+    let retryable: Bool?
+
+    nonisolated init(
+        id: String,
+        taskID: UUID,
+        attemptID: UUID,
+        sequence: UInt64,
+        occurredAt: Date,
+        receivedAt: Date,
+        kind: ExecutionBackendObservationKind,
+        summary: String,
+        rawPayload: String? = nil,
+        retryable: Bool? = nil
+    ) {
+        self.id = id
+        self.taskID = taskID
+        self.attemptID = attemptID
+        self.sequence = sequence
+        self.occurredAt = occurredAt
+        self.receivedAt = receivedAt
+        self.kind = kind
+        self.summary = summary
+        self.rawPayload = rawPayload
+        self.retryable = retryable
     }
 }
 
@@ -570,6 +700,7 @@ nonisolated struct PullRequestRef: Identifiable, Equatable, Codable, Sendable {
     let attemptID: UUID
     var url: URL
     var headBranch: String
+    var headCommitIdentifier: String?
     var baseBranch: String
     var state: PullRequestState
     var checksState: PullRequestChecksState
@@ -581,6 +712,7 @@ nonisolated struct PullRequestRef: Identifiable, Equatable, Codable, Sendable {
         attemptID: UUID,
         url: URL,
         headBranch: String,
+        headCommitIdentifier: String? = nil,
         baseBranch: String,
         state: PullRequestState = .open,
         checksState: PullRequestChecksState = .unknown,
@@ -591,6 +723,7 @@ nonisolated struct PullRequestRef: Identifiable, Equatable, Codable, Sendable {
         self.attemptID = attemptID
         self.url = url
         self.headBranch = headBranch
+        self.headCommitIdentifier = headCommitIdentifier
         self.baseBranch = baseBranch
         self.state = state
         self.checksState = checksState
@@ -616,6 +749,7 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
     var repositoryIdentity: DeliveryRepositoryIdentitySnapshot?
     var plan: DeliveryPlan?
     var attempts: [ExecutionAttempt]
+    var executionObservations: [ExecutionBackendObservation]
     var evidenceFacts: [EvidenceFact]
     var pullRequests: [PullRequestRef]
     let createdAt: Date
@@ -628,6 +762,7 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
         case repositoryIdentity
         case plan
         case attempts
+        case executionObservations
         case evidenceFacts
         case pullRequests
         case createdAt
@@ -641,6 +776,7 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
         repositoryIdentity: DeliveryRepositoryIdentitySnapshot? = nil,
         plan: DeliveryPlan? = nil,
         attempts: [ExecutionAttempt] = [],
+        executionObservations: [ExecutionBackendObservation] = [],
         evidenceFacts: [EvidenceFact] = [],
         pullRequests: [PullRequestRef] = [],
         createdAt: Date = Date(),
@@ -652,6 +788,7 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
         self.repositoryIdentity = repositoryIdentity
         self.plan = plan
         self.attempts = attempts
+        self.executionObservations = executionObservations
         self.evidenceFacts = evidenceFacts
         self.pullRequests = pullRequests
         self.createdAt = createdAt
@@ -669,6 +806,10 @@ nonisolated struct DeliveryRun: Identifiable, Equatable, Codable, Sendable {
         )
         plan = try container.decodeIfPresent(DeliveryPlan.self, forKey: .plan)
         attempts = try container.decode([ExecutionAttempt].self, forKey: .attempts)
+        executionObservations = try container.decodeIfPresent(
+            [ExecutionBackendObservation].self,
+            forKey: .executionObservations
+        ) ?? []
         evidenceFacts = try container.decode([EvidenceFact].self, forKey: .evidenceFacts)
         pullRequests = try container.decode([PullRequestRef].self, forKey: .pullRequests)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
