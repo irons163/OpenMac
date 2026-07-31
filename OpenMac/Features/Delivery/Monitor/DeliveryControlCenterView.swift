@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum DeliveryControlCenterSceneConfiguration {
     static let windowID = "delivery-control-center"
@@ -186,6 +188,15 @@ struct DeliveryControlCenterView: View {
             .disabled(model.isBusy)
 
             Button(
+                model.activity == .exportingFunnel
+                    ? L10n.string("Exporting…")
+                    : L10n.string("Export Funnel")
+            ) {
+                exportFunnel()
+            }
+            .disabled(model.isBusy)
+
+            Button(
                 model.activity == .reconciling
                     ? L10n.string("Reconciling…")
                     : L10n.string("Reconcile")
@@ -229,6 +240,18 @@ struct DeliveryControlCenterView: View {
     private func retry(_ item: DeliveryAttentionItem) {
         guard let taskID = item.taskID else { return }
         Task { await model.retryDispatch(taskID: taskID) }
+    }
+
+    private func exportFunnel() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "openmac-delivery-funnel.json"
+        panel.title = L10n.string("Export Funnel")
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+        model.exportFunnel(to: url)
     }
 
     private func stateTitle(_ state: DerivedDeliveryState) -> String {

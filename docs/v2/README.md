@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06 已完成；VS-07～VS-09 本機 contracts 已完成，待真實 AO daemon／dashboard／workspace identity smoke test
+> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成，待真實 AO daemon／dashboard／permission／workspace identity smoke test
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -25,6 +25,14 @@ Git common directory、branch 與 container identity。它不經 shell 拼接參
 會保存 scheme、command、exit status、摘要、時間與 `.xcresult`；真實 Swift
 package smoke 已產生可 round-trip 的 build record。Captured AO API 尚未提供
 workspace path，因此 AO session 不會被錯誤地拿原始 repo 代替驗證。
+
+VS-10 將 resume 與 retry 分成兩個明確語意：未綁定 session 的 reservation
+以同一 idempotency key 安全重播；terminal failed／stopped task 的人工 Retry
+才會原子建立 sequence+1 的新 attempt。Stale retry、已有 downstream attempt、
+權限為 `unknown` 或 `danger-full-access` 都會在啟動 session 前 fail closed。
+Control Center 也可匯出本機 funnel JSON；檔案只含里程碑 duration、狀態與
+計數，明確排除 brief／prompt、repository path、branch／commit、command／log
+及 PR URL。
 
 本目錄包含三份執行文件：
 

@@ -65,25 +65,34 @@ nonisolated enum ExecutionProjectIsolation: String, Sendable {
     case unknown
 }
 
+nonisolated enum ExecutionPermissionScope: String, Codable, Sendable {
+    case workspaceReadWrite
+    case dangerFullAccess
+    case unknown
+}
+
 nonisolated struct ExecutionProject: Identifiable, Equatable, Sendable {
     let id: ExecutionProjectID
     let name: String
     let repositoryURL: URL?
     let workspaceHint: String?
     let isolation: ExecutionProjectIsolation
+    let permissionScope: ExecutionPermissionScope
 
     nonisolated init(
         id: ExecutionProjectID,
         name: String,
         repositoryURL: URL? = nil,
         workspaceHint: String? = nil,
-        isolation: ExecutionProjectIsolation = .unknown
+        isolation: ExecutionProjectIsolation = .unknown,
+        permissionScope: ExecutionPermissionScope = .unknown
     ) {
         self.id = id
         self.name = name
         self.repositoryURL = repositoryURL
         self.workspaceHint = workspaceHint
         self.isolation = isolation
+        self.permissionScope = permissionScope
     }
 }
 
@@ -99,6 +108,7 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
     let instructions: String
     let baseBranch: String
     let baseCommitIdentifier: String
+    let requiredPermissionScope: ExecutionPermissionScope
 
     nonisolated init(
         requestID: UUID,
@@ -111,7 +121,8 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
         title: String,
         instructions: String,
         baseBranch: String,
-        baseCommitIdentifier: String
+        baseCommitIdentifier: String,
+        requiredPermissionScope: ExecutionPermissionScope = .workspaceReadWrite
     ) {
         self.requestID = requestID
         self.projectID = projectID
@@ -124,6 +135,7 @@ nonisolated struct ExecutionStartRequest: Equatable, Sendable {
         self.instructions = instructions
         self.baseBranch = baseBranch
         self.baseCommitIdentifier = baseCommitIdentifier
+        self.requiredPermissionScope = requiredPermissionScope
     }
 }
 

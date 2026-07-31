@@ -9,6 +9,7 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         case reconciling
         case verifyingXcode
         case retrying
+        case exportingFunnel
         case stopping
     }
 
@@ -225,14 +226,51 @@ final class DeliveryControlCenterViewModel: ObservableObject {
             guard let dispatcher else {
                 throw DeliveryDispatchError.missingRun(runID)
             }
-            let report = try await dispatcher.dispatchReadyWave(runID: runID)
+            guard let latestAttempt = run.flatMap({
+                DeliveryDispatchStateReducer
+                    .latestAttemptsByTaskID(in: $0)[taskID]
+            }) else {
+                throw DeliveryDispatchError.taskUnavailable(taskID)
+            }
+            let report: DeliveryDispatchReport
+            let resumedReservation = latestAttempt.externalSession == nil
+                && latestAttempt.status == .queued
+            if resumedReservation {
+                report = try await dispatcher.dispatchReadyWave(runID: runID)
+            } else {
+                report = try await dispatcher.retryTask(
+                    runID: runID,
+                    taskID: taskID,
+                    expectedAttemptID: latestAttempt.id
+                )
+            }
             try await apply(snapshot: report.snapshot)
             statusMessage = report.failedTaskIDs.isEmpty
-                ? "The persisted dispatch reservation was retried."
-                : "The backend still cannot bind the persisted reservation."
+                ? (resumedReservation
+                    ? "The persisted dispatch reservation was retried."
+                    : "The retry was dispatched in a new isolated attempt.")
+                : "The backend could not bind the retry reservation."
         } catch {
             errorMessage = error.localizedDescription
             try? await reloadSelectedRun()
+        }
+    }
+
+    func exportFunnel(to destinationURL: URL) {
+        guard !isBusy, let run else { return }
+        activity = .exportingFunnel
+        errorMessage = nil
+        statusMessage = nil
+        defer { activity = .idle }
+        do {
+            _ = try DeliveryFunnelExporter().export(
+                run: run,
+                to: destinationURL,
+                exportedAt: now()
+            )
+            statusMessage = "Exported privacy-filtered funnel metrics to \(destinationURL.lastPathComponent)."
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -436,7 +474,8 @@ final class DeliveryControlCenterViewModel: ObservableObject {
                     fileURLWithPath: identity.resolvedRepositoryRootPath,
                     isDirectory: true
                 ),
-                isolation: .isolatedWorkspace
+                isolation: .isolatedWorkspace,
+                permissionScope: .workspaceReadWrite
             )
         ]
         return DeterministicFixtureExecutionBackend(

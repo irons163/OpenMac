@@ -73,11 +73,20 @@ nonisolated enum DeliveryDispatchError:
     case backendNotReady(String?)
     case projectUnavailable(ExecutionProjectID)
     case isolationUnavailable(ExecutionProjectID)
+    case permissionScopeUnavailable(
+        ExecutionProjectID,
+        reported: ExecutionPermissionScope
+    )
     case projectRepositoryMismatch(ExecutionProjectID)
     case dispatchTimestampPrecedesPersistedState
     case duplicateOutcome(UUID)
     case missingAttempt(UUID)
     case attemptReservationConflict(UUID)
+    case taskUnavailable(UUID)
+    case retryAttemptMismatch(expected: UUID, latest: UUID?)
+    case attemptNotRetryable(UUID)
+    case attemptSequenceExhausted(UUID)
+    case dependentTaskAlreadyAttempted(UUID)
     case malformedStartReceipt(UUID)
 
     nonisolated var errorDescription: String? {
@@ -101,6 +110,8 @@ nonisolated enum DeliveryDispatchError:
             return "Execution project \(projectID.rawValue) is unavailable."
         case let .isolationUnavailable(projectID):
             return "Execution project \(projectID.rawValue) does not guarantee an isolated workspace."
+        case let .permissionScopeUnavailable(projectID, reported):
+            return "Execution project \(projectID.rawValue) reported \(reported.rawValue) permissions; OpenMac requires workspace-scoped read/write access."
         case let .projectRepositoryMismatch(projectID):
             return "Execution project \(projectID.rawValue) does not match the approved repository."
         case .dispatchTimestampPrecedesPersistedState:
@@ -111,6 +122,16 @@ nonisolated enum DeliveryDispatchError:
             return "Dispatch attempt \(attemptID.uuidString) is unavailable."
         case let .attemptReservationConflict(attemptID):
             return "Dispatch attempt \(attemptID.uuidString) no longer matches its persisted reservation."
+        case let .taskUnavailable(taskID):
+            return "Delivery task \(taskID.uuidString) is unavailable."
+        case let .retryAttemptMismatch(expected, latest):
+            return "Retry expected attempt \(expected.uuidString), but the latest attempt is \(latest?.uuidString ?? "missing")."
+        case let .attemptNotRetryable(attemptID):
+            return "Execution attempt \(attemptID.uuidString) is not terminal and retryable."
+        case let .attemptSequenceExhausted(taskID):
+            return "Delivery task \(taskID.uuidString) exhausted its attempt sequence."
+        case let .dependentTaskAlreadyAttempted(taskID):
+            return "Delivery task \(taskID.uuidString) cannot be retried after a dependent task has started."
         case let .malformedStartReceipt(attemptID):
             return "The backend returned an invalid start receipt for attempt \(attemptID.uuidString)."
         }
@@ -129,6 +150,15 @@ nonisolated protocol DeliveryDispatchPersisting: DeliveryRunStoring {
         _ outcomes: [DeliveryDispatchAttemptOutcome],
         runID: UUID
     ) async throws -> DeliveryRunSnapshot
+
+    func prepareRetryDispatch(
+        runID: UUID,
+        taskID: UUID,
+        expectedAttemptID: UUID,
+        backendID: String,
+        projectID: ExecutionProjectID,
+        requestedAt: Date
+    ) async throws -> DeliveryDispatchPreparation
 
     func stopFutureDispatch(
         runID: UUID,
@@ -155,8 +185,45 @@ actor DeliveryDispatcher {
     }
 
     func dispatchReadyWave(runID: UUID) async throws -> DeliveryDispatchReport {
+        let backendID = try await preflight(runID: runID)
+        let preparation = try await store.prepareReadyDispatch(
+            runID: runID,
+            backendID: backendID,
+            projectID: projectID,
+            requestedAt: now()
+        )
+        return try await execute(preparation, runID: runID)
+    }
+
+    func retryTask(
+        runID: UUID,
+        taskID: UUID,
+        expectedAttemptID: UUID
+    ) async throws -> DeliveryDispatchReport {
+        let backendID = try await preflight(runID: runID)
+        let preparation = try await store.prepareRetryDispatch(
+            runID: runID,
+            taskID: taskID,
+            expectedAttemptID: expectedAttemptID,
+            backendID: backendID,
+            projectID: projectID,
+            requestedAt: now()
+        )
+        return try await execute(preparation, runID: runID)
+    }
+
+    func stopFutureDispatch(runID: UUID) async throws -> DeliveryRunSnapshot {
+        try await store.stopFutureDispatch(
+            runID: runID,
+            stoppedAt: now()
+        )
+    }
+
+    private func preflight(runID: UUID) async throws -> String {
         let initialSnapshot = try await store.load()
-        guard let initialRun = initialSnapshot?.runs.first(where: { $0.id == runID }) else {
+        guard let initialRun = initialSnapshot?.runs.first(where: {
+            $0.id == runID
+        }) else {
             throw DeliveryDispatchError.missingRun(runID)
         }
         try validateRepositoryIdentity(for: initialRun)
@@ -178,16 +245,22 @@ actor DeliveryDispatcher {
         guard project.isolation == .isolatedWorkspace else {
             throw DeliveryDispatchError.isolationUnavailable(projectID)
         }
+        guard project.permissionScope == .workspaceReadWrite else {
+            throw DeliveryDispatchError.permissionScopeUnavailable(
+                projectID,
+                reported: project.permissionScope
+            )
+        }
         guard projectMatchesApprovedRepository(project, run: initialRun) else {
             throw DeliveryDispatchError.projectRepositoryMismatch(projectID)
         }
+        return backendID
+    }
 
-        let preparation = try await store.prepareReadyDispatch(
-            runID: runID,
-            backendID: backendID,
-            projectID: projectID,
-            requestedAt: now()
-        )
+    private func execute(
+        _ preparation: DeliveryDispatchPreparation,
+        runID: UUID
+    ) async throws -> DeliveryDispatchReport {
         guard !preparation.reservations.isEmpty else {
             return DeliveryDispatchReport(
                 runID: runID,
@@ -268,13 +341,6 @@ actor DeliveryDispatcher {
             startedTaskIDs: startedTaskIDs,
             failedTaskIDs: failedTaskIDs,
             snapshot: snapshot
-        )
-    }
-
-    func stopFutureDispatch(runID: UUID) async throws -> DeliveryRunSnapshot {
-        try await store.stopFutureDispatch(
-            runID: runID,
-            stoppedAt: now()
         )
     }
 

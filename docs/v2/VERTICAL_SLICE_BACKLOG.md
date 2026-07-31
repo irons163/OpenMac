@@ -15,9 +15,10 @@
 - [ ] VS-07：AO reference adapter 已完成 health／served OpenAPI version、project selection、idempotent start、snapshot facts 與 stop 的隔離實作；12 個 captured contract tests 固定於 upstream revision `9caafbee89383c9bf7e904936eb88c48add2fa88`，並覆蓋 snapshot 去重、未知狀態 fail-closed 與明確 terminated mapping。本機沒有 AO CLI 或 running daemon，尚欠建立一個真實隔離 session 的 smoke test，故不把 ticket 或 MVP 真實 backend 條件標成完成。
 - [ ] VS-08：已保存 reconcile failure 與 stop acknowledgement，Control Center 對可恢復 backend 會在重啟載入時 reconcile，也可手動重試；相同 AO snapshot 不重播 facts，backend down／未知狀態顯示 `Unknown`／`Needs You`，stop receipt 不會假裝 session 已終止。尚欠可設定且驗證過的 AO dashboard deep-link，以及在 live daemon 上完成 restart／stop smoke。
 - [ ] VS-09：已新增獨立 `XcodeVerifier`、Control Center 驗證動作與 atomic evidence persistence；執行前核對 backend-confirmed workspace、branch、Git common directory 與 container，命令以 argument array 啟動並保存 scheme、command、exit status、bounded summary、時間及 `.xcresult`。真實 Swift package smoke 已產生並 round-trip 保存 build record；失敗 evidence 會立即進 `Needs You` 且不能成為 `Ready to Merge`。AO captured contract 未提供 workspace path，因此 AO local verification 維持 fail-closed，尚待 upstream 可驗證 identity 或 live backend 路徑。
-- [ ] 下一步：在相容 AO daemon 完成 VS-07～VS-09 live smoke、dashboard deep-link 與 verification workspace identity，再進 VS-10 recovery。
+- [x] VS-10：terminal failed／stopped task 可由明確 Retry 建立 sequence+1、全新 idempotency key 的 isolated attempt；舊 reservation resume 仍重用原 key。Retry 以 expected latest-attempt identity、file lock 與 CAS 防止重複，已有 downstream attempt 時 fail closed。Dispatch project 現在必須明確保證 workspace read/write permission，`unknown`／`danger-full-access` 都在建立 reservation 前拒絕。Control Center 可匯出去識別化本機 funnel JSON，只含里程碑 duration／計數／衍生狀態，不含 brief、prompt、路徑、branch／commit、command／log 或 PR URL。
+- [ ] 下一步：產出 VS-11 可安裝測試 build；並在相容 AO daemon 完成 VS-07～VS-09 live smoke、dashboard deep-link、permission 與 verification workspace identity。
 
-VS-01～VS-09 contract path 目前由 121 個測試覆蓋，其中 Xcode verifier suite 包含一個真實 Swift package `xcodebuild` smoke；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
+VS-01～VS-10 contract path 目前由 125 個測試覆蓋，其中 Xcode verifier suite 包含一個真實 Swift package `xcodebuild` smoke；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
 
 ## 1. Slice 完成畫面
 

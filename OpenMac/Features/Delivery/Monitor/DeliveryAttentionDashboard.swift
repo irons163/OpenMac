@@ -99,22 +99,38 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                     )
                 )
             case .failed:
+                let canRetry = canCreateRetryAttempt(
+                    taskID: task.id,
+                    plan: plan,
+                    run: run
+                )
                 needsYou.append(
                     item(
                         task: task,
                         detail: observation?.summary
                             ?? "The backend session failed.",
-                        nextStep: "Inspect the source and failure evidence before retrying.",
-                        sourceURL: sourceURL
+                        nextStep: canRetry
+                            ? "Inspect the failure, then create a new isolated attempt."
+                            : "Inspect the failure. A dependent task already started, so retry is blocked to avoid mixing attempt lineages.",
+                        sourceURL: sourceURL,
+                        canRetryDispatch: canRetry
                     )
                 )
             case .stopped:
+                let canRetry = canCreateRetryAttempt(
+                    taskID: task.id,
+                    plan: plan,
+                    run: run
+                )
                 needsYou.append(
                     item(
                         task: task,
                         detail: "The backend session stopped before verification completed.",
-                        nextStep: "Inspect the source before deciding whether to create a later retry.",
-                        sourceURL: sourceURL
+                        nextStep: canRetry
+                            ? "Inspect the source, then create a new isolated attempt."
+                            : "Inspect the source. A dependent task already started, so retry is blocked to avoid mixing attempt lineages.",
+                        sourceURL: sourceURL,
+                        canRetryDispatch: canRetry
                     )
                 )
             case .unknown:
@@ -286,5 +302,23 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
         requirementID: UUID
     ) -> String {
         "\(attemptID.uuidString):\(requirementID.uuidString)"
+    }
+
+    nonisolated private static func canCreateRetryAttempt(
+        taskID: UUID,
+        plan: DeliveryPlan,
+        run: DeliveryRun
+    ) -> Bool {
+        guard run.stoppedAt == nil else { return false }
+        let dependentTaskIDs = Set(
+            plan.dependencyEdges.compactMap {
+                $0.prerequisiteTaskID == taskID
+                    ? $0.dependentTaskID
+                    : nil
+            }
+        )
+        return !run.attempts.contains {
+            dependentTaskIDs.contains($0.taskID)
+        }
     }
 }

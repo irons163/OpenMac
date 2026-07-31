@@ -15,7 +15,8 @@ private enum DeliveryAttentionTestSupport {
                 id: projectID,
                 name: "Attention Fixture",
                 repositoryURL: DeliveryGitTestRepository.shared.rootURL,
-                isolation: .isolatedWorkspace
+                isolation: .isolatedWorkspace,
+                permissionScope: .workspaceReadWrite
             )
         ]
         configuration.timestampMode = .wallClock

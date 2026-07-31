@@ -231,6 +231,13 @@ round-trip 驗證 command、scheme、exit status、summary、timestamps 與
 `.xcresult` reference。AO captured API 尚未提供 session workspace path，因此
 AO local verification 仍 fail closed，不以原始 repository 假冒隔離 workspace。
 
+Recovery contract 會區分同一 dispatch reservation 的 idempotent resume 與
+terminal attempt 的新 retry。新 retry 必須綁定使用者看到的 latest attempt；
+若 identity 已 stale、downstream 已開始、backend 未明確保證 workspace-scoped
+read/write，或回報 `danger-full-access`，都不得建立 session。MVP funnel export
+只在本機由使用者主動存檔，且不包含 feature／task 內容、repository identity、
+commands、logs 或外部 URL。
+
 ## 10. 安全與信任原則
 
 1. 預設 workspace-scoped；不得以 `danger-full-access` 作為 v2 預設。

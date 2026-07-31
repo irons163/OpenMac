@@ -159,7 +159,8 @@ nonisolated struct FixtureExecutionBackendConfiguration: Sendable {
                     id: ExecutionProjectID("fixture-project"),
                     name: "Fixture Xcode Project",
                     repositoryURL: URL(fileURLWithPath: "/fixture/OpenMac"),
-                    isolation: .isolatedWorkspace
+                    isolation: .isolatedWorkspace,
+                    permissionScope: .workspaceReadWrite
                 )
             ],
             baseTime: baseTime

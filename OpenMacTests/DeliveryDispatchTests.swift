@@ -132,6 +132,7 @@ enum DeliveryDispatchFixture {
 
     static func backendConfiguration(
         isolation: ExecutionProjectIsolation = .isolatedWorkspace,
+        permissionScope: ExecutionPermissionScope = .workspaceReadWrite,
         scriptsByTaskID: [UUID: FixtureExecutionScript] = [:]
     ) -> FixtureExecutionBackendConfiguration {
         var configuration = FixtureExecutionBackendConfiguration.standard
@@ -140,7 +141,8 @@ enum DeliveryDispatchFixture {
                 id: projectID,
                 name: "Dispatch Fixture",
                 repositoryURL: DeliveryGitTestRepository.shared.rootURL,
-                isolation: isolation
+                isolation: isolation,
+                permissionScope: permissionScope
             )
         ]
         configuration.scriptsByTaskID = scriptsByTaskID
