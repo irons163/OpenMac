@@ -41,8 +41,12 @@ private actor CapturedAOTransport: AgentOrchestratorHTTPTransport {
 
     private var responses: [Key: [AgentOrchestratorHTTPResponse]]
     private var capturedRequests: [CapturedAORequest] = []
+    private let responseDelayNanoseconds: UInt64
 
-    init(stubs: [CapturedAOStub]) {
+    init(
+        stubs: [CapturedAOStub],
+        responseDelayNanoseconds: UInt64 = 0
+    ) {
         var responses: [Key: [AgentOrchestratorHTTPResponse]] = [:]
         for stub in stubs {
             let key = Key(
@@ -53,6 +57,7 @@ private actor CapturedAOTransport: AgentOrchestratorHTTPTransport {
             responses[key, default: []].append(stub.response)
         }
         self.responses = responses
+        self.responseDelayNanoseconds = responseDelayNanoseconds
     }
 
     func send(
@@ -76,6 +81,11 @@ private actor CapturedAOTransport: AgentOrchestratorHTTPTransport {
             body: request.httpBody
         )
         capturedRequests.append(captured)
+        if responseDelayNanoseconds > 0 {
+            try await Task.sleep(
+                nanoseconds: responseDelayNanoseconds
+            )
+        }
 
         let key = Key(
             method: method,
@@ -148,12 +158,16 @@ private enum AgentOrchestratorAdapterTestFixture {
         supportedVersions: Set<String> = [
             AgentOrchestratorBackendConfiguration.capturedAPIVersion
         ],
-        expectedDaemonPID: Int? = nil
+        expectedDaemonPID: Int? = nil,
+        responseDelayNanoseconds: UInt64 = 0
     ) throws -> (
         AgentOrchestratorExecutionBackend,
         CapturedAOTransport
     ) {
-        let transport = CapturedAOTransport(stubs: stubs)
+        let transport = CapturedAOTransport(
+            stubs: stubs,
+            responseDelayNanoseconds: responseDelayNanoseconds
+        )
         let configuration = try AgentOrchestratorBackendConfiguration(
             baseURL: URL(string: "http://127.0.0.1:3001")!,
             supportedAPIVersions: supportedVersions,
@@ -262,6 +276,66 @@ struct AgentOrchestratorAdapterTests {
                 "/readyz",
                 "/api/v1/projects"
             ]
+        )
+    }
+
+    @Test("concurrent operations share one daemon identity probe")
+    func concurrentOperationsCoalesceIdentityProbe() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs,
+                responseDelayNanoseconds: 5_000_000
+            )
+
+        _ = try await backend.health()
+        async let first = backend.listProjects()
+        async let second = backend.listProjects()
+        let projectLists = try await (first, second)
+
+        #expect(!projectLists.0.isEmpty)
+        #expect(projectLists.0 == projectLists.1)
+        let requests = await transport.requests()
+        #expect(
+            requests.filter { $0.path == "/healthz" }.count == 2
+        )
+        #expect(
+            requests.filter { $0.path == "/readyz" }.count == 2
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/openapi.yaml"
+            }.count == 1
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/projects"
+            }.count == 2
         )
     }
 

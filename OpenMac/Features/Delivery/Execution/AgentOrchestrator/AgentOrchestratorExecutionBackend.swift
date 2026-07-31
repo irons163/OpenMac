@@ -101,6 +101,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         let task: Task<HealthProbeResult, any Error>
     }
 
+    private struct InFlightDaemonIdentity: Sendable {
+        let id: UUID
+        let task: Task<DaemonIdentityProbeResult, any Error>
+    }
+
     private struct HealthProbeResult: Sendable {
         let health: ExecutionBackendHealth
         let daemonPID: Int?
@@ -128,6 +133,7 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     private var compatibleAPIVersion: String?
     private var compatibleDaemonPID: Int?
     private var inFlightHealth: InFlightHealth?
+    private var inFlightDaemonIdentity: InFlightDaemonIdentity?
     private var startRequestByID: [UUID: ExecutionStartRequest] = [:]
     private var startTaskByID:
         [UUID: Task<ExecutionStartReceipt, any Error>] = [:]
@@ -422,15 +428,49 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         )
     }
 
+    private func daemonIdentityProbe() async throws
+        -> DaemonIdentityProbeResult {
+        let probe: InFlightDaemonIdentity
+        if let existing = inFlightDaemonIdentity {
+            probe = existing
+        } else {
+            let identifier = UUID()
+            let configuration = configuration
+            let transport = transport
+            let checkedAt = now()
+            let task = Task {
+                try await Self.performDaemonIdentityProbe(
+                    configuration: configuration,
+                    transport: transport,
+                    checkedAt: checkedAt
+                )
+            }
+            probe = InFlightDaemonIdentity(
+                id: identifier,
+                task: task
+            )
+            inFlightDaemonIdentity = probe
+        }
+
+        do {
+            let result = try await probe.task.value
+            if inFlightDaemonIdentity?.id == probe.id {
+                inFlightDaemonIdentity = nil
+            }
+            return result
+        } catch {
+            if inFlightDaemonIdentity?.id == probe.id {
+                inFlightDaemonIdentity = nil
+            }
+            throw error
+        }
+    }
+
     private func requireCompatibleAPI() async throws {
         if compatibleAPIVersion != nil,
            let cachedPID = compatibleDaemonPID {
             do {
-                let identity = try await Self.performDaemonIdentityProbe(
-                    configuration: configuration,
-                    transport: transport,
-                    checkedAt: now()
-                )
+                let identity = try await daemonIdentityProbe()
                 switch identity {
                 case let .ready(pid):
                     if pid == cachedPID {
