@@ -64,7 +64,7 @@ nonisolated enum AgentOrchestratorWire {
         let displayName: String
     }
 
-    struct Session: Decodable, Sendable {
+    struct Session: Codable, Sendable {
         let id: String
         let projectId: String
         let kind: String
@@ -80,12 +80,12 @@ nonisolated enum AgentOrchestratorWire {
         let prs: [PullRequest]
     }
 
-    struct Activity: Decodable, Sendable {
+    struct Activity: Codable, Sendable {
         let state: String
         let lastActivityAt: String
     }
 
-    struct PullRequest: Decodable, Sendable {
+    struct PullRequest: Codable, Sendable {
         let url: String
         let number: Int
         let state: String
@@ -96,13 +96,13 @@ nonisolated enum AgentOrchestratorWire {
         let updatedAt: String
     }
 
-    struct WorkspaceFiles: Decodable, Sendable {
+    struct WorkspaceFiles: Codable, Sendable {
         let sessionId: String
         let files: [WorkspaceFile]
         let truncated: Bool
     }
 
-    struct WorkspaceFile: Decodable, Sendable {
+    struct WorkspaceFile: Codable, Sendable {
         let path: String
         let status: String
         let additions: Int
@@ -120,5 +120,16 @@ nonisolated enum AgentOrchestratorWire {
     struct FactCursor: Codable, Sendable {
         let executionID: String
         let nextSequence: UInt64
+        let snapshotFingerprint: String?
+
+        init(
+            executionID: String,
+            nextSequence: UInt64,
+            snapshotFingerprint: String? = nil
+        ) {
+            self.executionID = executionID
+            self.nextSequence = nextSequence
+            self.snapshotFingerprint = snapshotFingerprint
+        }
     }
 }

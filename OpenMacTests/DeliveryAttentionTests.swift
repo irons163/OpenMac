@@ -69,6 +69,75 @@ private enum DeliveryAttentionTestSupport {
     }
 }
 
+private struct UnavailableFactsExecutionBackend: ExecutionBackend {
+    let backendID: String
+
+    func health() async throws -> ExecutionBackendHealth {
+        throw ExecutionBackendError.unavailable("AO is offline.")
+    }
+
+    func listProjects() async throws -> [ExecutionProject] {
+        throw ExecutionBackendError.unavailable("AO is offline.")
+    }
+
+    func start(
+        _ request: ExecutionStartRequest
+    ) async throws -> ExecutionStartReceipt {
+        throw ExecutionBackendError.unavailable("AO is offline.")
+    }
+
+    func facts(
+        for executionID: ExecutionID,
+        after cursor: ExecutionFactCursor?
+    ) async throws -> ExecutionFactPage {
+        throw ExecutionBackendError.unavailable("AO is offline.")
+    }
+
+    func stop(
+        executionID: ExecutionID
+    ) async throws -> ExecutionStopReceipt {
+        throw ExecutionBackendError.unavailable("AO is offline.")
+    }
+}
+
+private struct PersistedReconcileExecutionBackend: ExecutionBackend {
+    nonisolated let backendID: String
+    nonisolated let supportsPersistedSessionReconciliation = true
+    let backend: DeterministicFixtureExecutionBackend
+
+    init(_ backend: DeterministicFixtureExecutionBackend) {
+        self.backend = backend
+        backendID = backend.backendID
+    }
+
+    func health() async throws -> ExecutionBackendHealth {
+        try await backend.health()
+    }
+
+    func listProjects() async throws -> [ExecutionProject] {
+        try await backend.listProjects()
+    }
+
+    func start(
+        _ request: ExecutionStartRequest
+    ) async throws -> ExecutionStartReceipt {
+        try await backend.start(request)
+    }
+
+    func facts(
+        for executionID: ExecutionID,
+        after cursor: ExecutionFactCursor?
+    ) async throws -> ExecutionFactPage {
+        try await backend.facts(for: executionID, after: cursor)
+    }
+
+    func stop(
+        executionID: ExecutionID
+    ) async throws -> ExecutionStopReceipt {
+        try await backend.stop(executionID: executionID)
+    }
+}
+
 @Suite("Delivery v2 attention-first fixture loop", .serialized)
 struct DeliveryAttentionTests {
     @Test("fixture facts advance dependency waves to ready to merge")
@@ -131,6 +200,20 @@ struct DeliveryAttentionTests {
         let firstRun = try #require(first.snapshot.runs.first)
         #expect(firstRun.executionObservations.count == 2)
         #expect(firstRun.attempts.allSatisfy { $0.lastFactSequence == 1 })
+        let firstAttempt = try #require(firstRun.attempts.first)
+        let persistedCursor = try #require(firstAttempt.nextFactCursor)
+        let idle = try await store.recordExecutionFactPage(
+            ExecutionFactPage(
+                facts: [],
+                nextCursor: ExecutionFactCursor(persistedCursor),
+                hasMore: true
+            ),
+            runID: DeliveryDispatchFixture.runID,
+            attemptID: firstAttempt.id,
+            expectedCursor: ExecutionFactCursor(persistedCursor),
+            receivedAt: Date()
+        )
+        #expect(idle.storeRevision == first.snapshot.storeRevision)
 
         let restartedReconciler = DeliveryExecutionReconciler(
             store: FileDeliveryRunStore(fileURL: store.fileURL),
@@ -146,6 +229,146 @@ struct DeliveryAttentionTests {
             Set(secondRun.executionObservations.map(\.id)).count
                 == secondRun.executionObservations.count
         )
+    }
+
+    @Test("backend outage persists Unknown attention and recovery clears it")
+    func reconcileFailureFailsClosedUntilRecovery() async throws {
+        let (store, directoryURL) = try await DeliveryDispatchFixture.makeStore(
+            label: "attention-reconcile-outage"
+        )
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let backend = DeliveryAttentionTestSupport.backend()
+        let dispatcher = DeliveryDispatcher(
+            store: store,
+            backend: backend,
+            projectID: DeliveryDispatchFixture.projectID
+        )
+        _ = try await dispatcher.dispatchReadyWave(
+            runID: DeliveryDispatchFixture.runID
+        )
+        let outageReconciler = DeliveryExecutionReconciler(
+            store: store,
+            backend: UnavailableFactsExecutionBackend(
+                backendID: backend.backendID
+            )
+        )
+
+        let outage = try await outageReconciler.reconcileOnce(
+            runID: DeliveryDispatchFixture.runID
+        )
+        let outageRun = try #require(outage.snapshot.runs.first)
+        let outageDashboard = DeliveryAttentionDashboard.make(for: outageRun)
+
+        #expect(outage.failuresByAttemptID.count == 2)
+        #expect(outageRun.attempts.allSatisfy { $0.status == .running })
+        #expect(
+            outageRun.attempts.allSatisfy {
+                $0.lastReconcileFailureReason == "AO is offline."
+                    && $0.lastReconcileFailedAt != nil
+            }
+        )
+        #expect(DeliveryDispatchStateReducer.state(for: outageRun) == .needsYou)
+        #expect(outageDashboard.needsYou.count == 2)
+        #expect(
+            outageDashboard.needsYou.allSatisfy {
+                $0.detail == "AO is offline."
+            }
+        )
+
+        let recovery = try await DeliveryExecutionReconciler(
+            store: store,
+            backend: backend
+        ).reconcileOnce(runID: DeliveryDispatchFixture.runID)
+        let recoveredRun = try #require(recovery.snapshot.runs.first)
+
+        #expect(recovery.failuresByAttemptID.isEmpty)
+        #expect(
+            recoveredRun.attempts.allSatisfy {
+                $0.lastReconcileFailureReason == nil
+                    && $0.lastReconcileFailedAt == nil
+            }
+        )
+        #expect(DeliveryDispatchStateReducer.state(for: recoveredRun) == .running)
+    }
+
+    @Test("stop acknowledgement remains pending until stopped facts arrive")
+    func stopRequiresFactConfirmation() async throws {
+        let (store, directoryURL) = try await DeliveryDispatchFixture.makeStore(
+            label: "attention-stop-confirmation"
+        )
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let backend = DeliveryAttentionTestSupport.backend()
+        let (dispatcher, reconciler) = DeliveryAttentionTestSupport.services(
+            store: store,
+            backend: backend
+        )
+        _ = try await dispatcher.dispatchReadyWave(
+            runID: DeliveryDispatchFixture.runID
+        )
+        _ = try await dispatcher.stopFutureDispatch(
+            runID: DeliveryDispatchFixture.runID
+        )
+
+        let stop = try await reconciler.stopActiveExecutions(
+            runID: DeliveryDispatchFixture.runID
+        )
+        let acknowledgedRun = try #require(stop.snapshot.runs.first)
+
+        #expect(stop.acknowledgedAttemptIDs.count == 2)
+        #expect(stop.alreadyTerminalAttemptIDs.isEmpty)
+        #expect(stop.failuresByAttemptID.isEmpty)
+        #expect(
+            acknowledgedRun.attempts.allSatisfy {
+                $0.stopRequestedAt != nil && $0.status == .running
+            }
+        )
+
+        let confirmation = try await reconciler.reconcileOnce(
+            runID: DeliveryDispatchFixture.runID
+        )
+        let confirmedRun = try #require(confirmation.snapshot.runs.first)
+
+        #expect(
+            confirmedRun.attempts.allSatisfy {
+                $0.status == .stopped && $0.isFactStreamExhausted
+            }
+        )
+    }
+
+    @Test("control center restart automatically reconciles persisted sessions")
+    @MainActor
+    func controlCenterRestartReconcilesPersistedSessions() async throws {
+        let (store, directoryURL) = try await DeliveryDispatchFixture.makeStore(
+            label: "attention-control-center-restart"
+        )
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let backend = DeliveryAttentionTestSupport.backend()
+        let dispatcher = DeliveryDispatcher(
+            store: store,
+            backend: backend,
+            projectID: DeliveryDispatchFixture.projectID
+        )
+        _ = try await dispatcher.dispatchReadyWave(
+            runID: DeliveryDispatchFixture.runID
+        )
+        let model = DeliveryControlCenterViewModel(
+            persistence: store,
+            backendFactory: { _ in
+                PersistedReconcileExecutionBackend(backend)
+            }
+        )
+
+        await model.load()
+
+        #expect(model.errorMessage == nil)
+        #expect(model.run?.executionObservations.count == 2)
+        #expect(
+            model.run?.attempts.allSatisfy {
+                $0.lastFactSequence == 1 && $0.nextFactCursor != nil
+            } == true
+        )
+        #expect(model.dashboard?.state == .running)
+        #expect(model.canReconcile)
     }
 
     @Test("waiting for input appears in Needs You with an actionable reason")

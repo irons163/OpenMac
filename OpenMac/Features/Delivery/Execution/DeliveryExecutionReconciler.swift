@@ -8,6 +8,14 @@ nonisolated struct DeliveryExecutionReconcileReport: Equatable, Sendable {
     let snapshot: DeliveryRunSnapshot
 }
 
+nonisolated struct DeliveryExecutionStopReport: Equatable, Sendable {
+    let runID: UUID
+    let acknowledgedAttemptIDs: [UUID]
+    let alreadyTerminalAttemptIDs: [UUID]
+    let failuresByAttemptID: [UUID: String]
+    let snapshot: DeliveryRunSnapshot
+}
+
 nonisolated enum DeliveryExecutionReconcileError:
     Error,
     Equatable,
@@ -40,6 +48,19 @@ nonisolated protocol DeliveryExecutionFactPersisting: DeliveryRunStoring {
         attemptID: UUID,
         expectedCursor: ExecutionFactCursor?,
         receivedAt: Date
+    ) async throws -> DeliveryRunSnapshot
+
+    func recordExecutionReconcileFailure(
+        runID: UUID,
+        attemptID: UUID,
+        reason: String,
+        failedAt: Date
+    ) async throws -> DeliveryRunSnapshot
+
+    func recordExecutionStopAcknowledgements(
+        runID: UUID,
+        attemptIDs: [UUID],
+        requestedAt: Date
     ) async throws -> DeliveryRunSnapshot
 }
 
@@ -82,7 +103,15 @@ actor DeliveryExecutionReconciler {
         for attempt in attempts {
             guard let session = attempt.externalSession else { continue }
             guard session.backendID == backend.backendID else {
-                failures[attempt.id] = "The persisted session belongs to a different execution backend."
+                let reason =
+                    "The persisted session belongs to a different execution backend."
+                failures[attempt.id] = reason
+                snapshot = try await store.recordExecutionReconcileFailure(
+                    runID: runID,
+                    attemptID: attempt.id,
+                    reason: reason,
+                    failedAt: now()
+                )
                 continue
             }
             let expectedCursor = attempt.nextFactCursor.map(
@@ -103,7 +132,14 @@ actor DeliveryExecutionReconciler {
                 reconciledAttemptIDs.append(attempt.id)
                 importedFactCount += page.facts.count
             } catch {
-                failures[attempt.id] = Self.failureDescription(for: error)
+                let reason = Self.failureDescription(for: error)
+                failures[attempt.id] = reason
+                snapshot = try await store.recordExecutionReconcileFailure(
+                    runID: runID,
+                    attemptID: attempt.id,
+                    reason: reason,
+                    failedAt: now()
+                )
             }
         }
 
@@ -116,23 +152,51 @@ actor DeliveryExecutionReconciler {
         )
     }
 
-    func stopActiveExecutions(runID: UUID) async throws -> [UUID: String] {
-        guard let snapshot = try await store.load(),
-              let run = snapshot.runs.first(where: { $0.id == runID }) else {
+    func stopActiveExecutions(
+        runID: UUID
+    ) async throws -> DeliveryExecutionStopReport {
+        guard let initialSnapshot = try await store.load(),
+              let run = initialSnapshot.runs.first(where: { $0.id == runID }) else {
             throw DeliveryDispatchError.missingRun(runID)
         }
         var failures: [UUID: String] = [:]
+        var acknowledgedAttemptIDs: [UUID] = []
+        var alreadyTerminalAttemptIDs: [UUID] = []
         for attempt in activeAttempts(in: run) {
             guard let session = attempt.externalSession else { continue }
+            guard session.backendID == backend.backendID else {
+                failures[attempt.id] =
+                    "The persisted session belongs to a different execution backend."
+                continue
+            }
             do {
-                _ = try await backend.stop(
+                let receipt = try await backend.stop(
                     executionID: ExecutionID(session.sessionID)
                 )
+                switch receipt.disposition {
+                case .accepted, .alreadyStopped:
+                    acknowledgedAttemptIDs.append(attempt.id)
+                case .alreadyTerminal:
+                    alreadyTerminalAttemptIDs.append(attempt.id)
+                }
             } catch {
                 failures[attempt.id] = Self.failureDescription(for: error)
             }
         }
-        return failures
+        let recordedAttemptIDs =
+            acknowledgedAttemptIDs + alreadyTerminalAttemptIDs
+        let snapshot = try await store.recordExecutionStopAcknowledgements(
+            runID: runID,
+            attemptIDs: recordedAttemptIDs,
+            requestedAt: now()
+        )
+        return DeliveryExecutionStopReport(
+            runID: runID,
+            acknowledgedAttemptIDs: acknowledgedAttemptIDs,
+            alreadyTerminalAttemptIDs: alreadyTerminalAttemptIDs,
+            failuresByAttemptID: failures,
+            snapshot: snapshot
+        )
     }
 
     private func activeAttempts(in run: DeliveryRun) -> [ExecutionAttempt] {

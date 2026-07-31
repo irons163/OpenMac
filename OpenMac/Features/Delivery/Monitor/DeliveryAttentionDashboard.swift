@@ -121,11 +121,14 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                 needsYou.append(
                     item(
                         task: task,
-                        detail: attempt?.isFactStreamExhausted == true
-                            ? "The backend fact stream ended without a terminal state."
-                            : observation?.summary
-                                ?? "The backend reported an unknown state.",
-                        nextStep: "Open the source and reconcile the backend identity before continuing.",
+                        detail: attempt?.lastReconcileFailureReason
+                            ?? (attempt?.isFactStreamExhausted == true
+                                ? "The backend fact stream ended without a terminal state."
+                                : observation?.summary
+                                    ?? "The backend reported an unknown state."),
+                        nextStep: attempt?.lastReconcileFailureReason == nil
+                            ? "Open the source and reconcile the backend identity before continuing."
+                            : "Reconnect the execution backend and reconcile this persisted session before continuing.",
                         sourceURL: sourceURL
                     )
                 )

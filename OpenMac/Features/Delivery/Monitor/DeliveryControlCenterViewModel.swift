@@ -6,6 +6,7 @@ final class DeliveryControlCenterViewModel: ObservableObject {
     enum Activity: Equatable {
         case idle
         case runningFixture
+        case reconciling
         case retrying
         case stopping
     }
@@ -25,6 +26,7 @@ final class DeliveryControlCenterViewModel: ObservableObject {
     private var configuredRunID: UUID?
     private var dispatcher: DeliveryDispatcher?
     private var reconciler: DeliveryExecutionReconciler?
+    private var supportsPersistedSessionReconciliation = false
 
     init(
         persistence: FileDeliveryRunStore = FileDeliveryRunStore(),
@@ -56,6 +58,17 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         return run.plan?.approval != nil && run.stoppedAt == nil
     }
 
+    var canReconcile: Bool {
+        guard !isBusy, supportsPersistedSessionReconciliation, let run else {
+            return false
+        }
+        return run.attempts.contains {
+            $0.externalSession != nil
+                && !$0.isFactStreamExhausted
+                && [.queued, .running, .blocked, .unknown].contains($0.status)
+        }
+    }
+
     func load() async {
         guard !isBusy else { return }
         isLoading = true
@@ -63,8 +76,35 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             try await reloadSelectedRun()
+            guard run != nil else { return }
+            try configureServicesIfNeeded()
+            if supportsPersistedSessionReconciliation,
+               let runID = run?.id,
+               run?.attempts.contains(where: {
+                   $0.externalSession != nil
+                       && !$0.isFactStreamExhausted
+                       && [.queued, .running, .blocked, .unknown]
+                           .contains($0.status)
+               }) == true {
+                try await reconcileSelectedRun(runID: runID)
+            }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func reconcile() async {
+        guard canReconcile, let runID = run?.id else { return }
+        activity = .reconciling
+        errorMessage = nil
+        statusMessage = nil
+        defer { activity = .idle }
+        do {
+            try configureServicesIfNeeded()
+            try await reconcileSelectedRun(runID: runID)
+        } catch {
+            errorMessage = error.localizedDescription
+            try? await reloadSelectedRun()
         }
     }
 
@@ -164,17 +204,23 @@ final class DeliveryControlCenterViewModel: ObservableObject {
             guard let dispatcher, let reconciler else {
                 throw DeliveryDispatchError.missingRun(runID)
             }
-            let snapshot = try await dispatcher.stopFutureDispatch(
+            _ = try await dispatcher.stopFutureDispatch(
                 runID: runID
             )
-            let failures = try await reconciler.stopActiveExecutions(
+            let report = try await reconciler.stopActiveExecutions(
                 runID: runID
             )
-            try await apply(snapshot: snapshot)
-            if failures.isEmpty {
-                statusMessage = "Future dispatch stopped; active fixture sessions received a stop request."
+            try await apply(snapshot: report.snapshot)
+            if report.failuresByAttemptID.isEmpty {
+                statusMessage =
+                    "Future dispatch stopped; "
+                    + "\(report.acknowledgedAttemptIDs.count) session stop request(s) "
+                    + "acknowledged. Termination remains pending until backend "
+                    + "facts confirm it."
             } else {
-                errorMessage = failures.values.sorted().joined(separator: " · ")
+                errorMessage = report.failuresByAttemptID.values
+                    .sorted()
+                    .joined(separator: " · ")
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -211,13 +257,44 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         dashboard = DeliveryAttentionDashboard.make(for: updatedRun)
     }
 
+    private func reconcileSelectedRun(runID: UUID) async throws {
+        guard let reconciler else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+        let report = try await reconciler.reconcileOnce(runID: runID)
+        try await apply(snapshot: report.snapshot)
+        if report.failuresByAttemptID.isEmpty {
+            statusMessage =
+                "Reconciled \(report.reconciledAttemptIDs.count) persisted "
+                + "session(s) and imported \(report.importedFactCount) fact(s)."
+        } else {
+            statusMessage =
+                "Reconcile completed with "
+                + "\(report.failuresByAttemptID.count) session(s) needing attention."
+        }
+    }
+
     private func configureServicesIfNeeded() throws {
         guard let run else {
             throw DeliveryDispatchError.missingRun(UUID())
         }
         guard configuredRunID != run.id else { return }
         let backend = try backendFactory(run)
-        let projectID = Self.fixtureProjectID(for: run.id)
+        let persistedProjectIDs = Set(
+            run.attempts.compactMap { attempt -> String? in
+                guard attempt.backendID == backend.backendID else {
+                    return nil
+                }
+                return attempt.projectID ?? attempt.externalSession?.projectID
+            }
+        )
+        guard persistedProjectIDs.count <= 1 else {
+            throw ExecutionBackendError.conflict(
+                "The persisted run contains sessions from multiple backend projects."
+            )
+        }
+        let projectID = persistedProjectIDs.first.map(ExecutionProjectID.init)
+            ?? Self.fixtureProjectID(for: run.id)
         dispatcher = DeliveryDispatcher(
             store: persistence,
             backend: backend,
@@ -229,6 +306,8 @@ final class DeliveryControlCenterViewModel: ObservableObject {
             backend: backend,
             now: now
         )
+        supportsPersistedSessionReconciliation =
+            backend.supportsPersistedSessionReconciliation
         configuredRunID = run.id
     }
 

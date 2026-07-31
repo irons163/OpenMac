@@ -37,6 +37,11 @@ nonisolated enum DeliveryExecutionFactReducer {
             run: updatedRun,
             receivedAt: receivedAt
         )
+        let clearedReconcileFailure =
+            attempt.lastReconcileFailureReason != nil
+                || attempt.lastReconcileFailedAt != nil
+        attempt.lastReconcileFailureReason = nil
+        attempt.lastReconcileFailedAt = nil
 
         for fact in page.facts {
             let observationID = executionObservationID(
@@ -84,7 +89,9 @@ nonisolated enum DeliveryExecutionFactReducer {
             }
         }
         updatedRun.attempts[attemptIndex] = attempt
-        updatedRun.updatedAt = receivedAt
+        if !page.facts.isEmpty || clearedReconcileFailure {
+            updatedRun.updatedAt = receivedAt
+        }
         return updatedRun
     }
 
@@ -99,12 +106,23 @@ nonisolated enum DeliveryExecutionFactReducer {
             guard let nextCursor = page.nextCursor?.rawValue,
                   !nextCursor.trimmingCharacters(
                       in: .whitespacesAndNewlines
-                  ).isEmpty,
-                  nextCursor != attempt.nextFactCursor,
-                  !page.facts.isEmpty else {
+                  ).isEmpty else {
                 throw DeliveryExecutionReconcileError.malformedFactPage(
                     attemptID: attempt.id,
-                    reason: "A non-terminal page requires facts and a new cursor."
+                    reason: "A non-terminal page requires a cursor."
+                )
+            }
+            if page.facts.isEmpty {
+                guard nextCursor == attempt.nextFactCursor else {
+                    throw DeliveryExecutionReconcileError.malformedFactPage(
+                        attemptID: attempt.id,
+                        reason: "An idle polling page must preserve its cursor."
+                    )
+                }
+            } else if nextCursor == attempt.nextFactCursor {
+                throw DeliveryExecutionReconcileError.malformedFactPage(
+                    attemptID: attempt.id,
+                    reason: "A non-terminal fact page requires a new cursor."
                 )
             }
         }

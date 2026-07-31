@@ -1,0 +1,21 @@
+{
+  "session": {
+    "id": "openmac-7",
+    "projectId": "openmac",
+    "kind": "worker",
+    "harness": "codex",
+    "displayName": "Login button",
+    "activity": {
+      "state": "idle",
+      "lastActivityAt": "2026-07-31T05:11:00Z"
+    },
+    "isTerminated": false,
+    "terminateOnPrMerge": false,
+    "createdAt": "2026-07-31T05:00:00Z",
+    "updatedAt": "2026-07-31T05:11:00Z",
+    "status": "teleporting",
+    "scmStatus": "unknown",
+    "branch": "openmac/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "prs": []
+  }
+}

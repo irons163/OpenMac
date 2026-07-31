@@ -12,10 +12,11 @@
 - [x] VS-04：Debug-only 獨立 plan review window、完整 typed plan 編輯、deterministic waves／risk／session 摘要、原子 draft save／approval、store 與 plan 雙 CAS、跨程序 file lock、schema v1 → v2 fail-closed migration，以及零 execution backend calls 的 fixture bootstrap。Approval scope 綁定整份 brief、plan hash、reviewer/time、canonical Git common-directory 與 planning 前固定的 base commit；落盤與批准都會重新驗證 identity。
 - [x] VS-05：只 dispatch 當前 ready wave；先原子保存 task → attempt reservation 與 project/idempotency identity，再並行呼叫具隔離保證的 backend，最後綁定 session receipt。未綁定 reservation 可在重啟後安全重播；並行／重複 dispatch 共用同一批 attempt，start failure 保留可重試原因且不建立 ghost attempt；stop-future-dispatch 會阻止後續 wave。
 - [x] VS-06：新增 Debug-only 獨立 Delivery Control Center（`⌥⌘D`），依 persisted backend observations、cursor、attempt、evidence 與 PR facts 衍生 `Needs You`／Running／Verifying／`Ready to Merge`。Fixture loop 可依 DAG 自動跑完 happy path；blocked、failed、missing evidence 都保留原因與下一步，未知或失敗 facts 不會被顯示為完成。
-- [ ] VS-07：AO reference adapter 已完成 health／served OpenAPI version、project selection、idempotent start、snapshot facts 與 stop 的隔離實作；9 個 captured contract tests 固定於 upstream revision `9caafbee89383c9bf7e904936eb88c48add2fa88`。本機沒有 AO CLI 或 running daemon，尚欠建立一個真實隔離 session 的 smoke test，故不把 ticket 或 MVP 真實 backend 條件標成完成。
-- [ ] 下一步：在相容 AO daemon 完成 VS-07 live smoke，再進 VS-08 reconcile／attention。
+- [ ] VS-07：AO reference adapter 已完成 health／served OpenAPI version、project selection、idempotent start、snapshot facts 與 stop 的隔離實作；12 個 captured contract tests 固定於 upstream revision `9caafbee89383c9bf7e904936eb88c48add2fa88`，並覆蓋 snapshot 去重、未知狀態 fail-closed 與明確 terminated mapping。本機沒有 AO CLI 或 running daemon，尚欠建立一個真實隔離 session 的 smoke test，故不把 ticket 或 MVP 真實 backend 條件標成完成。
+- [ ] VS-08：已保存 reconcile failure 與 stop acknowledgement，Control Center 對可恢復 backend 會在重啟載入時 reconcile，也可手動重試；相同 AO snapshot 不重播 facts，backend down／未知狀態顯示 `Unknown`／`Needs You`，stop receipt 不會假裝 session 已終止。尚欠可設定且驗證過的 AO dashboard deep-link，以及在 live daemon 上完成 restart／stop smoke。
+- [ ] 下一步：在相容 AO daemon 完成 VS-07／VS-08 live smoke 與 dashboard deep-link，再進 VS-09 evidence。
 
-VS-01～VS-07 contract path 目前由 111 個隔離測試覆蓋；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
+VS-01～VS-08 contract path 目前由 117 個隔離測試覆蓋；測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
 
 ## 1. Slice 完成畫面
 

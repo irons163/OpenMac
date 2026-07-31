@@ -509,6 +509,123 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("an unchanged running snapshot produces an idle polling page")
+    func unchangedSnapshotDoesNotReplayFacts() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "session-running.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "session-running.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7/workspace/files",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "workspace-files.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7/workspace/files",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "workspace-files.json"
+                )
+            )
+        ])
+        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
+            stubs: stubs
+        )
+        let executionID = ExecutionID("openmac-7")
+
+        let first = try await backend.facts(for: executionID, after: nil)
+        let second = try await backend.facts(
+            for: executionID,
+            after: first.nextCursor
+        )
+
+        #expect(!first.facts.isEmpty)
+        #expect(second.facts.isEmpty)
+        #expect(second.nextCursor == first.nextCursor)
+        #expect(second.hasMore)
+    }
+
+    @Test("unknown AO session state maps to Unknown and never success")
+    func unknownSessionStateFailsClosed() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "session-unknown.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7/workspace/files",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "workspace-files.json"
+                )
+            )
+        ])
+        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
+            stubs: stubs
+        )
+
+        let page = try await backend.facts(
+            for: ExecutionID("openmac-7"),
+            after: nil
+        )
+
+        #expect(page.hasMore)
+        #expect(page.facts.contains(where: {
+            if case .unknown = $0.body { return true }
+            return false
+        }))
+        #expect(!page.facts.contains(where: {
+            if case .phase(.succeeded) = $0.body { return true }
+            return false
+        }))
+    }
+
+    @Test("terminated AO session requires an explicit stopped fact")
+    func terminatedSessionMapsStopped() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "session-terminated.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7/workspace/files",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "workspace-files.json"
+                )
+            )
+        ])
+        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
+            stubs: stubs
+        )
+
+        let page = try await backend.facts(
+            for: ExecutionID("openmac-7"),
+            after: nil
+        )
+
+        #expect(!page.hasMore)
+        #expect(page.facts.contains(where: {
+            if case .phase(.stopped) = $0.body { return true }
+            return false
+        }))
+        #expect(!page.facts.contains(where: {
+            if case .phase(.succeeded) = $0.body { return true }
+            return false
+        }))
+    }
+
     @Test("kill maps the AO acknowledgement to a stop receipt")
     func stopContract() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([

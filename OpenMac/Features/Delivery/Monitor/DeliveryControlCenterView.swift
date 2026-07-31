@@ -186,6 +186,15 @@ struct DeliveryControlCenterView: View {
             .disabled(model.isBusy)
 
             Button(
+                model.activity == .reconciling
+                    ? L10n.string("Reconciling…")
+                    : L10n.string("Reconcile")
+            ) {
+                Task { await model.reconcile() }
+            }
+            .disabled(!model.canReconcile)
+
+            Button(
                 model.activity == .stopping
                     ? L10n.string("Stopping…")
                     : L10n.string("Stop")

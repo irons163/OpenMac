@@ -367,6 +367,7 @@ nonisolated enum ExecutionBackendError:
 
 nonisolated protocol ExecutionBackend: Sendable {
     var backendID: String { get }
+    var supportsPersistedSessionReconciliation: Bool { get }
 
     func health() async throws -> ExecutionBackendHealth
     func listProjects() async throws -> [ExecutionProject]
@@ -376,4 +377,8 @@ nonisolated protocol ExecutionBackend: Sendable {
         after cursor: ExecutionFactCursor?
     ) async throws -> ExecutionFactPage
     func stop(executionID: ExecutionID) async throws -> ExecutionStopReceipt
+}
+
+extension ExecutionBackend {
+    nonisolated var supportsPersistedSessionReconciliation: Bool { false }
 }

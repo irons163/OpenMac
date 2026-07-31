@@ -273,7 +273,8 @@ nonisolated enum DeliveryRunValidator {
                 attempt.dispatchRequestedAt,
                 attempt.startedAt,
                 attempt.endedAt,
-                attempt.stopRequestedAt
+                attempt.stopRequestedAt,
+                attempt.lastReconcileFailedAt
             ].compactMap { $0 }
             let hasInvalidBounds = attempt.createdAt < runCreatedAt
                 || attempt.createdAt > runUpdatedAt
@@ -345,6 +346,12 @@ nonisolated enum DeliveryRunValidator {
                     || $0.projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || $0.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             } ?? false
+            let reconcileFailureIsEmpty = attempt.lastReconcileFailureReason?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty == true
+            let reconcileFailurePairIsIncomplete =
+                (attempt.lastReconcileFailureReason == nil)
+                    != (attempt.lastReconcileFailedAt == nil)
             let statusRequiresSession: Bool
             switch attempt.status {
             case .running, .blocked, .succeeded, .failed, .stopped:
@@ -359,7 +366,11 @@ nonisolated enum DeliveryRunValidator {
                 || (statusRequiresSession && attempt.externalSession == nil)
                 || (attempt.status == .queued && attempt.externalSession != nil)
                 || (attempt.dispatchFailureReason != nil
-                    && attempt.externalSession != nil) {
+                    && attempt.externalSession != nil)
+                || reconcileFailureIsEmpty
+                || reconcileFailurePairIsIncomplete
+                || (attempt.lastReconcileFailureReason != nil
+                    && attempt.externalSession == nil) {
                 issues.append(
                     DeliveryRunValidationIssue(
                         code: .invalidAttemptDispatchBinding,

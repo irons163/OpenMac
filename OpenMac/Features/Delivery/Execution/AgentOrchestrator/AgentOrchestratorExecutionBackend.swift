@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 nonisolated enum AgentOrchestratorAdapterConfigurationError:
@@ -82,6 +83,7 @@ nonisolated struct AgentOrchestratorBackendConfiguration: Sendable {
 
 actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     nonisolated let backendID = "agent-orchestrator"
+    nonisolated let supportsPersistedSessionReconciliation = true
 
     private struct InFlightHealth: Sendable {
         let id: UUID
@@ -91,6 +93,12 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     private enum WorkspaceFilesResult: Sendable {
         case success(AgentOrchestratorWire.WorkspaceFiles)
         case failure(String)
+    }
+
+    private struct SnapshotFingerprintPayload: Encodable, Sendable {
+        let session: AgentOrchestratorWire.Session
+        let workspace: AgentOrchestratorWire.WorkspaceFiles?
+        let workspaceFailure: String?
     }
 
     private let configuration: AgentOrchestratorBackendConfiguration
@@ -257,6 +265,17 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             workspaceResult: workspaceResult,
             observedAt: observedAt
         )
+        let snapshotFingerprint = try Self.snapshotFingerprint(
+            session: envelope.session,
+            workspaceResult: workspaceResult
+        )
+        if decodedCursor.snapshotFingerprint == snapshotFingerprint {
+            return ExecutionFactPage(
+                facts: [],
+                nextCursor: cursor,
+                hasMore: !mapped.isTerminal
+            )
+        }
         guard !mapped.bodies.isEmpty else {
             throw ExecutionBackendError.malformedResponse(
                 operation: .facts,
@@ -288,7 +307,8 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         let nextCursor = try Self.encodeFactCursor(
             AgentOrchestratorWire.FactCursor(
                 executionID: executionID.rawValue,
-                nextSequence: nextSequence
+                nextSequence: nextSequence,
+                snapshotFingerprint: snapshotFingerprint
             )
         )
         return ExecutionFactPage(
@@ -939,6 +959,41 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             bodies: bodies,
             isTerminal: isTerminal
         )
+    }
+
+    private nonisolated static func snapshotFingerprint(
+        session: AgentOrchestratorWire.Session,
+        workspaceResult: WorkspaceFilesResult
+    ) throws -> String {
+        let payload: SnapshotFingerprintPayload
+        switch workspaceResult {
+        case let .success(workspace):
+            payload = SnapshotFingerprintPayload(
+                session: session,
+                workspace: workspace,
+                workspaceFailure: nil
+            )
+        case let .failure(message):
+            payload = SnapshotFingerprintPayload(
+                session: session,
+                workspace: nil,
+                workspaceFailure: message
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data: Data
+        do {
+            data = try encoder.encode(payload)
+        } catch {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .facts,
+                reason: "The AO session snapshot could not be fingerprinted."
+            )
+        }
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private nonisolated static func pullRequestState(

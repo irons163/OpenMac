@@ -124,6 +124,9 @@ nonisolated enum DeliveryDispatchStateReducer {
     nonisolated private static func taskState(
         for attempt: ExecutionAttempt
     ) -> DeliveryTaskExecutionState {
+        if attempt.lastReconcileFailureReason != nil {
+            return .unknown
+        }
         switch attempt.status {
         case .queued:
             return attempt.dispatchFailureReason == nil

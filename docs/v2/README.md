@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06 已完成；VS-07 adapter 與 captured contracts 已完成，待真實 AO daemon smoke test
+> 狀態：VS-01～VS-06 已完成；VS-07 adapter 與 VS-08 reconcile contracts 已完成，待真實 AO daemon／dashboard deep-link smoke test
 > 更新日期：2026-07-31
 
 OpenMac v2 的定位是：
@@ -14,6 +14,11 @@ OpenMac v2 的定位是：
 [`Untrivial-ai/agent-orchestrator`](https://github.com/Untrivial-ai/agent-orchestrator)
 revision `9caafbee89383c9bf7e904936eb88c48add2fa88`；本機尚未安裝或啟動 AO，
 因此不宣稱已完成真實 session smoke test。
+
+VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
+snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
+acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位址可能由
+部署設定改變；在取得可驗證設定前不猜測 deep-link。
 
 本目錄包含三份執行文件：
 

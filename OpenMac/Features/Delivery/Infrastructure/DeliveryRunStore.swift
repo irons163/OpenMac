@@ -219,6 +219,34 @@ nonisolated struct FileDeliveryRunStore: DeliveryRunStoring, Sendable {
         )
     }
 
+    nonisolated func recordExecutionReconcileFailure(
+        runID: UUID,
+        attemptID: UUID,
+        reason: String,
+        failedAt: Date
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.recordExecutionReconcileFailure(
+            runID: runID,
+            attemptID: attemptID,
+            reason: reason,
+            failedAt: failedAt,
+            fileURL: fileURL
+        )
+    }
+
+    nonisolated func recordExecutionStopAcknowledgements(
+        runID: UUID,
+        attemptIDs: [UUID],
+        requestedAt: Date
+    ) async throws -> DeliveryRunSnapshot {
+        try await Self.coordinator.recordExecutionStopAcknowledgements(
+            runID: runID,
+            attemptIDs: attemptIDs,
+            requestedAt: requestedAt,
+            fileURL: fileURL
+        )
+    }
+
     nonisolated func stopFutureDispatch(
         runID: UUID,
         stoppedAt: Date
@@ -711,19 +739,136 @@ private actor DeliveryRunFileCoordinator {
             throw DeliveryDispatchError.missingRun(runID)
         }
 
-        var runs = latest.runs
-        runs[runIndex] = try DeliveryExecutionFactReducer.applying(
+        let updatedRun = try DeliveryExecutionFactReducer.applying(
             page,
-            to: runs[runIndex],
+            to: latest.runs[runIndex],
             attemptID: attemptID,
             expectedCursor: expectedCursor,
             receivedAt: receivedAt
         )
+        guard updatedRun != latest.runs[runIndex] else {
+            return latest
+        }
+        var runs = latest.runs
+        runs[runIndex] = updatedRun
         let updated = DeliveryRunSnapshot(
             format: latest.format,
             schemaVersion: latest.schemaVersion,
             storeRevision: latest.storeRevision + 1,
             savedAt: receivedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
+    func recordExecutionReconcileFailure(
+        runID: UUID,
+        attemptID: UUID,
+        reason: String,
+        failedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard failedAt >= latest.savedAt else {
+            throw DeliveryExecutionReconcileError
+                .timestampPrecedesPersistedState
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+        guard let attemptIndex = latest.runs[runIndex].attempts.firstIndex(
+            where: { $0.id == attemptID }
+        ) else {
+            throw DeliveryDispatchError.missingAttempt(attemptID)
+        }
+        let normalizedReason = normalizedReconcileFailure(reason)
+        let existing = latest.runs[runIndex].attempts[attemptIndex]
+        guard existing.externalSession != nil else {
+            throw DeliveryExecutionReconcileError.sessionUnavailable(attemptID)
+        }
+        guard existing.lastReconcileFailureReason != normalizedReason else {
+            return latest
+        }
+
+        var runs = latest.runs
+        runs[runIndex].attempts[attemptIndex].lastReconcileFailureReason =
+            normalizedReason
+        runs[runIndex].attempts[attemptIndex].lastReconcileFailedAt = failedAt
+        runs[runIndex].updatedAt = failedAt
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: failedAt,
+            runs: runs,
+            selectedRunID: latest.selectedRunID
+        )
+        try Task.checkCancellation()
+        try DeliveryRunSnapshotFileCodec.write(updated, to: fileURL)
+        return updated
+    }
+
+    func recordExecutionStopAcknowledgements(
+        runID: UUID,
+        attemptIDs: [UUID],
+        requestedAt: Date,
+        fileURL: URL
+    ) throws -> DeliveryRunSnapshot {
+        let fileLock = try DeliveryRunInterprocessLock(fileURL: fileURL)
+        defer { fileLock.unlock() }
+        try Task.checkCancellation()
+        guard let latest = try DeliveryRunSnapshotFileCodec.load(from: fileURL) else {
+            throw DeliveryRunStoreError.missingSnapshot
+        }
+        guard latest.storeRevision < Int.max else {
+            throw DeliveryRunStoreError.revisionExhausted(
+                current: latest.storeRevision
+            )
+        }
+        guard requestedAt >= latest.savedAt else {
+            throw DeliveryExecutionReconcileError
+                .timestampPrecedesPersistedState
+        }
+        guard let runIndex = latest.runs.firstIndex(where: { $0.id == runID }) else {
+            throw DeliveryDispatchError.missingRun(runID)
+        }
+        let attemptIDSet = Set(attemptIDs)
+        guard !attemptIDSet.isEmpty else {
+            return latest
+        }
+        var runs = latest.runs
+        var changed = false
+        for attemptIndex in runs[runIndex].attempts.indices
+        where attemptIDSet.contains(runs[runIndex].attempts[attemptIndex].id) {
+            guard runs[runIndex].attempts[attemptIndex].externalSession != nil,
+                  runs[runIndex].attempts[attemptIndex].stopRequestedAt == nil else {
+                continue
+            }
+            runs[runIndex].attempts[attemptIndex].stopRequestedAt = requestedAt
+            changed = true
+        }
+        guard changed else {
+            return latest
+        }
+        runs[runIndex].updatedAt = requestedAt
+        let updated = DeliveryRunSnapshot(
+            format: latest.format,
+            schemaVersion: latest.schemaVersion,
+            storeRevision: latest.storeRevision + 1,
+            savedAt: requestedAt,
             runs: runs,
             selectedRunID: latest.selectedRunID
         )
@@ -806,6 +951,14 @@ private actor DeliveryRunFileCoordinator {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return "Unknown backend start failure."
+        }
+        return String(trimmed.prefix(2_048))
+    }
+
+    private func normalizedReconcileFailure(_ reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Unknown backend reconcile failure."
         }
         return String(trimmed.prefix(2_048))
     }
@@ -1075,7 +1228,8 @@ nonisolated private enum DeliveryRunSnapshotFileCodec {
                         attempt.dispatchRequestedAt,
                         attempt.startedAt,
                         attempt.endedAt,
-                        attempt.stopRequestedAt
+                        attempt.stopRequestedAt,
+                        attempt.lastReconcileFailedAt
                     ].compactMap { $0 }
                 )
             }

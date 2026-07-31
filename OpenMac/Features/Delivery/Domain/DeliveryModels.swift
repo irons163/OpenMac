@@ -443,6 +443,8 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
     let createdAt: Date
     var dispatchRequestedAt: Date?
     var dispatchFailureReason: String?
+    var lastReconcileFailureReason: String?
+    var lastReconcileFailedAt: Date?
     var startedAt: Date?
     var endedAt: Date?
     var stopRequestedAt: Date?
@@ -464,6 +466,8 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         case createdAt
         case dispatchRequestedAt
         case dispatchFailureReason
+        case lastReconcileFailureReason
+        case lastReconcileFailedAt
         case startedAt
         case endedAt
         case stopRequestedAt
@@ -486,6 +490,8 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         createdAt: Date = Date(),
         dispatchRequestedAt: Date? = nil,
         dispatchFailureReason: String? = nil,
+        lastReconcileFailureReason: String? = nil,
+        lastReconcileFailedAt: Date? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
         stopRequestedAt: Date? = nil,
@@ -506,6 +512,8 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         self.createdAt = createdAt
         self.dispatchRequestedAt = dispatchRequestedAt
         self.dispatchFailureReason = dispatchFailureReason
+        self.lastReconcileFailureReason = lastReconcileFailureReason
+        self.lastReconcileFailedAt = lastReconcileFailedAt
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.stopRequestedAt = stopRequestedAt
@@ -540,6 +548,14 @@ nonisolated struct ExecutionAttempt: Identifiable, Equatable, Codable, Sendable 
         dispatchFailureReason = try container.decodeIfPresent(
             String.self,
             forKey: .dispatchFailureReason
+        )
+        lastReconcileFailureReason = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastReconcileFailureReason
+        )
+        lastReconcileFailedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lastReconcileFailedAt
         )
         startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
         endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)

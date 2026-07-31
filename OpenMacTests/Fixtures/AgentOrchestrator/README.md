@@ -14,6 +14,9 @@ The covered surface is deliberately limited to:
 - `GET /api/v1/sessions/{id}/workspace/files`
 - `POST /api/v1/sessions/{id}/kill`
 
+The session variants also cover unchanged polling snapshots, an unknown future
+status, and an explicitly terminated session so the adapter must fail closed.
+
 Paths, repository URLs, process IDs, session IDs, timestamps, and task content
 are test-only substitutions. Field names, envelopes, enums, and required
 relationships follow the upstream Go DTOs and served OpenAPI document.
