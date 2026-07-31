@@ -23,7 +23,8 @@ operations 都存在。後續操作會先重新確認 daemon PID；若手動 URL
 process 已替換，新的 daemon 必須重新通過完整 OpenAPI probe。手動 URL 仍只
 接受 loopback；discovered connection 遇到不同 PID 則拒絕並要求重新探索，
 不會沿用舊 run-file identity。並行 reconciliation 會共用同一個進行中的
-identity probe，避免 sessions 數量放大 health traffic。
+identity probe，避免 sessions 數量放大 health traffic；失敗的共享 probe 不會
+被快取，daemon 恢復後的下一次操作會重新執行完整 compatibility check。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop

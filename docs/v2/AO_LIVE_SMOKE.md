@@ -30,9 +30,11 @@ operation rechecks the lightweight daemon probes. A changed PID must pass the
 full OpenAPI probe again for a manually entered URL. A discovered connection
 rejects a changed PID and requires discovery to run again against the updated
 run file. Concurrent project or session operations share an in-flight identity
-probe so parallel reconciliation does not multiply health traffic. A missing
-or rejected run file never causes a remote connection; users can still enter a
-loopback URL manually.
+probe so parallel reconciliation does not multiply health traffic. A failed
+shared probe is discarded, allowing a later operation to rerun the full
+compatibility check after the daemon recovers. A missing or rejected run file
+never causes a remote connection; users can still enter a loopback URL
+manually.
 
 ## Explicit isolated-session probe
 
