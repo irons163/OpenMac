@@ -6,3 +6,17 @@ info:
 servers:
 - description: Local daemon (loopback only)
   url: http://127.0.0.1:3001
+paths:
+  /api/v1/projects:
+    get: {}
+  /api/v1/projects/{id}:
+    get: {}
+  /api/v1/sessions:
+    get: {}
+    post: {}
+  /api/v1/sessions/{sessionId}:
+    get: {}
+  /api/v1/sessions/{sessionId}/kill:
+    post: {}
+  /api/v1/sessions/{sessionId}/workspace/files:
+    get: {}

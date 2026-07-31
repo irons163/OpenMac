@@ -23,9 +23,10 @@ a symbolic link, bounds the file size, validates the recorded PID is live, and
 constructs the URL from the recorded port using `127.0.0.1`. The subsequent
 health and readiness requests must identify the AO daemon and report the same
 PID; a discovered connection must also match the run-file PID. OpenMac does not
-read the served OpenAPI contract until both probes pass. A missing or rejected
-run file never causes a remote connection; users can still enter a loopback URL
-manually.
+read the served OpenAPI contract until both probes pass, and accepts it only
+when the version and every project/session operation used by the adapter are
+present. A missing or rejected run file never causes a remote connection; users
+can still enter a loopback URL manually.
 
 ## Explicit isolated-session probe
 

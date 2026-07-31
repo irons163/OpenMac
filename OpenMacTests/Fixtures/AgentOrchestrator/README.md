@@ -17,6 +17,8 @@ The covered surface is deliberately limited to:
 
 The session variants also cover unchanged polling snapshots, an unknown future
 status, and an explicitly terminated session so the adapter must fail closed.
+The served OpenAPI fixture lists every operation the adapter requires; health
+degrades before project or session calls when a compatible version omits one.
 
 Paths, repository URLs, process IDs, session IDs, timestamps, and task content
 are test-only substitutions. Field names, envelopes, enums, and required

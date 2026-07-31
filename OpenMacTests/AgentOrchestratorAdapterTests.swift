@@ -363,6 +363,71 @@ struct AgentOrchestratorAdapterTests {
         #expect(health.message?.contains("fixture backend") == true)
     }
 
+    @Test("supported API version without a required route degrades")
+    func missingRequiredOpenAPIOperationFailsClosed() async throws {
+        let incompleteSpec = Data(
+            """
+            openapi: 3.1.0
+            info:
+              title: Agent Orchestrator HTTP daemon
+              version: 0.1.0-route-shell
+            paths:
+              /api/v1/projects:
+                get: {}
+              /api/v1/projects/{projectId}:
+                get: {}
+              /api/v1/sessions:
+                get: {}
+                post: {}
+              /api/v1/sessions/{sessionId}:
+                get: {}
+              /api/v1/sessions/{sessionId}/workspace/files:
+                get: {}
+            """.utf8
+        )
+        let stubs = [
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/openapi.yaml",
+                data: incompleteSpec
+            )
+        ]
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
+
+        let health = try await backend.health()
+
+        #expect(health.state == .degraded)
+        #expect(
+            health.version
+                == AgentOrchestratorBackendConfiguration.capturedAPIVersion
+        )
+        #expect(
+            health.message?.contains(
+                "POST /api/v1/sessions/{id}/kill"
+            ) == true
+        )
+        #expect(health.message?.contains("missing operations") == true)
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path)
+                == ["/healthz", "/readyz", "/api/v1/openapi.yaml"]
+        )
+    }
+
     @Test("project summaries map isolation without leaking AO wire types")
     func projectSelectionContract() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([

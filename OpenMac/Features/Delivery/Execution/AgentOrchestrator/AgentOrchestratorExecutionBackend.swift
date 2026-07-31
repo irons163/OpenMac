@@ -782,6 +782,19 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             )
         }
 
+        let missingOperations = missingRequiredOpenAPIOperations(
+            in: specResponse.data
+        )
+        guard missingOperations.isEmpty else {
+            return ExecutionBackendHealth(
+                state: .degraded,
+                backendName: "Agent Orchestrator",
+                version: version,
+                checkedAt: checkedAt,
+                message: "AO API \(version) is missing operations required by OpenMac: \(missingOperations.joined(separator: ", ")). Update AO or select the fixture backend."
+            )
+        }
+
         return ExecutionBackendHealth(
             state: .ready,
             backendName: "Agent Orchestrator",
@@ -1319,6 +1332,86 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             return value.isEmpty ? nil : value
         }
         return nil
+    }
+
+    private nonisolated static func missingRequiredOpenAPIOperations(
+        in data: Data
+    ) -> [String] {
+        let required: Set<String> = [
+            "GET /api/v1/projects",
+            "GET /api/v1/projects/{id}",
+            "GET /api/v1/sessions",
+            "POST /api/v1/sessions",
+            "GET /api/v1/sessions/{id}",
+            "GET /api/v1/sessions/{id}/workspace/files",
+            "POST /api/v1/sessions/{id}/kill"
+        ]
+        guard let source = String(data: data, encoding: .utf8) else {
+            return required.sorted()
+        }
+
+        let methods: Set<String> = [
+            "delete", "get", "head", "options", "patch", "post", "put"
+        ]
+        var found: Set<String> = []
+        var isInsidePaths = false
+        var currentPath: String?
+
+        for rawLine in source.split(
+            separator: "\n",
+            omittingEmptySubsequences: false
+        ) {
+            let line = String(rawLine)
+            if line == "paths:" {
+                isInsidePaths = true
+                currentPath = nil
+                continue
+            }
+            guard isInsidePaths else { continue }
+            if !line.isEmpty, !line.hasPrefix(" ") {
+                break
+            }
+
+            let indentation = line.prefix { $0 == " " }.count
+            let trimmed = line.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            if indentation == 2,
+               trimmed.hasSuffix(":") {
+                let candidate = String(trimmed.dropLast())
+                    .trimmingCharacters(
+                        in: CharacterSet(charactersIn: "\"'")
+                    )
+                currentPath = candidate.hasPrefix("/")
+                    ? normalizedOpenAPIPath(candidate)
+                    : nil
+                continue
+            }
+            guard indentation == 4,
+                  let currentPath,
+                  let separator = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+            let method = trimmed[..<separator].lowercased()
+            guard methods.contains(method) else { continue }
+            found.insert("\(method.uppercased()) \(currentPath)")
+        }
+
+        return required.subtracting(found).sorted()
+    }
+
+    private nonisolated static func normalizedOpenAPIPath(
+        _ path: String
+    ) -> String {
+        let components = path.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        ).map { component in
+            component.hasPrefix("{") && component.hasSuffix("}")
+                ? "{id}"
+                : String(component)
+        }
+        return "/" + components.joined(separator: "/")
     }
 
     private nonisolated static func parseDate(
