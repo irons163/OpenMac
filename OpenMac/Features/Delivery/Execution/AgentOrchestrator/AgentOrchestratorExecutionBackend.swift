@@ -98,7 +98,17 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
 
     private struct InFlightHealth: Sendable {
         let id: UUID
-        let task: Task<ExecutionBackendHealth, any Error>
+        let task: Task<HealthProbeResult, any Error>
+    }
+
+    private struct HealthProbeResult: Sendable {
+        let health: ExecutionBackendHealth
+        let daemonPID: Int?
+    }
+
+    private enum DaemonIdentityProbeResult: Sendable {
+        case ready(pid: Int)
+        case degraded(ExecutionBackendHealth)
     }
 
     private enum WorkspaceFilesResult: Sendable {
@@ -116,6 +126,7 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     private let transport: any AgentOrchestratorHTTPTransport
     private let now: @Sendable () -> Date
     private var compatibleAPIVersion: String?
+    private var compatibleDaemonPID: Int?
     private var inFlightHealth: InFlightHealth?
     private var startRequestByID: [UUID: ExecutionStartRequest] = [:]
     private var startTaskByID:
@@ -157,18 +168,20 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             if inFlightHealth?.id == probe.id {
                 inFlightHealth = nil
             }
-            if result.state == .ready,
-               let version = result.version {
+            if result.health.state == .ready,
+               let version = result.health.version,
+               let daemonPID = result.daemonPID {
                 compatibleAPIVersion = version
+                compatibleDaemonPID = daemonPID
             } else {
-                compatibleAPIVersion = nil
+                invalidateCompatibility()
             }
-            return result
+            return result.health
         } catch {
             if inFlightHealth?.id == probe.id {
                 inFlightHealth = nil
             }
-            compatibleAPIVersion = nil
+            invalidateCompatibility()
             throw error
         }
     }
@@ -410,8 +423,31 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     }
 
     private func requireCompatibleAPI() async throws {
-        if compatibleAPIVersion != nil {
-            return
+        if compatibleAPIVersion != nil,
+           let cachedPID = compatibleDaemonPID {
+            do {
+                let identity = try await Self.performDaemonIdentityProbe(
+                    configuration: configuration,
+                    transport: transport,
+                    checkedAt: now()
+                )
+                switch identity {
+                case let .ready(pid):
+                    if pid == cachedPID {
+                        return
+                    }
+                    invalidateCompatibility()
+                case let .degraded(health):
+                    invalidateCompatibility()
+                    throw ExecutionBackendError.unavailable(
+                        health.message
+                            ?? "Agent Orchestrator is not ready."
+                    )
+                }
+            } catch {
+                invalidateCompatibility()
+                throw error
+            }
         }
         let current = try await health()
         guard current.state == .ready else {
@@ -420,6 +456,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
                     ?? "Agent Orchestrator has an incompatible API version."
             )
         }
+    }
+
+    private func invalidateCompatibility() {
+        compatibleAPIVersion = nil
+        compatibleDaemonPID = nil
     }
 
     private func workspaceFiles(
@@ -669,7 +710,94 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         configuration: AgentOrchestratorBackendConfiguration,
         transport: any AgentOrchestratorHTTPTransport,
         checkedAt: Date
-    ) async throws -> ExecutionBackendHealth {
+    ) async throws -> HealthProbeResult {
+        let identity = try await performDaemonIdentityProbe(
+            configuration: configuration,
+            transport: transport,
+            checkedAt: checkedAt
+        )
+        let daemonPID: Int
+        switch identity {
+        case let .ready(pid):
+            daemonPID = pid
+        case let .degraded(health):
+            return HealthProbeResult(
+                health: health,
+                daemonPID: nil
+            )
+        }
+
+        let specRequest = makeRequest(
+            configuration: configuration,
+            pathComponents: ["api", "v1", "openapi.yaml"],
+            operation: .health,
+            accept: "application/yaml, text/yaml, text/plain"
+        )
+        let specResponse = try await send(
+            specRequest,
+            operation: .health,
+            transport: transport
+        )
+        guard specResponse.statusCode == 200,
+              let version = openAPIVersion(in: specResponse.data) else {
+            return HealthProbeResult(
+                health: ExecutionBackendHealth(
+                    state: .degraded,
+                    backendName: "Agent Orchestrator",
+                    checkedAt: checkedAt,
+                    message: "AO is running, but its served OpenAPI version could not be read. Update AO or select the fixture backend."
+                ),
+                daemonPID: nil
+            )
+        }
+
+        guard configuration.supportedAPIVersions.contains(version) else {
+            let supported = configuration.supportedAPIVersions.sorted()
+                .joined(separator: ", ")
+            return HealthProbeResult(
+                health: ExecutionBackendHealth(
+                    state: .degraded,
+                    backendName: "Agent Orchestrator",
+                    version: version,
+                    checkedAt: checkedAt,
+                    message: "AO API \(version) is incompatible. OpenMac currently supports \(supported); update the AO adapter or use the fixture backend."
+                ),
+                daemonPID: nil
+            )
+        }
+
+        let missingOperations = missingRequiredOpenAPIOperations(
+            in: specResponse.data
+        )
+        guard missingOperations.isEmpty else {
+            return HealthProbeResult(
+                health: ExecutionBackendHealth(
+                    state: .degraded,
+                    backendName: "Agent Orchestrator",
+                    version: version,
+                    checkedAt: checkedAt,
+                    message: "AO API \(version) is missing operations required by OpenMac: \(missingOperations.joined(separator: ", ")). Update AO or select the fixture backend."
+                ),
+                daemonPID: nil
+            )
+        }
+
+        return HealthProbeResult(
+            health: ExecutionBackendHealth(
+                state: .ready,
+                backendName: "Agent Orchestrator",
+                version: version,
+                checkedAt: checkedAt
+            ),
+            daemonPID: daemonPID
+        )
+    }
+
+    private nonisolated static func performDaemonIdentityProbe(
+        configuration: AgentOrchestratorBackendConfiguration,
+        transport: any AgentOrchestratorHTTPTransport,
+        checkedAt: Date
+    ) async throws -> DaemonIdentityProbeResult {
         let probeRequest = makeRequest(
             configuration: configuration,
             pathComponents: ["healthz"],
@@ -741,66 +869,16 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             )
         }
         guard readiness.status == "ready" else {
-            return ExecutionBackendHealth(
-                state: .degraded,
-                backendName: "Agent Orchestrator",
-                checkedAt: checkedAt,
-                message: "AO is healthy but not ready (readyz: \(readiness.status)). Wait for startup to finish or inspect AO."
+            return .degraded(
+                ExecutionBackendHealth(
+                    state: .degraded,
+                    backendName: "Agent Orchestrator",
+                    checkedAt: checkedAt,
+                    message: "AO is healthy but not ready (readyz: \(readiness.status)). Wait for startup to finish or inspect AO."
+                )
             )
         }
-
-        let specRequest = makeRequest(
-            configuration: configuration,
-            pathComponents: ["api", "v1", "openapi.yaml"],
-            operation: .health,
-            accept: "application/yaml, text/yaml, text/plain"
-        )
-        let specResponse = try await send(
-            specRequest,
-            operation: .health,
-            transport: transport
-        )
-        guard specResponse.statusCode == 200,
-              let version = openAPIVersion(in: specResponse.data) else {
-            return ExecutionBackendHealth(
-                state: .degraded,
-                backendName: "Agent Orchestrator",
-                checkedAt: checkedAt,
-                message: "AO is running, but its served OpenAPI version could not be read. Update AO or select the fixture backend."
-            )
-        }
-
-        guard configuration.supportedAPIVersions.contains(version) else {
-            let supported = configuration.supportedAPIVersions.sorted()
-                .joined(separator: ", ")
-            return ExecutionBackendHealth(
-                state: .degraded,
-                backendName: "Agent Orchestrator",
-                version: version,
-                checkedAt: checkedAt,
-                message: "AO API \(version) is incompatible. OpenMac currently supports \(supported); update the AO adapter or use the fixture backend."
-            )
-        }
-
-        let missingOperations = missingRequiredOpenAPIOperations(
-            in: specResponse.data
-        )
-        guard missingOperations.isEmpty else {
-            return ExecutionBackendHealth(
-                state: .degraded,
-                backendName: "Agent Orchestrator",
-                version: version,
-                checkedAt: checkedAt,
-                message: "AO API \(version) is missing operations required by OpenMac: \(missingOperations.joined(separator: ", ")). Update AO or select the fixture backend."
-            )
-        }
-
-        return ExecutionBackendHealth(
-            state: .ready,
-            backendName: "Agent Orchestrator",
-            version: version,
-            checkedAt: checkedAt
-        )
+        return .ready(pid: probe.pid)
     }
 
     private nonisolated static func recoveredReceipt(

@@ -220,6 +220,114 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("cached API compatibility revalidates the daemon identity")
+    func cachedCompatibilityRevalidatesIdentity() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
+
+        let health = try await backend.health()
+        let projects = try await backend.listProjects()
+
+        #expect(health.state == .ready)
+        #expect(!projects.isEmpty)
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path) == [
+                "/healthz",
+                "/readyz",
+                "/api/v1/openapi.yaml",
+                "/healthz",
+                "/readyz",
+                "/api/v1/projects"
+            ]
+        )
+    }
+
+    @Test("a replacement daemon must pass the full compatibility probe")
+    func replacementDaemonRechecksOpenAPI() async throws {
+        let replacementHealth = Data(
+            """
+            {
+              "status": "ok",
+              "service": "agent-orchestrator-daemon",
+              "pid": 9812
+            }
+            """.utf8
+        )
+        let replacementReadiness = Data(
+            """
+            {
+              "status": "ready",
+              "service": "agent-orchestrator-daemon",
+              "pid": 9812
+            }
+            """.utf8
+        )
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub("/healthz", data: replacementHealth),
+            CapturedAOStub("/healthz", data: replacementHealth),
+            CapturedAOStub("/readyz", data: replacementReadiness),
+            CapturedAOStub("/readyz", data: replacementReadiness),
+            CapturedAOStub(
+                "/api/v1/openapi.yaml",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "openapi.yaml"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
+
+        _ = try await backend.health()
+        let projects = try await backend.listProjects()
+
+        #expect(!projects.isEmpty)
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path) == [
+                "/healthz",
+                "/readyz",
+                "/api/v1/openapi.yaml",
+                "/healthz",
+                "/readyz",
+                "/healthz",
+                "/readyz",
+                "/api/v1/openapi.yaml",
+                "/api/v1/projects"
+            ]
+        )
+    }
+
     @Test("discovered PID must match the responding daemon")
     func discoveredPIDMismatchFailsClosed() async throws {
         let (backend, transport) =
@@ -610,6 +718,18 @@ struct AgentOrchestratorAdapterTests {
     func factsContract() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
             CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
+            CapturedAOStub(
                 "/api/v1/sessions/openmac-7",
                 data: try AgentOrchestratorAdapterTestFixture.data(
                     "session-running.json"
@@ -634,9 +754,10 @@ struct AgentOrchestratorAdapterTests {
                 )
             )
         ])
-        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
-            stubs: stubs
-        )
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
         let executionID = ExecutionID("openmac-7")
 
         let running = try await backend.facts(
@@ -697,11 +818,35 @@ struct AgentOrchestratorAdapterTests {
                 return false
             })
         )
+        let requests = await transport.requests()
+        #expect(
+            requests.filter { $0.path == "/healthz" }.count == 2
+        )
+        #expect(
+            requests.filter { $0.path == "/readyz" }.count == 2
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/openapi.yaml"
+            }.count == 1
+        )
     }
 
     @Test("an unchanged running snapshot produces an idle polling page")
     func unchangedSnapshotDoesNotReplayFacts() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
             CapturedAOStub(
                 "/api/v1/sessions/openmac-7",
                 data: try AgentOrchestratorAdapterTestFixture.data(
@@ -727,9 +872,10 @@ struct AgentOrchestratorAdapterTests {
                 )
             )
         ])
-        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
-            stubs: stubs
-        )
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs
+            )
         let executionID = ExecutionID("openmac-7")
 
         let first = try await backend.facts(for: executionID, after: nil)
@@ -742,6 +888,18 @@ struct AgentOrchestratorAdapterTests {
         #expect(second.facts.isEmpty)
         #expect(second.nextCursor == first.nextCursor)
         #expect(second.hasMore)
+        let requests = await transport.requests()
+        #expect(
+            requests.filter { $0.path == "/healthz" }.count == 2
+        )
+        #expect(
+            requests.filter { $0.path == "/readyz" }.count == 2
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/openapi.yaml"
+            }.count == 1
+        )
     }
 
     @Test("unknown AO session state maps to Unknown and never success")

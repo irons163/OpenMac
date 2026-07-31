@@ -25,8 +25,10 @@ health and readiness requests must identify the AO daemon and report the same
 PID; a discovered connection must also match the run-file PID. OpenMac does not
 read the served OpenAPI contract until both probes pass, and accepts it only
 when the version and every project/session operation used by the adapter are
-present. A missing or rejected run file never causes a remote connection; users
-can still enter a loopback URL manually.
+present. Before using that cached compatibility result, each project or session
+operation rechecks the lightweight daemon probes. A changed PID must pass the
+full OpenAPI probe again. A missing or rejected run file never causes a remote
+connection; users can still enter a loopback URL manually.
 
 ## Explicit isolated-session probe
 
