@@ -41,12 +41,13 @@ universal zip 與 SHA-256。Release build 以獨立 feature flag 開啟 v2 畫�
 封裝工具會拒絕未 commit 的 source。開放給受測者前仍須用 clean-source 包在
 乾淨 Mac 驗證 Gatekeeper onboarding。
 
-本目錄包含四份執行文件：
+本目錄包含五份執行文件：
 
 - [產品規格](PRODUCT_SPEC.md)：目標使用者、核心流程、資料邊界、MVP 與驗證指標。
 - [功能凍結清單](FEATURE_FREEZE.md)：哪些既有能力保留、凍結、替換、延後或列為移除候選。
 - [兩週 vertical slice backlog](VERTICAL_SLICE_BACKLOG.md)：單人、十個工作日的交付順序與決策閘門。
 - [測試 build 安裝指南](TEST_BUILD_INSTALL.md)：checksum、Gatekeeper、五分鐘 fixture walkthrough 與 AO connection probe。
+- [AO live smoke](AO_LIVE_SMOKE.md)：對既有 loopback daemon 執行 opt-in adapter compatibility 與明確授權的 isolated-session smoke。
 
 在 Day 10 決策閘門通過前：
 

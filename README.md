@@ -100,6 +100,17 @@ The script writes an ad-hoc signed, non-notarized zip and SHA-256 file to
 [test build install guide](docs/v2/TEST_BUILD_INSTALL.md) for Gatekeeper,
 fixture, and Agent Orchestrator connection steps.
 
+With an AO daemon already running, developers can execute the read-only live
+adapter probe:
+
+```bash
+tools/test-agent-orchestrator-live.sh --url http://127.0.0.1:3001
+```
+
+Session creation remains separately opt-in. See the
+[AO live smoke guide](docs/v2/AO_LIVE_SMOKE.md) for its prerequisites and
+side-effect boundary.
+
 ## AI Runtime Setup
 
 ### Option A: API Key
