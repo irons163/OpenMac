@@ -260,7 +260,7 @@ struct DeliveryAgentOrchestratorConnectionScene: View {
 
             Text(
                 L10n.string(
-                    "Connection success does not enable dispatch by itself. The captured AO contract still lacks a verifiable workspace permission and verification path, so OpenMac continues to fail closed."
+                    "Connection success does not enable dispatch by itself. OpenMac requires workspace-scoped permission and a backend-confirmed verification workspace; if either is unavailable, it fails closed."
                 )
             )
             .font(.caption)
