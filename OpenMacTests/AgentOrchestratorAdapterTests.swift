@@ -1440,6 +1440,31 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("terminal session stop does not send another kill")
+    func stopTerminalSessionIsAlreadyTerminal() async throws {
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/sessions/openmac-7",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "session-terminated.json"
+                )
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(stubs: stubs)
+
+        let receipt = try await backend.stop(
+            executionID: ExecutionID("openmac-7")
+        )
+
+        #expect(receipt.disposition == .alreadyTerminal)
+        #expect(
+            !(await transport.requests()).contains {
+                $0.method == "POST" && $0.path.hasSuffix("/kill")
+            }
+        )
+    }
+
     @Test("configuration rejects non-loopback daemon URLs")
     func rejectsRemoteDaemonURL() {
         #expect(throws: AgentOrchestratorAdapterConfigurationError.self) {

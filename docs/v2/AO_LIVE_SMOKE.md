@@ -43,6 +43,9 @@ scopes never reach the AO daemon.
 When resuming an existing session, OpenMac also revalidates the session ID,
 project ID, stable idempotency branch, worker kind, harness, and creation time;
 malformed identity is treated as a conflict and never as a successful receipt.
+Stopping an already terminal session returns `alreadyTerminal` without sending
+another kill request; a non-terminal kill acknowledgement remains distinct from
+the later terminal facts.
 
 ## Explicit isolated-session probe
 
