@@ -107,6 +107,12 @@ run-file process.
   omits an absolute worktree path. `/workspace/files` exposes file metadata and
   `/preview` exposes a preview URL, but neither is a backend-confirmed Xcode
   workspace identity.
+- A follow-up audit of the latest upstream `main` at
+  [`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
+  found the same boundary: `ControllersSessionView` still omits
+  `workspacePath`/`workspaceRepoPath`; the new workspace-files response only
+  returns session-relative file metadata. The upstream `/preview` route is a
+  browser-preview URL, not an AO dashboard/session deep-link.
 - The AO desktop was quit gracefully and reopened; the old daemon PID `8874`
   became stale, the new PID `11085` reached ready state, and the read-only
   compatibility smoke passed again with exit code 0.
@@ -114,6 +120,8 @@ run-file process.
   terminated records in the session list.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08.
-VS-08 still needs App restart reconcile and a verified dashboard deep-link,
-while VS-09 remains fail-closed until AO exposes a verifiable workspace path for
+Control Center now reloads and reconciles when its macOS scene becomes active;
+the deterministic restart test passes without replaying facts. VS-08 still
+needs a packaged-App restart smoke and a verified dashboard deep-link, while
+VS-09 remains fail-closed until AO exposes a verifiable workspace path for
 Xcode evidence.

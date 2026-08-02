@@ -43,14 +43,21 @@ VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
 acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位址可能由
 部署設定改變；2026-08-02 已完成 AO daemon PID `8874 → 11085` 的重啟後
-compatibility smoke。App restart reconcile 與取得可驗證設定前的 dashboard
-deep-link 仍待完成，不猜測 URL。
+compatibility smoke。Control Center 已補 scene-active reload/reconcile，且
+deterministic restart test 會用新的 model instance 驗證 persisted facts 不重播；
+packaged-App restart smoke 與取得可驗證設定前的 dashboard deep-link 仍待完成，
+不猜測 URL。另對 upstream `main` revision
+[`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
+重新核對：其 desktop dashboard 仍不是 daemon 的 HTTP route，session view
+仍沒有可供外部 app 使用的 dashboard URL；`/preview` 只代表瀏覽器 preview。
 
 VS-09 的 `XcodeVerifier` 只接受 backend-confirmed workspace，並在執行前核對
 Git common directory、branch 與 container identity。它不經 shell 拼接參數，
 會保存 scheme、command、exit status、摘要、時間與 `.xcresult`；真實 Swift
 package smoke 已產生可 round-trip 的 build record。Captured AO API 尚未提供
-workspace path，因此 AO session 不會被錯誤地拿原始 repo 代替驗證。
+workspace path；最新 upstream main 的 `ControllersSessionView` 也仍把
+`workspacePath` 留在 daemon 內部 metadata，未暴露到 API，因此 AO session
+不會被錯誤地拿原始 repo 代替驗證。
 
 VS-10 將 resume 與 retry 分成兩個明確語意：未綁定 session 的 reservation
 以同一 idempotency key 安全重播；terminal failed／stopped task 的人工 Retry
