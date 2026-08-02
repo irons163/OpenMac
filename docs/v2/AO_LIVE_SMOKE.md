@@ -40,6 +40,9 @@ connection; users can still enter a loopback URL manually.
 Session start also fails closed unless the approved request requires
 workspace-scoped read/write permission; unknown or full-machine permission
 scopes never reach the AO daemon.
+When resuming an existing session, OpenMac also revalidates the session ID,
+project ID, stable idempotency branch, worker kind, harness, and creation time;
+malformed identity is treated as a conflict and never as a successful receipt.
 
 ## Explicit isolated-session probe
 

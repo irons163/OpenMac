@@ -931,7 +931,12 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         request: ExecutionStartRequest,
         configuration: AgentOrchestratorBackendConfiguration
     ) throws -> ExecutionStartReceipt {
-        guard session.kind == "worker",
+        guard !session.id.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ).isEmpty,
+              session.projectId == request.projectID.rawValue,
+              session.branch == idempotencyBranch(request.requestID),
+              session.kind == "worker",
               session.harness == configuration.harness,
               let acceptedAt = parseDate(session.createdAt) else {
             throw ExecutionBackendError.conflict(

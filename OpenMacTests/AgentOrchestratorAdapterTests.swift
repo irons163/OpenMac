@@ -1031,6 +1031,53 @@ struct AgentOrchestratorAdapterTests {
         #expect(!requests.contains(where: { $0.method == "POST" }))
     }
 
+    @Test("an existing session with invalid identity fails closed")
+    func malformedRecoveredSessionFailsClosed() async throws {
+        let existing = try AgentOrchestratorAdapterTestFixture.data(
+            "session-existing.json"
+        )
+        let malformed = try #require(
+            String(data: existing, encoding: .utf8)
+        ).replacingOccurrences(
+            of: "\"id\": \"openmac-7\"",
+            with: "\"id\": \"\""
+        )
+        let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/projects/openmac",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "project.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions",
+                query: "project=openmac",
+                data: Data(malformed.utf8)
+            )
+        ])
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(stubs: stubs)
+
+        do {
+            _ = try await backend.start(
+                AgentOrchestratorAdapterTestFixture.startRequest()
+            )
+            Issue.record("Expected malformed existing session rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .conflict(message) = error else {
+                Issue.record("Expected conflict, got \(error)")
+                return
+            }
+            #expect(message.contains("incompatible identity"))
+        }
+
+        #expect(
+            !(await transport.requests()).contains {
+                $0.method == "POST" && $0.path == "/api/v1/sessions"
+            }
+        )
+    }
+
     @Test("base branch mismatch prevents AO side effects")
     func baseBranchMismatchFailsClosed() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([

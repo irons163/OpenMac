@@ -29,6 +29,8 @@ compatibility probe，避免 sessions 數量放大 traffic；失敗的共享 pro
 下一次操作都會重新執行完整 compatibility check。
 AO session start 也會在 adapter 邊界拒絕 `unknown` 或 `dangerFullAccess`
 權限，不會先送出 project、session 或 spawn request。
+恢復既有 session 時也會重新核對 session／project identity、固定 branch、worker
+kind、harness 與建立時間；不完整 receipt 會 fail closed。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
