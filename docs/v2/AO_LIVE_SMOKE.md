@@ -32,10 +32,10 @@ rejects a changed PID and requires discovery to run again against the updated
 run file. Concurrent project or session operations share an in-flight identity
 probe so parallel reconciliation does not multiply health traffic. Concurrent
 first operations also share the full health, readiness, and OpenAPI
-compatibility probe. A failed shared probe is discarded, allowing a later
-operation to rerun the full compatibility check after the daemon recovers. A
-missing or rejected run file never causes a remote connection; users can still
-enter a loopback URL manually.
+compatibility probe. A failed shared full or identity probe is discarded,
+allowing a later operation to rerun the full compatibility check after the
+daemon recovers. A missing or rejected run file never causes a remote
+connection; users can still enter a loopback URL manually.
 
 ## Explicit isolated-session probe
 

@@ -281,6 +281,95 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("a failed shared compatibility probe is cleared before retry")
+    func failedSharedCompatibilityProbeCanRetry() async throws {
+        let serviceUnavailable = Data(
+            """
+            {
+              "error": "daemon starting"
+            }
+            """.utf8
+        )
+        let stubs = [
+            CapturedAOStub(
+                "/healthz",
+                status: 503,
+                data: serviceUnavailable
+            ),
+            CapturedAOStub(
+                "/healthz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "health.json"
+                )
+            ),
+            CapturedAOStub(
+                "/readyz",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "ready.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/openapi.yaml",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "openapi.yaml"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/projects",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "projects.json"
+                )
+            )
+        ]
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(
+                stubs: stubs,
+                responseDelayNanoseconds: 5_000_000
+            )
+
+        async let first = backend.listProjects()
+        async let second = backend.listProjects()
+        do {
+            _ = try await first
+            Issue.record("Expected the first shared probe to fail")
+        } catch let error as ExecutionBackendError {
+            guard case .unavailable = error else {
+                Issue.record("Expected unavailable, got \(error)")
+                return
+            }
+        }
+        do {
+            _ = try await second
+            Issue.record("Expected the second shared probe to fail")
+        } catch let error as ExecutionBackendError {
+            guard case .unavailable = error else {
+                Issue.record("Expected unavailable, got \(error)")
+                return
+            }
+        }
+
+        let projects = try await backend.listProjects()
+
+        #expect(!projects.isEmpty)
+        let requests = await transport.requests()
+        #expect(
+            requests.filter { $0.path == "/healthz" }.count == 2
+        )
+        #expect(
+            requests.filter { $0.path == "/readyz" }.count == 1
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/openapi.yaml"
+            }.count == 1
+        )
+        #expect(
+            requests.filter {
+                $0.path == "/api/v1/projects"
+            }.count == 1
+        )
+    }
+
     @Test("cached API compatibility revalidates the daemon identity")
     func cachedCompatibilityRevalidatesIdentity() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
