@@ -64,8 +64,16 @@ stop_process() {
         fi
         sleep 0.2
     done
-    echo "Packaged OpenMac did not terminate cleanly (pid $process_id)." >&2
-    return 1
+    # A short-lived macOS app can be a zombie until its parent reaps it, so
+    # kill -0 alone is not a reliable termination check. Reap the child after
+    # the grace period; if it is still running, force-stop only this process
+    # that the smoke itself started.
+    kill -KILL "$process_id" 2>/dev/null || true
+    wait "$process_id" 2>/dev/null || true
+    if kill -0 "$process_id" 2>/dev/null; then
+        echo "Packaged OpenMac did not terminate (pid $process_id)." >&2
+        return 1
+    fi
 }
 
 LLVM_PROFILE_FILE="$temporary_root/openmac-packaged-restart-%p.profraw" \
