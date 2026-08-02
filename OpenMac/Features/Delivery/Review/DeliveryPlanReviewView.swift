@@ -37,6 +37,10 @@ struct DeliveryPlanReviewCommands: Commands {
 struct DeliveryPlanReviewScene: View {
     @StateObject private var model: DeliveryPlanReviewViewModel
     @State private var isChoosingFixtureRepository = false
+    @State private var isEnteringFixtureBrief = false
+    @State private var fixtureRepositoryURL: URL?
+    @State private var fixtureBriefTitle = ""
+    @State private var fixtureBriefBody = ""
 
     init(
         persistence: any DeliveryPlanReviewPersisting = FileDeliveryRunStore()
@@ -92,21 +96,115 @@ struct DeliveryPlanReviewScene: View {
             switch result {
             case let .success(urls):
                 guard let repositoryURL = urls.first else { return }
-                Task {
-                    let hasAccess = repositoryURL.startAccessingSecurityScopedResource()
-                    defer {
-                        if hasAccess {
-                            repositoryURL.stopAccessingSecurityScopedResource()
-                        }
-                    }
-                    await model.createFixtureReview(
-                        repositoryRootURL: repositoryURL
-                    )
-                }
+                fixtureRepositoryURL = repositoryURL
+                let repositoryName = repositoryURL.lastPathComponent.isEmpty
+                    ? L10n.string("Repository")
+                    : repositoryURL.lastPathComponent
+                fixtureBriefTitle = L10n.format(
+                    "Deliver %@",
+                    repositoryName
+                )
+                fixtureBriefBody = L10n.format(
+                    "Describe the feature to deliver in %@. Include the observable behavior and the verification outcome you expect.",
+                    repositoryName
+                )
+                isEnteringFixtureBrief = true
             case let .failure(error):
                 model.presentFixtureSelectionError(error)
             }
         }
+        .sheet(isPresented: $isEnteringFixtureBrief) {
+            DeliveryFixtureBriefSheet(
+                title: $fixtureBriefTitle,
+                briefBody: $fixtureBriefBody,
+                onCancel: {
+                    fixtureRepositoryURL = nil
+                    isEnteringFixtureBrief = false
+                },
+                onSubmit: {
+                    submitFixtureBrief()
+                }
+            )
+        }
+    }
+
+    private func submitFixtureBrief() {
+        guard let repositoryURL = fixtureRepositoryURL else { return }
+        let title = fixtureBriefTitle
+        let body = fixtureBriefBody
+        isEnteringFixtureBrief = false
+        fixtureRepositoryURL = nil
+        Task {
+            let hasAccess = repositoryURL.startAccessingSecurityScopedResource()
+            defer {
+                if hasAccess {
+                    repositoryURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            await model.createFixtureReview(
+                repositoryRootURL: repositoryURL,
+                briefTitle: title,
+                briefBody: body
+            )
+        }
+    }
+}
+
+private struct DeliveryFixtureBriefSheet: View {
+    @Binding var title: String
+    @Binding var briefBody: String
+    let onCancel: () -> Void
+    let onSubmit: () -> Void
+
+    private var canSubmit: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !briefBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.string("New Delivery Brief"))
+                    .font(.title2.weight(.semibold))
+                Text(
+                    L10n.string(
+                        "Describe the feature before OpenMac generates the typed delivery plan. No execution session is created in this step."
+                    )
+                )
+                .foregroundStyle(.secondary)
+            }
+
+            TextField(
+                L10n.string("Feature title"),
+                text: $title
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Feature brief"))
+                    .font(.headline)
+                TextEditor(text: $briefBody)
+                    .font(.body)
+                    .frame(minHeight: 170)
+                    .padding(6)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.separator)
+                    }
+            }
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Cancel"), action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button(L10n.string("Generate Plan"), action: onSubmit)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
+            }
+        }
+        .padding(22)
+        .frame(width: 560)
     }
 }
 

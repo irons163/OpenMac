@@ -102,6 +102,22 @@ nonisolated enum AgentOrchestratorWire {
         let truncated: Bool
     }
 
+    struct OpenShellTerminalRequest: Encodable, Sendable {
+        let projectId: String
+        let sessionId: String
+    }
+
+    struct ShellTerminalEnvelope: Decodable, Sendable {
+        let shellTerminal: ShellTerminal
+    }
+
+    struct ShellTerminal: Decodable, Sendable {
+        let handleId: String
+        let projectId: String?
+        let sessionId: String?
+        let workingDir: String
+    }
+
     struct WorkspaceFile: Codable, Sendable {
         let path: String
         let status: String

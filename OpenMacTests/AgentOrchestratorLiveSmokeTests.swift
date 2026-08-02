@@ -97,9 +97,11 @@ struct AgentOrchestratorLiveSmokeTests {
             AgentOrchestratorLiveSmokeEnvironment.baseCommit
         )
         let backend = try AgentOrchestratorLiveSmokeEnvironment.backend()
-        let requestID = UUID(
-            uuidString: "E2E00001-0000-4000-8000-000000000001"
-        )!
+        // Live smoke runs are intentionally repeatable against a disposable
+        // project. A fresh id avoids recovering a prior terminated session,
+        // so the test exercises a real start -> facts -> stop lifecycle every
+        // time it is opted in.
+        let requestID = UUID()
         let request = ExecutionStartRequest(
             requestID: requestID,
             projectID: ExecutionProjectID(projectID),
@@ -147,7 +149,12 @@ struct AgentOrchestratorLiveSmokeTests {
                 requestID.uuidString.lowercased()
             ) == true
         )
-        #expect(receipt.verificationWorkspaceURL == nil)
+        #expect(receipt.verificationWorkspaceURL?.isFileURL == true)
+        #expect(
+            receipt.verificationWorkspaceURL?.path.contains(
+                "/.ao/data/worktrees/openmac-ao-fixture/"
+            ) == true
+        )
         #expect(!facts.facts.isEmpty)
         #expect(stop.executionID == receipt.executionID)
         #expect(stop.disposition == .accepted)

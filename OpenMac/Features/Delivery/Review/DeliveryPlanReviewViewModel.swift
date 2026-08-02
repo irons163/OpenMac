@@ -149,7 +149,11 @@ final class DeliveryPlanReviewViewModel: ObservableObject {
         await load()
     }
 
-    func createFixtureReview(repositoryRootURL: URL) async {
+    func createFixtureReview(
+        repositoryRootURL: URL,
+        briefTitle: String? = nil,
+        briefBody: String? = nil
+    ) async {
         guard !isBusy else { return }
         activity = .creating
         errorMessage = nil
@@ -158,7 +162,9 @@ final class DeliveryPlanReviewViewModel: ObservableObject {
 
         do {
             let snapshot = try await fixtureBootstrapper.createFixtureReview(
-                repositoryRootURL: repositoryRootURL
+                repositoryRootURL: repositoryRootURL,
+                briefTitle: briefTitle,
+                briefBody: briefBody
             )
             guard let selectedRunID = snapshot.selectedRunID else {
                 throw DeliveryPlanReviewPresentationError.selectedRunMissing

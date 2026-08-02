@@ -153,12 +153,33 @@ private enum AgentOrchestratorAdapterTestFixture {
         ] + additional
     }
 
+    static func workspaceIdentityOpenAPIData() throws -> Data {
+        let source = String(
+            decoding: try data("openapi.yaml"),
+            as: UTF8.self
+        )
+        return Data(
+            source.replacingOccurrences(
+                of: "  /api/v1/sessions/{sessionId}/workspace/files:\n    get: {}\n",
+                with: """
+                  /api/v1/sessions/{sessionId}/workspace/files:
+                    get: {}
+                  /api/v1/shell-terminals:
+                    post: {}
+                  /api/v1/shell-terminals/{handleId}:
+                    delete: {}
+                """
+            ).utf8
+        )
+    }
+
     static func backend(
         stubs: [CapturedAOStub],
         supportedVersions: Set<String> = [
             AgentOrchestratorBackendConfiguration.capturedAPIVersion
         ],
         expectedDaemonPID: Int? = nil,
+        resolvesVerificationWorkspaceIdentity: Bool = false,
         responseDelayNanoseconds: UInt64 = 0
     ) throws -> (
         AgentOrchestratorExecutionBackend,
@@ -171,7 +192,9 @@ private enum AgentOrchestratorAdapterTestFixture {
         let configuration = try AgentOrchestratorBackendConfiguration(
             baseURL: URL(string: "http://127.0.0.1:3001")!,
             supportedAPIVersions: supportedVersions,
-            expectedDaemonPID: expectedDaemonPID
+            expectedDaemonPID: expectedDaemonPID,
+            resolvesVerificationWorkspaceIdentity:
+                resolvesVerificationWorkspaceIdentity
         )
         return (
             AgentOrchestratorExecutionBackend(
@@ -888,6 +911,24 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("workspace identity operations are required when enabled")
+    func workspaceIdentityOperationsAreRequiredWhenEnabled() async throws {
+        let (backend, _) = try AgentOrchestratorAdapterTestFixture.backend(
+            stubs: try AgentOrchestratorAdapterTestFixture.commonStubs(),
+            resolvesVerificationWorkspaceIdentity: true
+        )
+
+        let health = try await backend.health()
+
+        #expect(health.state == .degraded)
+        #expect(
+            health.message?.contains(
+                "POST /api/v1/shell-terminals"
+            ) == true
+        )
+        #expect(health.message?.contains("missing operations") == true)
+    }
+
     @Test("project summaries map isolation without leaking AO wire types")
     func projectSelectionContract() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
@@ -997,6 +1038,104 @@ struct AgentOrchestratorAdapterTests {
             (json["prompt"] as? String)?.contains(
                 "main @ abc123"
             ) == true
+        )
+    }
+
+    @Test("AO start resolves and releases the backend-confirmed workspace")
+    func startResolvesVerificationWorkspaceIdentity() async throws {
+        let shellTerminal = Data(
+            """
+            {
+              "shellTerminal": {
+                "handleId": "shellterm-openmac-7",
+                "projectId": "openmac",
+                "sessionId": "openmac-7",
+                "workingDir": "/Users/test/.ao/data/worktrees/openmac/openmac-7",
+                "title": "openmac-7",
+                "createdAt": "2026-07-31T05:00:02Z"
+              }
+            }
+            """.utf8
+        )
+        var stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
+            CapturedAOStub(
+                "/api/v1/openapi.yaml",
+                data: try AgentOrchestratorAdapterTestFixture
+                    .workspaceIdentityOpenAPIData()
+            ),
+            CapturedAOStub(
+                "/api/v1/projects/openmac",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "project.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions",
+                query: "project=openmac",
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "sessions-empty.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/sessions",
+                method: "POST",
+                status: 201,
+                data: try AgentOrchestratorAdapterTestFixture.data(
+                    "spawn.json"
+                )
+            ),
+            CapturedAOStub(
+                "/api/v1/shell-terminals",
+                method: "POST",
+                status: 201,
+                data: shellTerminal
+            ),
+            CapturedAOStub(
+                "/api/v1/shell-terminals/shellterm-openmac-7",
+                method: "DELETE",
+                status: 204,
+                data: Data()
+            )
+        ])
+        stubs.removeAll {
+            $0.method == "GET"
+                && $0.path == "/api/v1/openapi.yaml"
+                && $0.response.statusCode == 200
+        }
+        stubs.insert(
+            CapturedAOStub(
+                "/api/v1/openapi.yaml",
+                data: try AgentOrchestratorAdapterTestFixture
+                    .workspaceIdentityOpenAPIData()
+            ),
+            at: 2
+        )
+        let (backend, transport) = try AgentOrchestratorAdapterTestFixture
+            .backend(
+                stubs: stubs,
+                resolvesVerificationWorkspaceIdentity: true
+            )
+
+        let receipt = try await backend.start(
+            AgentOrchestratorAdapterTestFixture.startRequest()
+        )
+
+        #expect(
+            receipt.verificationWorkspaceURL?.path
+                == "/Users/test/.ao/data/worktrees/openmac/openmac-7"
+        )
+        let requests = await transport.requests()
+        #expect(
+            requests.map(\.path).contains(
+                "/api/v1/shell-terminals"
+            )
+        )
+        #expect(
+            requests.contains {
+                $0.method == "DELETE"
+                    && $0.path
+                        == "/api/v1/shell-terminals/shellterm-openmac-7"
+            }
         )
     }
 

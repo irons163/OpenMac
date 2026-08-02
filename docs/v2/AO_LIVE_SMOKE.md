@@ -85,13 +85,37 @@ On 2026-07-31, OpenMac was checked against upstream revision
 - Session spawn stopped at AO's own preflight because `tmux` was not installed;
   no session was created.
 - The current AO session response deliberately omits the absolute worktree path.
-  OpenMac therefore continues to reject local Xcode verification for AO
-  sessions instead of running commands in the original repository.
+  That response is not sufficient for local Xcode verification, and OpenMac
+  never falls back to running commands in the original repository. The
+  follow-up workspace probe below uses a separate, official AO endpoint when
+  the served contract exposes it.
 
 The CLI probe sequence and identity checks were also re-audited at upstream
 revision `25c9c96b74b57a9c0d4c0c4efb468eb4847ef74b`. It still checks
 `/healthz` before `/readyz` and requires both responses to identify the
 run-file process.
+
+## Backend-confirmed verification workspace probe
+
+AO's `SessionView` still intentionally omits an absolute worktree path. For a
+served contract that supports it, OpenMac resolves the path through AO's
+official shell-terminal API instead of reading AO's private database or
+guessing from the original repository:
+
+1. `POST /api/v1/shell-terminals` with the requested `projectId` and
+   `sessionId`.
+2. Validate the returned `shellTerminal.handleId`, `projectId`, `sessionId`,
+   and absolute `workingDir`.
+3. `DELETE /api/v1/shell-terminals/{handleId}` immediately; the temporary
+   terminal is not used to execute a command.
+4. Store the normalized `workingDir` as the start receipt's
+   `verificationWorkspaceURL`.
+
+The compatibility probe requires both shell-terminal operations when this
+identity resolution is enabled. A missing operation, mismatched identity,
+unsafe handle, non-absolute path, or failed cleanup fails closed. The older
+captured fixture intentionally keeps the pre-endpoint contract; a dedicated
+adapter test and the opt-in live smoke cover the shell-terminal response.
 
 ## Live verification completed on 2026-08-02
 
@@ -106,7 +130,8 @@ run-file process.
 - Direct inspection of the same daemon showed that a session response still
   omits an absolute worktree path. `/workspace/files` exposes file metadata and
   `/preview` exposes a preview URL, but neither is a backend-confirmed Xcode
-  workspace identity.
+  workspace identity. The official shell-terminal probe now supplies that
+  identity without exposing AO's internal session metadata.
 - A follow-up audit of the latest upstream `main` at
   [`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
   found the same boundary: `ControllersSessionView` still omits
@@ -118,11 +143,20 @@ run-file process.
   compatibility smoke passed again with exit code 0.
 - No AO session remains running after the smoke; AO reports only hidden
   terminated records in the session list.
+- The live start receipt contained a file URL under AO's managed
+  `/.ao/data/worktrees/openmac-ao-fixture/` root, and the temporary shell
+  terminal was released; no shell terminals remained after the smoke.
+- The installed AO desktop `0.11.2` currently exposes only the daemon listener
+  at `127.0.0.1:3001`; nothing listens on the documented dashboard port `3000`,
+  the daemon root and `/preview` are not dashboard routes, and the app bundle
+  declares no external URL scheme. OpenMac therefore leaves VS-08's dashboard
+  deep-link pending instead of guessing an `ao://` or browser URL.
 
-This completes the live session and daemon-restart prerequisite for VS-07/VS-08.
-Control Center now reloads and reconciles when its macOS scene becomes active;
+This completes the live session and daemon-restart prerequisite for VS-07/VS-08,
+and the backend-confirmed workspace identity prerequisite for VS-09. Control
+Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
 test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
-terminate, relaunch, terminate). VS-08 now only needs a verified dashboard
-deep-link, while VS-09 remains fail-closed until AO exposes a verifiable
-workspace path for Xcode evidence.
+terminate, relaunch, terminate). VS-08 still needs a verified dashboard
+deep-link, while VS-09 still needs a real Xcode/PR end-to-end run. The clean
+Mac Gatekeeper and participant/concierge gates remain intentionally deferred.

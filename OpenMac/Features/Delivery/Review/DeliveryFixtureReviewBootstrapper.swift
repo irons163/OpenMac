@@ -14,6 +14,8 @@ nonisolated enum DeliveryFixtureReviewBootstrapError:
     case supportedContainerMissing
     case ambiguousContainers([String])
     case planningInventoryUnavailable(String)
+    case briefTitleRequired
+    case briefBodyRequired
     case storeRevisionChanged(expected: Int?, current: Int?)
 
     nonisolated var errorDescription: String? {
@@ -34,6 +36,10 @@ nonisolated enum DeliveryFixtureReviewBootstrapError:
             return "Choose a repository with one top-level Apple container; found \(names.joined(separator: ", "))."
         case let .planningInventoryUnavailable(container):
             return "Could not read targets or schemes from \(container). Check the project or package locally and try again."
+        case .briefTitleRequired:
+            return "Enter a feature brief title."
+        case .briefBodyRequired:
+            return "Enter a feature brief description."
         case let .storeRevisionChanged(expected, current):
             let expectedValue = expected.map(String.init) ?? "none"
             let currentValue = current.map(String.init) ?? "none"
@@ -66,19 +72,33 @@ nonisolated struct DeliveryFixtureReviewBootstrapper: Sendable {
     }
 
     nonisolated func createFixtureReview(
-        repositoryRootURL: URL
+        repositoryRootURL: URL,
+        briefTitle: String? = nil,
+        briefBody: String? = nil
     ) async throws -> DeliveryRunSnapshot {
         let repository = try DeliveryFixtureReviewRepository.resolve(
             repositoryRootURL
         )
         let existingSnapshot = try await persistence.load()
         let generatedAt = now()
-        let brief = FeatureBrief(
-            title: "Fixture review for \(repository.displayName)",
-            body: """
+        let defaultTitle = "Fixture review for \(repository.displayName)"
+        let defaultBody = """
             Create a deterministic delivery-plan fixture for \(repository.displayName). \
             This review is local, editable, and must not dispatch any execution sessions.
-            """,
+            """
+        let title = try normalizedBriefValue(
+            briefTitle,
+            fallback: defaultTitle,
+            error: .briefTitleRequired
+        )
+        let body = try normalizedBriefValue(
+            briefBody,
+            fallback: defaultBody,
+            error: .briefBodyRequired
+        )
+        let brief = FeatureBrief(
+            title: title,
+            body: body,
             repository: DeliveryRepositoryReference(
                 rootPath: repository.context.repositoryRootPath,
                 baseBranch: repository.baseBranch,
@@ -103,6 +123,17 @@ nonisolated struct DeliveryFixtureReviewBootstrapper: Sendable {
             request: request,
             expectedStoreRevision: existingSnapshot?.storeRevision
         )
+    }
+
+    private nonisolated func normalizedBriefValue(
+        _ value: String?,
+        fallback: String,
+        error: DeliveryFixtureReviewBootstrapError
+    ) throws -> String {
+        guard let value else { return fallback }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw error }
+        return trimmed
     }
 }
 

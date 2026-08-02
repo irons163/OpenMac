@@ -254,6 +254,58 @@ struct DeliveryPlanReviewTests {
         )
     }
 
+    @Test("fixture bootstrap preserves the user-entered feature brief")
+    func fixtureBootstrapPreservesEnteredBrief() async throws {
+        let fixture = DeliveryPlanReviewFixture.temporaryStore(
+            label: "review-brief"
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.directoryURL) }
+
+        let bootstrapper = DeliveryFixtureReviewBootstrapper(
+            persistence: fixture.store,
+            now: { DeliveryPlanReviewFixture.createdAt }
+        )
+        let snapshot = try await bootstrapper.createFixtureReview(
+            repositoryRootURL: DeliveryGitTestRepository.shared.rootURL,
+            briefTitle: "Ship an observable delivery brief",
+            briefBody: "The plan must preserve the requested behavior and verify it with Xcode."
+        )
+
+        let run = try #require(snapshot.runs.first)
+        #expect(run.brief.title == "Ship an observable delivery brief")
+        #expect(
+            run.brief.body
+                == "The plan must preserve the requested behavior and verify it with Xcode."
+        )
+        #expect(run.brief.repository.rootPath == DeliveryPlanReviewFixture.repositoryRootPath)
+        #expect(run.plan?.tasks.isEmpty == false)
+    }
+
+    @Test("fixture bootstrap rejects a blank user-entered feature brief")
+    func fixtureBootstrapRejectsBlankEnteredBrief() async throws {
+        let fixture = DeliveryPlanReviewFixture.temporaryStore(
+            label: "review-blank-brief"
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.directoryURL) }
+
+        let bootstrapper = DeliveryFixtureReviewBootstrapper(
+            persistence: fixture.store,
+            now: { DeliveryPlanReviewFixture.createdAt }
+        )
+        do {
+            _ = try await bootstrapper.createFixtureReview(
+                repositoryRootURL: DeliveryGitTestRepository.shared.rootURL,
+                briefTitle: "   ",
+                briefBody: "A valid description."
+            )
+            Issue.record("A blank feature brief title should be rejected.")
+        } catch let error as DeliveryFixtureReviewBootstrapError {
+            #expect(error == .briefTitleRequired)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("fixture bootstrap appends and selects a new review run")
     func fixtureBootstrapAppendsToExistingSnapshot() async throws {
         let fixture = DeliveryPlanReviewFixture.temporaryStore(

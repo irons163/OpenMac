@@ -207,12 +207,12 @@ Execution backend 負責：
 
 ## 9. MVP 驗收條件
 
-- [ ] 使用者可開啟一個 Apple/Xcode Git repository 並輸入 brief。
+- [x] 使用者可開啟一個 Apple/Xcode Git repository 並輸入 brief；Plan Review 的 fixture bootstrap 會在產生 typed plan 前讓使用者編輯 brief title 與內容。
 - [x] 可產生、編輯並驗證 3–7 個 typed dependency tasks。
 - [x] 循環依賴或缺少 acceptance／evidence 時不能批准。
 - [x] 未批准的 plan 不會建立 session 或修改 repo。
 - [x] fixture backend 可重現 running、blocked、failed、ready 等情境。
-- [x] 至少一個真實 backend 可建立隔離 session；AO desktop daemon 已以 deterministic fake harness 完成 live start/facts/stop smoke，workspace identity 仍由後續 Xcode verification 條件限制。
+- [x] 至少一個真實 backend 可建立隔離 session；AO desktop daemon 已以 deterministic fake harness 完成 live start/facts/stop smoke，並透過官方 shell-terminal API 取得及釋放 backend-confirmed workspace identity。
 - [x] 每個 task 可追蹤 session、attempt、branch 與 PR identity。
 - [x] 只 dispatch dependencies 已滿足的 task，重啟後不重複 dispatch。
 - [x] 主畫面能區分 `Running` 與 `Needs You`，並顯示原因與下一步。
@@ -229,8 +229,11 @@ stop acknowledgement 均通過；request、branch、execution identity 也已核
 
 Xcode verifier 已以真實 Swift package 執行 `xcodebuild` build，保存並
 round-trip 驗證 command、scheme、exit status、summary、timestamps 與
-`.xcresult` reference。AO captured API 尚未提供 session workspace path，因此
-AO local verification 仍 fail closed，不以原始 repository 假冒隔離 workspace。
+`.xcresult` reference。AO 的 session response 仍未直接提供 workspace path；對
+支援官方 shell-terminal API 的 daemon，adapter 會以 project／session identity
+核對回傳的絕對 `workingDir`，關閉暫時 terminal 後保存為 verification
+workspace。endpoint 缺失或回應／清理失敗時仍 fail closed，絕不以原始 repository
+冒充隔離 workspace。真實 AO Xcode／PR E2E 尚待完成。
 
 Recovery contract 會區分同一 dispatch reservation 的 idempotent resume 與
 terminal attempt 的新 retry。新 retry 必須綁定使用者看到的 latest attempt；

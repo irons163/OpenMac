@@ -15,6 +15,11 @@ The covered surface is deliberately limited to:
 - `GET /api/v1/sessions/{id}/workspace/files`
 - `POST /api/v1/sessions/{id}/kill`
 
+These captured fixtures predate the shell-terminal workspace identity probe and
+therefore intentionally do not list `POST /api/v1/shell-terminals` or its
+`DELETE /api/v1/shell-terminals/{handleId}` cleanup route. The dedicated adapter
+contract test and opt-in live smoke supply that newer response shape.
+
 The session variants also cover unchanged polling snapshots, an unknown future
 status, and an explicitly terminated session so the adapter must fail closed.
 The served OpenAPI fixture lists every operation the adapter requires; health

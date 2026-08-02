@@ -39,13 +39,15 @@ nonisolated struct AgentOrchestratorBackendConfiguration: Sendable {
     let harness: String
     let requestTimeout: TimeInterval
     let expectedDaemonPID: Int?
+    let resolvesVerificationWorkspaceIdentity: Bool
 
     nonisolated init(
         baseURL: URL,
         supportedAPIVersions: Set<String> = [capturedAPIVersion],
         harness: String = "codex",
         requestTimeout: TimeInterval = 10,
-        expectedDaemonPID: Int? = nil
+        expectedDaemonPID: Int? = nil,
+        resolvesVerificationWorkspaceIdentity: Bool = true
     ) throws {
         guard let components = URLComponents(
             url: baseURL,
@@ -89,6 +91,8 @@ nonisolated struct AgentOrchestratorBackendConfiguration: Sendable {
         self.harness = normalizedHarness
         self.requestTimeout = max(1, requestTimeout)
         self.expectedDaemonPID = expectedDaemonPID
+        self.resolvesVerificationWorkspaceIdentity =
+            resolvesVerificationWorkspaceIdentity
     }
 }
 
@@ -686,10 +690,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             )
         }
         if let match = matches.first {
-            return try recoveredReceipt(
+            return try await recoveredReceipt(
                 match,
                 request: request,
-                configuration: configuration
+                configuration: configuration,
+                transport: transport
             )
         }
 
@@ -756,11 +761,18 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
                 reason: "The AO spawn receipt does not match the requested session."
             )
         }
+        let verificationWorkspaceURL = try await resolveVerificationWorkspace(
+            executionID: spawned.session.id,
+            projectID: request.projectID.rawValue,
+            configuration: configuration,
+            transport: transport
+        )
         return ExecutionStartReceipt(
             requestID: request.requestID,
             executionID: ExecutionID(spawned.session.id),
             acceptedAt: acceptedAt,
-            branch: spawned.session.branch
+            branch: spawned.session.branch,
+            verificationWorkspaceURL: verificationWorkspaceURL
         )
     }
 
@@ -825,7 +837,9 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         }
 
         let missingOperations = missingRequiredOpenAPIOperations(
-            in: specResponse.data
+            in: specResponse.data,
+            resolvesVerificationWorkspaceIdentity:
+                configuration.resolvesVerificationWorkspaceIdentity
         )
         guard missingOperations.isEmpty else {
             return HealthProbeResult(
@@ -942,8 +956,9 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     private nonisolated static func recoveredReceipt(
         _ session: AgentOrchestratorWire.Session,
         request: ExecutionStartRequest,
-        configuration: AgentOrchestratorBackendConfiguration
-    ) throws -> ExecutionStartReceipt {
+        configuration: AgentOrchestratorBackendConfiguration,
+        transport: any AgentOrchestratorHTTPTransport
+    ) async throws -> ExecutionStartReceipt {
         guard Self.isSafePathComponent(session.id),
               session.projectId == request.projectID.rawValue,
               session.branch == idempotencyBranch(request.requestID),
@@ -954,12 +969,144 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
                 "The existing AO session for this OpenMac request has incompatible identity or harness data."
             )
         }
+        let verificationWorkspaceURL: URL?
+        if session.isTerminated {
+            verificationWorkspaceURL = nil
+        } else {
+            verificationWorkspaceURL = try await resolveVerificationWorkspace(
+                executionID: session.id,
+                projectID: request.projectID.rawValue,
+                configuration: configuration,
+                transport: transport
+            )
+        }
         return ExecutionStartReceipt(
             requestID: request.requestID,
             executionID: ExecutionID(session.id),
             acceptedAt: acceptedAt,
-            branch: session.branch
+            branch: session.branch,
+            verificationWorkspaceURL: verificationWorkspaceURL
         )
+    }
+
+    private nonisolated static func resolveVerificationWorkspace(
+        executionID: String,
+        projectID: String,
+        configuration: AgentOrchestratorBackendConfiguration,
+        transport: any AgentOrchestratorHTTPTransport
+    ) async throws -> URL? {
+        guard configuration.resolvesVerificationWorkspaceIdentity else {
+            return nil
+        }
+        try requireSafePathComponent(
+            executionID,
+            operation: .workspaceIdentity,
+            label: "execution ID"
+        )
+        try requireSafePathComponent(
+            projectID,
+            operation: .workspaceIdentity,
+            label: "project ID"
+        )
+
+        let body = AgentOrchestratorWire.OpenShellTerminalRequest(
+            projectId: projectID,
+            sessionId: executionID
+        )
+        var openRequest = makeRequest(
+            configuration: configuration,
+            pathComponents: ["api", "v1", "shell-terminals"],
+            operation: .workspaceIdentity,
+            method: "POST"
+        )
+        openRequest.setValue(
+            "application/json",
+            forHTTPHeaderField: "Content-Type"
+        )
+        do {
+            openRequest.httpBody = try JSONEncoder().encode(body)
+        } catch {
+            throw ExecutionBackendError.rejected(
+                "The AO workspace identity request could not be encoded."
+            )
+        }
+
+        let openResponse = try await send(
+            openRequest,
+            operation: .workspaceIdentity,
+            transport: transport
+        )
+        if openResponse.statusCode == 404 {
+            throw ExecutionBackendError.executionNotFound(
+                ExecutionID(executionID)
+            )
+        }
+        try requireStatus(
+            openResponse,
+            expected: [201],
+            operation: .workspaceIdentity
+        )
+        let envelope: AgentOrchestratorWire.ShellTerminalEnvelope = try decode(
+            openResponse.data,
+            operation: .workspaceIdentity
+        )
+        let terminal = envelope.shellTerminal
+        guard isSafePathComponent(terminal.handleId) else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .workspaceIdentity,
+                reason: "AO returned an unsafe shell terminal handle."
+            )
+        }
+
+        let close = {
+            let closeRequest = makeRequest(
+                configuration: configuration,
+                pathComponents: [
+                    "api", "v1", "shell-terminals", terminal.handleId
+                ],
+                operation: .workspaceIdentity,
+                method: "DELETE"
+            )
+            let closeResponse = try await send(
+                closeRequest,
+                operation: .workspaceIdentity,
+                transport: transport
+            )
+            try requireStatus(
+                closeResponse,
+                expected: [200, 204],
+                operation: .workspaceIdentity
+            )
+        }
+
+        let workspaceURL: URL
+        do {
+            guard terminal.sessionId == executionID,
+                  terminal.projectId == projectID,
+                  !terminal.workingDir.isEmpty else {
+                throw ExecutionBackendError.malformedResponse(
+                    operation: .workspaceIdentity,
+                    reason: "AO returned a shell terminal for another session or project."
+                )
+            }
+            let candidate = URL(
+                fileURLWithPath: terminal.workingDir,
+                isDirectory: true
+            )
+            guard candidate.isFileURL,
+                  (candidate.path as NSString).isAbsolutePath else {
+                throw ExecutionBackendError.malformedResponse(
+                    operation: .workspaceIdentity,
+                    reason: "AO returned a non-absolute verification workspace path."
+                )
+            }
+            workspaceURL = candidate.standardizedFileURL
+        } catch {
+            try? await close()
+            throw error
+        }
+        try await close()
+        return workspaceURL
     }
 
     private nonisolated static func executionProject(
@@ -1505,9 +1652,10 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     }
 
     private nonisolated static func missingRequiredOpenAPIOperations(
-        in data: Data
+        in data: Data,
+        resolvesVerificationWorkspaceIdentity: Bool = false
     ) -> [String] {
-        let required: Set<String> = [
+        var required: Set<String> = [
             "GET /api/v1/projects",
             "GET /api/v1/projects/{id}",
             "GET /api/v1/sessions",
@@ -1516,6 +1664,12 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             "GET /api/v1/sessions/{id}/workspace/files",
             "POST /api/v1/sessions/{id}/kill"
         ]
+        if resolvesVerificationWorkspaceIdentity {
+            required.formUnion([
+                "POST /api/v1/shell-terminals",
+                "DELETE /api/v1/shell-terminals/{id}"
+            ])
+        }
         guard let source = String(data: data, encoding: .utf8) else {
             return required.sorted()
         }

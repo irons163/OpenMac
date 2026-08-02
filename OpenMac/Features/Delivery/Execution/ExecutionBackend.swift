@@ -348,6 +348,7 @@ nonisolated enum ExecutionBackendOperation: String, Hashable, Sendable {
     case health
     case listProjects
     case start
+    case workspaceIdentity
     case facts
     case stop
 }
