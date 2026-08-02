@@ -156,6 +156,33 @@ dispatcher preflight and parallel execution contract remain covered by the
 deterministic suite until AO exposes that permission fact. The command prints
 the temporary `ao-live-e2e-funnel.json` export before cleanup.
 
+## Opt-in live AO dashboard route probe
+
+The installed AO desktop package currently serves the daemon/API on port 3001;
+its browser renderer is a separate official upstream web process. Start that
+renderer against the running daemon (from the upstream `frontend` directory):
+
+```bash
+npm ci
+npm run dev:web -- --host 127.0.0.1 --port 3000
+```
+
+Then run the OpenMac route verifier in another terminal:
+
+```bash
+tools/test-agent-orchestrator-dashboard.sh \
+  --url http://127.0.0.1:3000 \
+  --project-id openmac-ao-fixture \
+  --session-id openmac-ao-fixture-1
+```
+
+This sends a real `GET` through OpenMac's `URLSession` transport to the exact
+project and session hash routes and requires a non-empty `200 text/html`
+response before either route is considered openable. Omit `--session-id` when
+there is no existing session to check. It is read-only and does not create AO
+sessions or mutate GitHub. The configured root is stored only after the probe
+passes; a daemon JSON root, remote host, or missing renderer fails closed.
+
 ## Current compatibility record
 
 On 2026-07-31, OpenMac was checked against upstream revision
@@ -247,11 +274,17 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   uses approved store reservations plus the real AO backend directly because the
   current AO project summary omits permission scope; production dispatcher
   preflight remains fail-closed until AO exposes that fact.
+- The upstream `main` web renderer at revision `9159a020` was started on
+  `127.0.0.1:3000` against the desktop daemon, and
+  `tools/test-agent-orchestrator-dashboard.sh --url http://127.0.0.1:3000
+  --project-id openmac-ao-fixture --session-id openmac-ao-fixture-1` passed the
+  real OpenMac dashboard verifier; the exact project and session hash routes
+  returned `200 text/html`.
 - The installed AO desktop `0.11.2` currently exposes only the daemon listener
   at `127.0.0.1:3001`; nothing listens on the documented dashboard port `3000`,
   the daemon root and `/preview` are not dashboard routes, and the app bundle
-  declares no external URL scheme. OpenMac therefore leaves VS-08's dashboard
-  deep-link pending instead of guessing an `ao://` or browser URL.
+  declares no external URL scheme. OpenMac therefore requires the separately
+  configured official web renderer and never guesses an `ao://` or browser URL.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08,
 the backend-confirmed workspace identity, real AO workspace/Xcode-build, and
@@ -261,7 +294,8 @@ Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
 test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
 terminate, relaunch, terminate). The dashboard route helper is configurable and
-fail-closed, but VS-08 still needs a real AO HTML dashboard route to verify.
+fail-closed; the official web renderer route probe above completes VS-08's live
+HTML verification gate.
 PR creation, push, merge, and review mutation were not performed by the smoke.
 The clean Mac Gatekeeper and participant/concierge gates remain
 intentionally deferred.

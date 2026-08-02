@@ -227,3 +227,72 @@ struct AgentOrchestratorDashboardDeepLinkTests {
         )
     }
 }
+
+private enum AgentOrchestratorDashboardLiveEnvironment {
+    static let baseURLKey = "OPENMAC_AO_DASHBOARD_URL"
+    static let projectIDKey = "OPENMAC_AO_DASHBOARD_PROJECT_ID"
+    static let sessionIDKey = "OPENMAC_AO_DASHBOARD_SESSION_ID"
+
+    static var baseURLText: String? {
+        ProcessInfo.processInfo.environment[baseURLKey]
+    }
+
+    static var projectID: String {
+        ProcessInfo.processInfo.environment[projectIDKey]
+            ?? "openmac-ao-fixture"
+    }
+
+    static var sessionID: String? {
+        guard let value = ProcessInfo.processInfo.environment[sessionIDKey],
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+        return value
+    }
+}
+
+@Suite(
+    "Agent Orchestrator live dashboard route",
+    .serialized,
+    .enabled(
+        if: AgentOrchestratorDashboardLiveEnvironment.baseURLText != nil,
+        "Pass --url to tools/test-agent-orchestrator-dashboard.sh."
+    )
+)
+struct AgentOrchestratorDashboardLiveTests {
+    @Test("the configured AO web renderer serves the exact project and session routes")
+    func verifiesLiveDashboardRoute() async throws {
+        let baseURLText = try #require(
+            AgentOrchestratorDashboardLiveEnvironment.baseURLText
+        )
+        let baseURL = try #require(URL(string: baseURLText))
+        let configuration = try AgentOrchestratorDashboardConfiguration(
+            baseURL: baseURL
+        )
+        let verifiedURL = try await AgentOrchestratorDashboardRouteVerifier()
+            .verify(
+                configuration: configuration,
+                projectID: AgentOrchestratorDashboardLiveEnvironment.projectID
+            )
+        let expectedURL = try configuration.projectURL(
+            projectID: AgentOrchestratorDashboardLiveEnvironment.projectID
+        )
+
+        #expect(verifiedURL == expectedURL)
+
+        if let sessionID = AgentOrchestratorDashboardLiveEnvironment.sessionID {
+            let verifiedSessionURL = try await AgentOrchestratorDashboardRouteVerifier()
+                .verify(
+                    configuration: configuration,
+                    projectID: AgentOrchestratorDashboardLiveEnvironment.projectID,
+                    sessionID: sessionID
+                )
+            let expectedSessionURL = try configuration.sessionURL(
+                projectID: AgentOrchestratorDashboardLiveEnvironment.projectID,
+                sessionID: sessionID
+            )
+            #expect(verifiedSessionURL == expectedSessionURL)
+        }
+    }
+}

@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-07、VS-09～VS-12 的技術 gate 已完成；VS-08 的 dashboard deep-link 已補 fail-closed route verifier，但目前 AO desktop 沒有可驗證的外部 HTML route，仍待 AO 提供該能力
+> 狀態：VS-01～VS-12 的技術 gate 已完成；VS-08 dashboard deep-link 已由 OpenMac 的 fail-closed verifier 透過 AO 官方 web renderer live 驗證。已安裝的 AO desktop 仍只提供 daemon，需另外啟動 web renderer
 > 更新日期：2026-08-02
 
 本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
@@ -48,10 +48,14 @@ deterministic restart test 會用新的 model instance 驗證 persisted facts �
 packaged test.2 已通過 `tools/test-packaged-app-restart.sh` 的 launch →
 terminate → relaunch → terminate smoke；已補可設定的 dashboard root、project/session
 route builder 與 HTML verification，Control Center 只在 route 通過 verification 後
-開啟，不猜測 URL。另對 upstream `main` revision
+開啟，不猜測 URL。2026-08-02 以 upstream `main` revision
 [`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
-重新核對：其 desktop dashboard 仍不是 daemon 的 HTTP route，session view
-仍沒有可供外部 app 使用的 dashboard URL；`/preview` 只代表瀏覽器 preview。
+啟動官方 `frontend` 的 `npm run dev:web -- --host 127.0.0.1 --port 3000`，並以
+`tools/test-agent-orchestrator-dashboard.sh --url http://127.0.0.1:3000
+--project-id openmac-ao-fixture --session-id openmac-ao-fixture-1` 通過真實
+`URLSession` HTML route probe；project 與 session hash route 都回傳
+`200 text/html`。desktop dashboard 仍不是 daemon 的 HTTP route，
+也沒有外部 URL scheme；`/preview` 只代表瀏覽器 preview，不冒充 dashboard。
 
 VS-09 的 `XcodeVerifier` 只接受 backend-confirmed workspace，並在執行前核對
 Git common directory、branch 與 container identity。它不經 shell 拼接參數，
