@@ -352,24 +352,47 @@ struct DeliveryAttentionTests {
         _ = try await dispatcher.dispatchReadyWave(
             runID: DeliveryDispatchFixture.runID
         )
-        let model = DeliveryControlCenterViewModel(
+        let firstModel = DeliveryControlCenterViewModel(
             persistence: store,
             backendFactory: { _ in
                 PersistedReconcileExecutionBackend(backend)
             }
         )
 
-        await model.load()
+        await firstModel.load()
 
-        #expect(model.errorMessage == nil)
-        #expect(model.run?.executionObservations.count == 2)
+        #expect(firstModel.errorMessage == nil)
+        #expect(firstModel.run?.executionObservations.count == 2)
         #expect(
-            model.run?.attempts.allSatisfy {
+            firstModel.run?.attempts.allSatisfy {
                 $0.lastFactSequence == 1 && $0.nextFactCursor != nil
             } == true
         )
-        #expect(model.dashboard?.state == .running)
-        #expect(model.canReconcile)
+
+        // A new model instance is the deterministic equivalent of reopening
+        // the app: it must resume from the persisted cursor, import the next
+        // page, and never duplicate the observations already stored.
+        let restartedModel = DeliveryControlCenterViewModel(
+            persistence: store,
+            backendFactory: { _ in
+                PersistedReconcileExecutionBackend(backend)
+            }
+        )
+        await restartedModel.load()
+
+        #expect(restartedModel.errorMessage == nil)
+        #expect(restartedModel.run?.executionObservations.count == 4)
+        #expect(
+            Set(restartedModel.run?.executionObservations.map(\.id) ?? [])
+                .count == 4
+        )
+        #expect(
+            restartedModel.run?.attempts.allSatisfy {
+                $0.lastFactSequence == 2 && $0.nextFactCursor != nil
+            } == true
+        )
+        #expect(restartedModel.dashboard?.state == .running)
+        #expect(restartedModel.canReconcile)
     }
 
     @Test("waiting for input appears in Needs You with an actionable reason")

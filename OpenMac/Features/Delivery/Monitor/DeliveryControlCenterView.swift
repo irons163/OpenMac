@@ -8,6 +8,7 @@ enum DeliveryControlCenterSceneConfiguration {
 
 struct DeliveryControlCenterScene: View {
     @StateObject private var model: DeliveryControlCenterViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     init(persistence: FileDeliveryRunStore = FileDeliveryRunStore()) {
         _model = StateObject(
@@ -48,6 +49,10 @@ struct DeliveryControlCenterScene: View {
         .frame(minWidth: 1040, minHeight: 700)
         .task {
             await model.load()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task { await model.load() }
         }
     }
 }
