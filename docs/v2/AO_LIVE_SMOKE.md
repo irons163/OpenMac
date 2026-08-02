@@ -37,6 +37,10 @@ allowing a later operation to rerun the full compatibility check after the
 daemon recovers. A missing or rejected run file never causes a remote
 connection; users can still enter a loopback URL manually.
 
+Session start also fails closed unless the approved request requires
+workspace-scoped read/write permission; unknown or full-machine permission
+scopes never reach the AO daemon.
+
 ## Explicit isolated-session probe
 
 Starting a session is opt-in because it creates an AO-managed worktree and

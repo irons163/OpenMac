@@ -27,6 +27,8 @@ identity probe，首次並行操作也會共用完整的 health、readiness 與 
 compatibility probe，避免 sessions 數量放大 traffic；失敗的共享 probe 不會被
 快取；無論失敗發生在首次完整 probe 或後續 identity probe，daemon 恢復後的
 下一次操作都會重新執行完整 compatibility check。
+AO session start 也會在 adapter 邊界拒絕 `unknown` 或 `dangerFullAccess`
+權限，不會先送出 project、session 或 spawn request。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop

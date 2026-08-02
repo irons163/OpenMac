@@ -1066,6 +1066,40 @@ struct AgentOrchestratorAdapterTests {
         #expect(!requests.contains(where: { $0.method == "POST" }))
     }
 
+    @Test("unsafe session permission scope fails before AO side effects")
+    func unsafePermissionScopeFailsClosed() async throws {
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(stubs: [])
+        let baseRequest = AgentOrchestratorAdapterTestFixture.startRequest()
+        let request = ExecutionStartRequest(
+            requestID: baseRequest.requestID,
+            projectID: baseRequest.projectID,
+            deliveryRunID: baseRequest.deliveryRunID,
+            taskID: baseRequest.taskID,
+            planID: baseRequest.planID,
+            planRevision: baseRequest.planRevision,
+            approvalFingerprint: baseRequest.approvalFingerprint,
+            title: baseRequest.title,
+            instructions: baseRequest.instructions,
+            baseBranch: baseRequest.baseBranch,
+            baseCommitIdentifier: baseRequest.baseCommitIdentifier,
+            requiredPermissionScope: .dangerFullAccess
+        )
+
+        do {
+            _ = try await backend.start(request)
+            Issue.record("Expected unsafe permission scope rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .rejected(message) = error else {
+                Issue.record("Expected rejection, got \(error)")
+                return
+            }
+            #expect(message.contains("workspace-scoped"))
+        }
+
+        #expect(await transport.requests().isEmpty)
+    }
+
     @Test("session snapshots map running, files, PR, and terminal facts")
     func factsContract() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([

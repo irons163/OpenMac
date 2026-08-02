@@ -217,6 +217,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     func start(
         _ request: ExecutionStartRequest
     ) async throws -> ExecutionStartReceipt {
+        guard request.requiredPermissionScope == .workspaceReadWrite else {
+            throw ExecutionBackendError.rejected(
+                "OpenMac requires workspace-scoped read/write permission before starting an AO session."
+            )
+        }
         if let existing = startRequestByID[request.requestID],
            existing != request {
             throw ExecutionBackendError.conflict(
