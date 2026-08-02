@@ -33,6 +33,8 @@ AO session start 也會在 adapter 邊界拒絕 `unknown` 或 `dangerFullAccess`
 kind、harness 與建立時間；不完整 receipt 會 fail closed。
 已終止的 session stop 只保存 `alreadyTerminal` acknowledgement，不會重送 kill
 或假裝取得了新的 stopped fact。
+AO project／execution identifiers 也必須是單一安全 URL path component；`/`、`\`
+與 `.`／`..` segment 會在送出 compatibility probe 前拒絕。
 
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop

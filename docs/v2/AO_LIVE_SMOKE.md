@@ -46,6 +46,9 @@ malformed identity is treated as a conflict and never as a successful receipt.
 Stopping an already terminal session returns `alreadyTerminal` without sending
 another kill request; a non-terminal kill acknowledgement remains distinct from
 the later terminal facts.
+Session and project identifiers are validated as single safe URL path
+components before any request, so separators and dot segments cannot redirect
+an adapter call to another AO route.
 
 ## Explicit isolated-session probe
 

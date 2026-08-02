@@ -222,6 +222,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
                 "OpenMac requires workspace-scoped read/write permission before starting an AO session."
             )
         }
+        try Self.requireSafePathComponent(
+            request.projectID.rawValue,
+            operation: .start,
+            label: "project ID"
+        )
         if let existing = startRequestByID[request.requestID],
            existing != request {
             throw ExecutionBackendError.conflict(
@@ -260,6 +265,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         for executionID: ExecutionID,
         after cursor: ExecutionFactCursor?
     ) async throws -> ExecutionFactPage {
+        try Self.requireSafePathComponent(
+            executionID.rawValue,
+            operation: .facts,
+            label: "execution ID"
+        )
         try await requireCompatibleAPI()
         let decodedCursor = try Self.decodeFactCursor(
             cursor,
@@ -356,6 +366,11 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
     func stop(
         executionID: ExecutionID
     ) async throws -> ExecutionStopReceipt {
+        try Self.requireSafePathComponent(
+            executionID.rawValue,
+            operation: .stop,
+            label: "execution ID"
+        )
         try await requireCompatibleAPI()
         let sessionRequest = makeRequest(
             pathComponents: [
@@ -734,9 +749,7 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
               spawned.session.kind == "worker",
               spawned.session.harness == configuration.harness,
               spawned.session.branch == branch,
-              !spawned.session.id.trimmingCharacters(
-                  in: .whitespacesAndNewlines
-              ).isEmpty,
+              Self.isSafePathComponent(spawned.session.id),
               let acceptedAt = parseDate(spawned.session.createdAt) else {
             throw ExecutionBackendError.malformedResponse(
                 operation: .start,
@@ -931,9 +944,7 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
         request: ExecutionStartRequest,
         configuration: AgentOrchestratorBackendConfiguration
     ) throws -> ExecutionStartReceipt {
-        guard !session.id.trimmingCharacters(
-                  in: .whitespacesAndNewlines
-              ).isEmpty,
+        guard Self.isSafePathComponent(session.id),
               session.projectId == request.projectID.rawValue,
               session.branch == idempotencyBranch(request.requestID),
               session.kind == "worker",
@@ -1350,6 +1361,37 @@ actor AgentOrchestratorExecutionBackend: ExecutionBackend {
             forHTTPHeaderField: "User-Agent"
         )
         return request
+    }
+
+    private nonisolated static func isSafePathComponent(
+        _ value: String
+    ) -> Bool {
+        guard !value.isEmpty,
+              value == value.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              value != ".",
+              value != "..",
+              !value.contains("/"),
+              !value.contains("\\") else {
+            return false
+        }
+        return !value.unicodeScalars.contains {
+            CharacterSet.controlCharacters.contains($0)
+        }
+    }
+
+    private nonisolated static func requireSafePathComponent(
+        _ value: String,
+        operation: ExecutionBackendOperation,
+        label: String
+    ) throws {
+        guard isSafePathComponent(value) else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: operation,
+                reason: "The AO \(label) is not a safe single URL path component."
+            )
+        }
     }
 
     private nonisolated static func send(

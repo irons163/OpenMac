@@ -1078,6 +1078,77 @@ struct AgentOrchestratorAdapterTests {
         )
     }
 
+    @Test("unsafe AO path identifiers fail before any request")
+    func unsafePathIdentifiersFailClosed() async throws {
+        let (backend, transport) =
+            try AgentOrchestratorAdapterTestFixture.backend(stubs: [])
+
+        do {
+            _ = try await backend.start(
+                ExecutionStartRequest(
+                    requestID: UUID(
+                        uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
+                    )!,
+                    projectID: ExecutionProjectID("../../healthz"),
+                    deliveryRunID: UUID(
+                        uuidString: "44444444-4444-4444-4444-444444444444"
+                    )!,
+                    taskID: UUID(
+                        uuidString: "55555555-5555-5555-5555-555555555555"
+                    )!,
+                    planID: UUID(
+                        uuidString: "66666666-6666-6666-6666-666666666666"
+                    )!,
+                    planRevision: 1,
+                    approvalFingerprint: "unsafe-path",
+                    title: "Unsafe path",
+                    instructions: "Must not reach AO.",
+                    baseBranch: "main",
+                    baseCommitIdentifier: "abc123"
+                )
+            )
+            Issue.record("Expected unsafe project ID rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed start response, got \(error)")
+                return
+            }
+            #expect(operation == .start)
+            #expect(reason.contains("safe single URL path component"))
+        }
+
+        do {
+            _ = try await backend.facts(
+                for: ExecutionID("session/../../healthz"),
+                after: nil
+            )
+            Issue.record("Expected unsafe execution ID rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed facts response, got \(error)")
+                return
+            }
+            #expect(operation == .facts)
+            #expect(reason.contains("safe single URL path component"))
+        }
+
+        do {
+            _ = try await backend.stop(
+                executionID: ExecutionID("..")
+            )
+            Issue.record("Expected unsafe stop ID rejection")
+        } catch let error as ExecutionBackendError {
+            guard case let .malformedResponse(operation, reason) = error else {
+                Issue.record("Expected malformed stop response, got \(error)")
+                return
+            }
+            #expect(operation == .stop)
+            #expect(reason.contains("safe single URL path component"))
+        }
+
+        #expect(await transport.requests().isEmpty)
+    }
+
     @Test("base branch mismatch prevents AO side effects")
     func baseBranchMismatchFailsClosed() async throws {
         let stubs = try AgentOrchestratorAdapterTestFixture.commonStubs([
