@@ -12,6 +12,7 @@ private enum AgentOrchestratorLiveSmokeEnvironment {
     static let repositoryRootKey = "OPENMAC_AO_LIVE_REPOSITORY_ROOT"
     static let xcodeSchemeKey = "OPENMAC_AO_LIVE_XCODE_SCHEME"
     static let workspaceRootKey = "OPENMAC_AO_LIVE_WORKSPACE_ROOT"
+    static let prURLKey = "OPENMAC_AO_LIVE_PR_URL"
 
     static var baseURLText: String? {
         ProcessInfo.processInfo.environment[baseURLKey]
@@ -55,6 +56,81 @@ private enum AgentOrchestratorLiveSmokeEnvironment {
 
     static var workspaceRoot: String? {
         ProcessInfo.processInfo.environment[workspaceRootKey]
+    }
+
+    static var prURL: String? {
+        ProcessInfo.processInfo.environment[prURLKey]
+    }
+
+    static func claimPR(
+        _ prURL: String,
+        for executionID: ExecutionID
+    ) async throws {
+        let baseURLText = try #require(baseURLText)
+        let baseURL = try #require(URL(string: baseURLText))
+        var url = baseURL
+        for component in [
+            "api", "v1", "sessions", executionID.rawValue, "pr", "claim"
+        ] {
+            url.appendPathComponent(component)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(
+            "application/json",
+            forHTTPHeaderField: "Content-Type"
+        )
+        request.httpBody = try JSONEncoder().encode(
+            ClaimPRRequest(pr: prURL)
+        )
+        let (data, response) = try await URLSession.shared.data(
+            for: request
+        )
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .facts,
+                reason: "AO PR claim did not return an HTTP response."
+            )
+        }
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw ExecutionBackendError.malformedResponse(
+                operation: .facts,
+                reason: "AO PR claim returned HTTP \(httpResponse.statusCode): \(body)"
+            )
+        }
+        let claim = try JSONDecoder().decode(
+            ClaimPRResponse.self,
+            from: data
+        )
+        guard claim.ok,
+              claim.sessionID == executionID.rawValue,
+              claim.prs.contains(where: { $0.url == prURL }) else {
+            throw ExecutionBackendError.malformedResponse(
+                operation: .facts,
+                reason: "AO PR claim did not return the requested PR identity."
+            )
+        }
+    }
+
+    private struct ClaimPRRequest: Encodable {
+        let pr: String
+    }
+
+    private struct ClaimPRResponse: Decodable {
+        let ok: Bool
+        let sessionID: String
+        let prs: [ClaimPR]
+
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case sessionID = "sessionId"
+            case prs
+        }
+    }
+
+    private struct ClaimPR: Decodable {
+        let url: String
     }
 
     static func backend() throws -> AgentOrchestratorExecutionBackend {
@@ -180,18 +256,18 @@ struct AgentOrchestratorLiveSmokeTests {
         #expect(receipt.verificationWorkspaceURL?.isFileURL == true)
         if let workspaceRoot =
             AgentOrchestratorLiveSmokeEnvironment.workspaceRoot {
-            let normalizedRoot = workspaceRoot.hasSuffix("/")
+            let normalizedWorkspaceRoot = workspaceRoot.hasSuffix("/")
                 ? workspaceRoot
                 : workspaceRoot + "/"
             #expect(
                 receipt.verificationWorkspaceURL?.path.hasPrefix(
-                    normalizedRoot
+                    normalizedWorkspaceRoot
                 ) == true
             )
         } else {
             #expect(
                 receipt.verificationWorkspaceURL?.path.contains(
-                    "/.ao/data/worktrees/openmac-ao-fixture/"
+                    "/.ao/data/worktrees/\(projectID)/"
                 ) == true
             )
         }
@@ -300,6 +376,91 @@ struct AgentOrchestratorLiveSmokeTests {
                     == workspaceURL.standardizedFileURL
                         .resolvingSymlinksInPath()
                         .path
+            )
+            #expect(stop.executionID == receipt.executionID)
+            #expect(stop.disposition == .accepted)
+        } catch {
+            _ = try? await backend.stop(
+                executionID: receipt.executionID
+            )
+            throw error
+        }
+    }
+
+    @Test(
+        "real AO session consumes live pull request facts",
+        .enabled(
+            if: AgentOrchestratorLiveSmokeEnvironment.prURL != nil
+                && AgentOrchestratorLiveSmokeEnvironment.projectID != nil
+                && AgentOrchestratorLiveSmokeEnvironment.baseBranch != nil
+                && AgentOrchestratorLiveSmokeEnvironment.baseCommit != nil,
+            "Pass --pr-url with a disposable AO project and public GitHub PR."
+        )
+    )
+    func realAOSessionConsumesLivePullRequestFacts() async throws {
+        let projectID = try #require(
+            AgentOrchestratorLiveSmokeEnvironment.projectID
+        )
+        let baseBranch = try #require(
+            AgentOrchestratorLiveSmokeEnvironment.baseBranch
+        )
+        let baseCommit = try #require(
+            AgentOrchestratorLiveSmokeEnvironment.baseCommit
+        )
+        let prURL = try #require(
+            AgentOrchestratorLiveSmokeEnvironment.prURL
+        )
+        let backend = try AgentOrchestratorLiveSmokeEnvironment.backend()
+        let requestID = UUID()
+        let request = ExecutionStartRequest(
+            requestID: requestID,
+            projectID: ExecutionProjectID(projectID),
+            deliveryRunID: UUID(
+                uuidString: "E2E00008-0000-4000-8000-000000000008"
+            )!,
+            taskID: UUID(
+                uuidString: "E2E00009-0000-4000-8000-000000000009"
+            )!,
+            planID: UUID(
+                uuidString: "E2E0000A-0000-4000-8000-00000000000A"
+            )!,
+            planRevision: 1,
+            approvalFingerprint: "opt-in-live-pr",
+            title: "OpenMac AO PR smoke",
+            instructions:
+                "Consume live pull request identity and CI/review facts.",
+            baseBranch: baseBranch,
+            baseCommitIdentifier: baseCommit
+        )
+
+        let receipt = try await backend.start(request)
+        do {
+            try await AgentOrchestratorLiveSmokeEnvironment.claimPR(
+                prURL,
+                for: receipt.executionID
+            )
+            let facts = try await backend.facts(
+                for: receipt.executionID,
+                after: nil
+            )
+            let pullRequests = facts.facts.compactMap { fact ->
+                ExecutionPullRequestEvidence? in
+                guard case let .pullRequestEvidence(evidence) = fact.body
+                else {
+                    return nil
+                }
+                return evidence
+            }
+            let matching = pullRequests.first {
+                $0.url.absoluteString == prURL
+            }
+            #expect(matching != nil)
+            #expect(matching?.state == .open)
+            #expect(matching?.checks == .passing)
+            #expect(matching?.review == .required)
+
+            let stop = try await backend.stop(
+                executionID: receipt.executionID
             )
             #expect(stop.executionID == receipt.executionID)
             #expect(stop.disposition == .accepted)

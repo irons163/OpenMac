@@ -234,7 +234,8 @@ round-trip 驗證 command、scheme、exit status、summary、timestamps 與
 核對回傳的絕對 `workingDir`，關閉暫時 terminal 後保存為 verification
 workspace。endpoint 缺失或回應／清理失敗時仍 fail closed，絕不以原始 repository
 冒充隔離 workspace。disposable AO workspace 的實際 Xcode build smoke 已通過，
-真實 PR identity／facts E2E 尚待完成。
+並透過 AO 官方 PR claim endpoint 讀回公開 PR 的 URL、open state、CI 與 review
+facts；PR creation／push／merge／review mutation 不在本 smoke 範圍。
 
 Recovery contract 會區分同一 dispatch reservation 的 idempotent resume 與
 terminal attempt 的新 retry。新 retry 必須綁定使用者看到的 latest attempt；

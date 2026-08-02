@@ -93,8 +93,36 @@ This opt-in test creates a fresh AO session, obtains the backend-confirmed
 `Package.swift` identity, runs a real `xcodebuild` build, persists the
 `.xcresult` record, and stops the session. It uses the disposable fixture at
 `/Volumes/M2SSD/openmac-ao-fixture` (commit `529f574`); it does not contact a
-real coding agent or create a PR. A real PR remote and authenticated PR facts
-remain a separate E2E prerequisite.
+real coding agent or create a PR. The separate PR facts probe below covers the
+read-only provider path.
+
+## Opt-in live PR facts probe
+
+AO can claim an existing public GitHub PR for a disposable worker session and
+return the provider's current PR, CI, and review facts. The OpenMac smoke uses
+that official claim endpoint only as test setup, then reads the session through
+the OpenMac adapter:
+
+```bash
+tools/test-agent-orchestrator-live.sh \
+  --url http://127.0.0.1:3001 \
+  --start-project openmac-ao-pr-e2e \
+  --harness fake \
+  --base-branch main \
+  --base-commit 9159a0206a2e1d2a99333118bf9ebc5590b7404f \
+  --pr-url https://github.com/Untrivial-ai/agent-orchestrator/pull/3451
+```
+
+This is read-only with respect to GitHub: it does not create, edit, merge, or
+close a PR. The disposable project must point at the same GitHub repository,
+and the AO daemon must have read access to provider facts. The test asserts the
+PR URL, open state, passing CI, and required-review state after the adapter
+maps the live session snapshot.
+
+The persistent disposable PR fixture is `/Volumes/M2SSD/openmac-ao-pr-fixture`
+at upstream revision `9159a020`; AO registers it as project
+`openmac-ao-pr-e2e`. The fixture and registration are local test state, not
+part of the OpenMac source repository.
 
 ## Current compatibility record
 
@@ -175,6 +203,10 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   OpenMacAOFixture ... build` inside that AO worktree, produced a passing
   `.xcresult`, and stopped the session; the fixture's Git common-directory and
   branch identities matched the AO receipt.
+- The opt-in PR facts smoke claimed public GitHub PR `Untrivial-ai/agent-orchestrator#3451`
+  through AO's official session claim endpoint, then read it through the
+  OpenMac adapter; URL, open state, passing CI, and required-review facts were
+  mapped to the same execution identity and the session was stopped.
 - The installed AO desktop `0.11.2` currently exposes only the daemon listener
   at `127.0.0.1:3001`; nothing listens on the documented dashboard port `3000`,
   the daemon root and `/preview` are not dashboard routes, and the app bundle
@@ -182,12 +214,12 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   deep-link pending instead of guessing an `ao://` or browser URL.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08,
-and the backend-confirmed workspace identity and real AO workspace/Xcode-build
-prerequisites for VS-09. Control
+and the backend-confirmed workspace identity, real AO workspace/Xcode-build,
+and live PR-facts prerequisites for VS-09. Control
 Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
 test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
 terminate, relaunch, terminate). VS-08 still needs a verified dashboard
-deep-link, while VS-09 still needs a real PR identity/facts end-to-end run.
-The clean Mac Gatekeeper and participant/concierge gates remain intentionally
-deferred.
+deep-link. PR creation, push, merge, and review mutation were not performed by
+the smoke. The clean Mac Gatekeeper and participant/concierge gates remain
+intentionally deferred.

@@ -12,11 +12,13 @@ base_commit=""
 xcode_repository_root=""
 xcode_scheme="OpenMacAOFixture"
 xcode_workspace_root=""
+pr_url=""
 
 usage() {
     echo "Usage: $0 [--url URL]"
     echo "       $0 --start-project ID --harness NAME --base-branch BRANCH --base-commit SHA [--url URL]"
     echo "       $0 --start-project ID --base-branch BRANCH --base-commit SHA --xcode-repository-root PATH [--xcode-scheme SCHEME] [--xcode-workspace-root PATH]"
+    echo "       $0 --start-project ID --base-branch BRANCH --base-commit SHA --pr-url GITHUB_PR_URL"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             xcode_workspace_root="${2:-}"
             shift 2
             ;;
+        --pr-url)
+            pr_url="${2:-}"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -87,6 +93,16 @@ fi
 
 if [[ -n "$xcode_workspace_root" && -z "$xcode_repository_root" ]]; then
     echo "--xcode-workspace-root requires --xcode-repository-root." >&2
+    exit 64
+fi
+
+if [[ -n "$xcode_workspace_root" && ! -d "$xcode_workspace_root" ]]; then
+    echo "The AO workspace root is not a directory: $xcode_workspace_root" >&2
+    exit 64
+fi
+
+if [[ -n "$pr_url" && -z "$project_id" ]]; then
+    echo "--pr-url requires --start-project." >&2
     exit 64
 fi
 
@@ -132,6 +148,7 @@ unset OPENMAC_AO_LIVE_XCODE
 unset OPENMAC_AO_LIVE_REPOSITORY_ROOT
 unset OPENMAC_AO_LIVE_XCODE_SCHEME
 unset OPENMAC_AO_LIVE_WORKSPACE_ROOT
+unset OPENMAC_AO_LIVE_PR_URL
 if [[ -n "$project_id" ]]; then
     export OPENMAC_AO_LIVE_PROJECT_ID="$project_id"
     export OPENMAC_AO_LIVE_BASE_BRANCH="$base_branch"
@@ -149,6 +166,11 @@ if [[ -n "$xcode_repository_root" ]]; then
         export OPENMAC_AO_LIVE_WORKSPACE_ROOT="$xcode_workspace_root"
     fi
     echo "Authorized live Xcode verification for $xcode_repository_root ($xcode_scheme)."
+fi
+
+if [[ -n "$pr_url" ]]; then
+    export OPENMAC_AO_LIVE_PR_URL="$pr_url"
+    echo "Authorized live PR facts verification for $pr_url."
 fi
 
 xcrun xctest \
