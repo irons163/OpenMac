@@ -66,3 +66,14 @@ permission or verification path, so OpenMac intentionally fails closed.
 - License: OpenMac Evaluation License, included as `LICENSE.txt`.
 
 `BUILD-INFO.json` records the exact source commit and packaging timestamp.
+
+For a local packaged restart smoke after building the archive, run from the
+repository root:
+
+```bash
+tools/test-packaged-app-restart.sh
+```
+
+The smoke starts the packaged app, terminates it, starts the same packaged app
+again, and terminates it a second time. It does not claim a clean-Mac or human
+validation result.

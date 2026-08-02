@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-07、VS-10～VS-11 已完成；VS-08 restart/deep-link、VS-09 workspace identity 與 Xcode／PR E2E 尚待完成
+> 狀態：VS-01～VS-07、VS-10～VS-11 已完成；VS-08 dashboard deep-link、VS-09 workspace identity 與 Xcode／PR E2E 尚待完成
 > 更新日期：2026-08-02
 
 本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
@@ -45,8 +45,9 @@ acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位�
 部署設定改變；2026-08-02 已完成 AO daemon PID `8874 → 11085` 的重啟後
 compatibility smoke。Control Center 已補 scene-active reload/reconcile，且
 deterministic restart test 會用新的 model instance 驗證 persisted facts 不重播；
-packaged-App restart smoke 與取得可驗證設定前的 dashboard deep-link 仍待完成，
-不猜測 URL。另對 upstream `main` revision
+packaged test.2 已通過 `tools/test-packaged-app-restart.sh` 的 launch →
+terminate → relaunch → terminate smoke；取得可驗證設定前的 dashboard deep-link
+仍待完成，不猜測 URL。另對 upstream `main` revision
 [`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
 重新核對：其 desktop dashboard 仍不是 daemon 的 HTTP route，session view
 仍沒有可供外部 app 使用的 dashboard URL；`/preview` 只代表瀏覽器 preview。

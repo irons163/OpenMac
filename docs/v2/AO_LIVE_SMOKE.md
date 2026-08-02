@@ -121,7 +121,8 @@ run-file process.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08.
 Control Center now reloads and reconciles when its macOS scene becomes active;
-the deterministic restart test passes without replaying facts. VS-08 still
-needs a packaged-App restart smoke and a verified dashboard deep-link, while
-VS-09 remains fail-closed until AO exposes a verifiable workspace path for
-Xcode evidence.
+the deterministic restart test passes without replaying facts. The packaged
+test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
+terminate, relaunch, terminate). VS-08 now only needs a verified dashboard
+deep-link, while VS-09 remains fail-closed until AO exposes a verifiable
+workspace path for Xcode evidence.
