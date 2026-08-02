@@ -42,7 +42,9 @@ AO project／execution identifiers 也必須是單一安全 URL path component�
 VS-08 已能從 persisted session mapping 自動或手動 reconcile，對相同 AO
 snapshot 去重，將 backend outage／未知狀態顯示為 `Needs You`，並把 stop
 acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位址可能由
-部署設定改變；在取得可驗證設定前不猜測 deep-link。
+部署設定改變；2026-08-02 已完成 AO daemon PID `8874 → 11085` 的重啟後
+compatibility smoke。App restart reconcile 與取得可驗證設定前的 dashboard
+deep-link 仍待完成，不猜測 URL。
 
 VS-09 的 `XcodeVerifier` 只接受 backend-confirmed workspace，並在執行前核對
 Git common directory、branch 與 container identity。它不經 shell 拼接參數，

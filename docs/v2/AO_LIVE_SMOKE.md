@@ -103,8 +103,16 @@ run-file process.
   and received a stop acknowledgement. The OpenMac test verified request,
   execution, branch, and stop identities; no production repository or real
   coding-agent session was used.
+- Direct inspection of the same daemon showed that a session response still
+  omits an absolute worktree path. `/workspace/files` exposes file metadata and
+  `/preview` exposes a preview URL, but neither is a backend-confirmed Xcode
+  workspace identity.
+- The AO desktop was quit gracefully and reopened; the old daemon PID `8874`
+  became stale, the new PID `11085` reached ready state, and the read-only
+  compatibility smoke passed again with exit code 0.
 - No AO session remains running after the smoke (`hiddenTerminatedCount: 1`).
 
-This completes the live session prerequisite for VS-07. VS-08 still needs a
-restart/reconcile and dashboard deep-link smoke, while VS-09 remains fail-closed
-until AO exposes a verifiable workspace path for Xcode evidence.
+This completes the live session and daemon-restart prerequisite for VS-07/VS-08.
+VS-08 still needs App restart reconcile and a verified dashboard deep-link,
+while VS-09 remains fail-closed until AO exposes a verifiable workspace path for
+Xcode evidence.
