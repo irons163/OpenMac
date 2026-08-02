@@ -1,7 +1,9 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06、VS-10 已完成；VS-07～VS-09 本機 contracts 已完成；VS-11 clean-source test.2 與本機 launch smoke 已完成，待乾淨測試機 smoke
-> 更新日期：2026-07-31
+> 狀態：VS-01～VS-06、VS-10～VS-11 已完成；VS-07～VS-09 本機 contracts 已完成；AO live isolated-session、workspace identity 與 Xcode／PR E2E 仍待具備 AO runtime prerequisites 的環境
+> 更新日期：2026-08-02
+
+本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
 
 OpenMac v2 的定位是：
 
@@ -61,7 +63,7 @@ universal zip 與 SHA-256。由 clean commit
 封裝前後簽章、架構與本機 launch smoke。Release build 以獨立 feature flag
 開啟 v2 畫面，另有安全 AO discovery 與 compatibility／project discovery
 probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章
-且未 notarized；開放給受測者前仍須在乾淨 Mac 驗證 Gatekeeper onboarding。
+且未 notarized；乾淨 Mac Gatekeeper onboarding 依本輪範圍決策延後，不影響本機技術 slice 的完成判定。
 
 本目錄包含六份執行文件：
 
@@ -70,7 +72,7 @@ probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽
 - [兩週 vertical slice backlog](VERTICAL_SLICE_BACKLOG.md)：單人、十個工作日的交付順序與決策閘門。
 - [測試 build 安裝指南](TEST_BUILD_INSTALL.md)：checksum、Gatekeeper、五分鐘 fixture walkthrough 與 AO connection probe。
 - [AO live smoke](AO_LIVE_SMOKE.md)：對既有 loopback daemon 執行 opt-in adapter compatibility 與明確授權的 isolated-session smoke。
-- [Concierge validation](CONCIERGE_VALIDATION.md)：test.2 招募條件、30 分鐘觀察腳本、紀錄模板與早期停止條件。
+- [Concierge validation](CONCIERGE_VALIDATION.md)：test.2 招募條件、30 分鐘觀察腳本、紀錄模板與早期停止條件（本輪延後）。
 
 在 Day 10 決策閘門通過前：
 

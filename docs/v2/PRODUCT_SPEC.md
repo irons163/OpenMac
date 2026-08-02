@@ -220,7 +220,7 @@ Execution backend 負責：
 - [x] session 結束不會自動成為 verified。
 - [x] 缺少必要 evidence 或 PR checks 時不能成為 `Ready to Merge`。
 - [x] 使用者可停止後續 dispatch，產品不會自動 merge。
-- [ ] 有不需 Xcode 編譯即可安裝的 macOS 測試 build，並有明確 license。
+- [x] 有不需 Xcode 編譯即可安裝的 macOS 測試 build，並有明確 license；乾淨 Mac 的 Gatekeeper onboarding 依本輪範圍決策延後。
 
 AO reference adapter 的 captured contract coverage 已完成，但目前開發機沒有 AO CLI
 或 running daemon；在建立一個真實隔離 session 並核對回傳 identity 前，
@@ -243,8 +243,8 @@ VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程�
 build metadata。由 clean commit
 `84610a2db899926939271193a37e2e70a2efa2b0` 產生的 test.2 已通過封裝前後
 簽章、架構、最低系統版本、checksum 與本機 launch smoke；目前仍是 ad-hoc
-signed、未 notarized，且尚待乾淨測試機完成首次啟動，因此安裝條件維持
-未勾選。
+signed、未 notarized。乾淨測試機的首次啟動依本輪範圍決策延後，不阻塞目前
+安裝條件的完成判定。
 
 ## 10. 安全與信任原則
 
@@ -255,9 +255,10 @@ signed、未 notarized，且尚待乾淨測試機完成首次啟動，因此安�
 5. 外部 backend facts 視為不可信輸入；解析失敗時保留原始資料並顯示未知狀態。
 6. MVP telemetry 預設本機可匯出；若加入遠端匿名統計，必須 opt-in 並說明欄位。
 
-## 11. 驗證指標
+## 11. 驗證指標（延後）
 
-完成 vertical slice 後，以七天 validation window 判斷方向，不用 stars 判斷：
+本輪不啟動七天 validation window；以下指標保留作為未來判斷方向的依據，不是
+本輪完成門檻：
 
 ### Go
 

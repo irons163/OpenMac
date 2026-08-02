@@ -3,6 +3,9 @@
 This package is an invited-evaluator build for the OpenMac v2 validation
 window.
 
+> 本輪跳過乾淨 Mac 的 Gatekeeper onboarding。以下安裝步驟保留作為未來外部
+> validation 的參考，不阻塞目前的本機 fixture 與技術驗證。
+
 ## Requirements
 
 - macOS 14.0 or later.

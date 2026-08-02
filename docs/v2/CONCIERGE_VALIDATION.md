@@ -1,7 +1,10 @@
-# OpenMac 0.1.0 test.2 Concierge Validation
+# OpenMac 0.1.0 test.2 Concierge Validation（延後）
+
+> 範圍決策（2026-08-02）：本輪跳過受測者／concierge 驗證。本文件保留給未來 validation window，3–5 場觀察測試不列入本輪完成門檻。
 
 This runbook turns the invited build into evidence for a go, narrow, or stop
-decision. It is for 3–5 observed sessions before any further product expansion.
+decision. It is for 3–5 observed sessions before any further product expansion;
+that validation is intentionally deferred in the current scope.
 
 ## What this test must answer
 

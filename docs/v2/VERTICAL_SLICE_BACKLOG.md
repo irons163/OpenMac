@@ -4,7 +4,9 @@
 > 人力假設：1 位開發者
 > 目標：證明 Apple/Xcode 的 brief → approved plan → isolated sessions → verified PR 閉環
 
-## 目前進度（2026-07-31）
+> 範圍決策（2026-08-02）：本輪跳過乾淨 Mac 的 Gatekeeper onboarding 與受測者／concierge 驗證。兩者保留為未來 validation，不列入本輪完成門檻；本輪只追蹤目前環境可驗證的程式、contract、fixture 與 AO live prerequisites。
+
+## 目前進度（2026-08-02）
 
 - [x] VS-01：獨立 delivery domain、內容綁定 approval fingerprint、關聯驗證與具 compare-and-swap 的 versioned store。
 - [x] VS-02：backend-neutral execution contract、deterministic fixture、可重播 facts、游標／stop／fault／cancellation 行為。
@@ -16,8 +18,8 @@
 - [ ] VS-08：已保存 reconcile failure 與 stop acknowledgement，Control Center 對可恢復 backend 會在重啟載入時 reconcile，也可手動重試；相同 AO snapshot 不重播 facts，backend down／未知狀態顯示 `Unknown`／`Needs You`，stop receipt 不會假裝 session 已終止。尚欠可設定且驗證過的 AO dashboard deep-link，以及在 live daemon 上完成 restart／stop smoke。
 - [ ] VS-09：已新增獨立 `XcodeVerifier`、Control Center 驗證動作與 atomic evidence persistence；執行前核對 backend-confirmed workspace、branch、Git common directory 與 container，命令以 argument array 啟動並保存 scheme、command、exit status、bounded summary、時間及 `.xcresult`。真實 Swift package smoke 已產生並 round-trip 保存 build record；失敗 evidence 會立即進 `Needs You` 且不能成為 `Ready to Merge`。AO captured contract 未提供 workspace path，因此 AO local verification 維持 fail-closed，尚待 upstream 可驗證 identity 或 live backend 路徑。
 - [x] VS-10：terminal failed／stopped task 可由明確 Retry 建立 sequence+1、全新 idempotency key 的 isolated attempt；舊 reservation resume 仍重用原 key。Retry 以 expected latest-attempt identity、file lock 與 CAS 防止重複，已有 downstream attempt 時 fail closed。Dispatch project 現在必須明確保證 workspace read/write permission，`unknown`／`danger-full-access` 都在建立 reservation 前拒絕。Control Center 可匯出去識別化本機 funnel JSON，只含里程碑 duration／計數／衍生狀態，不含 brief、prompt、路徑、branch／commit、command／log 或 PR URL。
-- [ ] VS-11：已決定 invited-evaluator license、版本 `0.1.0 (2)` 與最低 macOS 14；Release feature flag 會包含 v2 review、control center 與安全 AO discovery／connection probe。封裝工具會拒絕未 commit 的 source，產出 arm64／x86_64 zip、SHA-256、build metadata，並在封裝前後嚴格驗證 ad-hoc hardened-runtime 簽章。由 commit `84610a2db899926939271193a37e2e70a2efa2b0` 產生的 clean-source test.2 archive 已通過 checksum、解壓、簽章與 launch smoke；尚欠在乾淨測試機走過 Gatekeeper onboarding，故不把 ticket 標成完成。
-- [ ] 下一步：先用 test.2 執行 3–5 場 fixture-first concierge tests，驗證 onboarding、plan approval 與 evidence 是否真的有價值；同時在具 AO runtime prerequisites 的環境完成 explicit isolated-session smoke，再取得 verification workspace identity 並跑 Xcode／PR E2E。只有觀察到 repeat-use signal 才通過 Gate B。
+- [x] VS-11：已決定 invited-evaluator license、版本 `0.1.0 (2)` 與最低 macOS 14；Release feature flag 會包含 v2 review、control center 與安全 AO discovery／connection probe。封裝工具會拒絕未 commit 的 source，產出 arm64／x86_64 zip、SHA-256、build metadata，並在封裝前後嚴格驗證 ad-hoc hardened-runtime 簽章。由 commit `84610a2db899926939271193a37e2e70a2efa2b0` 產生的 clean-source test.2 archive 已通過 checksum、解壓、簽章與 launch smoke；乾淨測試機 Gatekeeper onboarding 依本輪範圍決策延後，不阻塞此 ticket。
+- [ ] 下一步：在具 AO runtime prerequisites 的環境完成 explicit isolated-session smoke，再取得 verification workspace identity 並跑 Xcode／PR E2E。乾淨 Mac 與受測者／concierge 驗證已明確延後，不阻塞本輪技術進度。
 
 VS-01～VS-11 contract path 目前由 151 個測試覆蓋，其中 Xcode verifier suite 包含一個真實 Swift package `xcodebuild` smoke；AO discovery suite 以 8 個 deterministic tests 覆蓋有效檔案、missing、stale、invalid identity、writable、oversized、malformed timestamp 與 symlink，install-readiness suite 也驗證 discovery PID 會綁定 connection probe。Xcode 26 的 hosted runner 在本機會卡在 worker materialization，這是 runner 層問題，未算作產品測試通過。測試不啟動真實 Codex 或 AO，也未改動舊 Kanban schema。初始 generation 以 3–5 tasks 作為品質目標；編輯後的產品 plan 允許 3–7 tasks，approval eligibility 一律從目前 typed plan 與未解 generation blockers 重算。
 
@@ -56,10 +58,12 @@ VS-01～VS-11 contract path 目前由 151 個測試覆蓋，其中 Xcode verifie
 | 7 | VS-08：AO reconcile 與 attention | P0 | 輪詢／訂閱必要 facts，映射 running/blocked/failed/ready；restart reconcile；deep-link 到 AO 處理 terminal/follow-up | VS-05、VS-07 | App restart 後恢復 mapping、沒有 duplicate dispatch；未知 AO state 顯示 Unknown/Needs You，不假裝成功；stop 會停止後續 dispatch，外部 session 終止須明確確認 |
 | 8 | VS-09：Xcode 與 PR evidence | P0 | 從既有 runtime 抽出 `XcodeVerifier`；保存 scheme、command、exit status、摘要、時間；接收 backend PR ref/check facts | VS-05；真實 AO 路徑需 VS-08 | 至少一個真實 sample repo 產生 build/test evidence；失敗會阻止 `Ready to Merge`；PR identity 與 attempt 對得上；無 PR API 時可貼 URL，但不得手填「checks passed」 |
 | 9 | VS-10：Recovery、安全與測試 | P0 | 補齊 resume、retry attempt、malformed input、權限與 fail-closed 測試；避免 live process 測試；加入本機 funnel export | VS-05、VS-08、VS-09 | 測試不會呼叫真實 Codex/AO；restart、duplicate event、stale fact、backend down、xcodebuild fail 都有 deterministic coverage；預設不是 `danger-full-access` |
-| 9 | VS-11：可安裝測試 build | P1 | 決定 license、最低 macOS、版本號；產出不需 Xcode 的 zip/dmg，提供最短 onboarding | VS-10 | 乾淨測試機可啟動；首次使用能找到 repo、fixture demo 與 AO connect；未有簽章 credentials 時明確標示測試安裝步驟，不宣稱 notarized |
-| 10 | VS-12：真實 E2E 與 Gate B | P0 | 在真實 Xcode repo 跑 3+ task plan，至少 2 個平行 sessions；執行 verification、連到 PR；完成 3–5 次 concierge tests | VS-07–VS-11 | 一次完整 AO run 可重現且有 event/evidence export；至少 3 位目標使用者在一次引導內完成核心 loop；記錄 brief-to-running 時間、改寫比例、阻塞點與是否願意再用；通過 Gate B 才進 validation window |
+| 9 | VS-11：可安裝測試 build | P1 | 決定 license、最低 macOS、版本號；產出不需 Xcode 的 zip/dmg，提供最短 onboarding | VS-10 | test.2 archive 通過 checksum、簽章、架構與本機 launch smoke；未有簽章 credentials 時明確標示測試安裝步驟，不宣稱 notarized；乾淨測試機 Gatekeeper 驗證延後 |
+| 10 | VS-12：真實 E2E 與 Gate B（延後） | P0 | 在真實 Xcode repo 跑 3+ task plan，至少 2 個平行 sessions；執行 verification、連到 PR；受測者／concierge tests 依範圍決策延後 | VS-07–VS-11 | 一次完整 AO run 可重現且有 event/evidence export；workspace identity、Xcode evidence 與 PR facts 可核對；受測者訊號與 Gate B 延後，不列入本輪完成判定 |
 
-## 4. 每日並行的使用者驗證工作
+## 4. 每日並行的使用者驗證工作（延後）
+
+本節本輪不執行；保留為未來 validation window 的招募與觀察清單，不阻塞技術 slice。
 
 - Day 1：寫一頁 screener，只招募每週同時跑 3+ coding sessions 的 Apple developers。
 - Day 2：發出 20 個精準邀請，不做大眾 launch。
@@ -81,7 +85,9 @@ VS-01～VS-11 contract path 目前由 151 個測試覆蓋，其中 Xcode verifie
 
 若未通過：停止 AO integration，先縮小 plan editor、狀態 reducer 或 evidence contract；不以增加 UI 功能掩蓋 contract 問題。
 
-## 6. Day 10：Gate B
+## 6. Day 10：Gate B（延後）
+
+本輪不以 Gate B 的受測者與 repeat-use 條件作為完成門檻；以下條件保留給未來公開 validation window。
 
 進入公開 validation window 前必須成立：
 
@@ -106,7 +112,9 @@ VS-01～VS-11 contract path 目前由 151 個測試覆蓋，其中 Xcode verifie
 - 自動 merge、review 修復、部署、雲端同步、團隊權限。
 - 新語系、全 README 改版、行銷網站或大眾 launch。
 
-## 8. 七天 Validation Window
+## 8. 七天 Validation Window（延後）
+
+本輪不啟動七天 validation window；相關指標保留作為未來是否擴建的判斷依據。
 
 Day 10 後只修 end-to-end blocker，依 [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md) 的 Go／Stop 指標判斷：
 
