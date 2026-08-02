@@ -242,7 +242,8 @@ commands、logs 或外部 URL。
 VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程。目前版本
 `0.1.0 (2)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
 build metadata。由 clean commit
-`84610a2db899926939271193a37e2e70a2efa2b0` 產生的 test.2 已通過封裝前後
+`f3740d0` 產生的 test.2（SHA-256
+`e5e2c0043c6120eb145d67e585fdaa4b319d5ea0acf39f0927a73c4b12586b7b`）已通過封裝前後
 簽章、架構、最低系統版本、checksum 與本機 launch smoke；目前仍是 ad-hoc
 signed、未 notarized。乾淨測試機的首次啟動依本輪範圍決策延後，不阻塞目前
 安裝條件的完成判定。

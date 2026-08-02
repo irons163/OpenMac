@@ -69,7 +69,8 @@ Control Center 也可匯出本機 funnel JSON；檔案只含里程碑 duration�
 
 VS-11 的目前測試版本為 `0.1.0 (2)`、最低 macOS 14，產出 arm64／x86_64
 universal zip 與 SHA-256。由 clean commit
-`84610a2db899926939271193a37e2e70a2efa2b0` 產生的 archive 已通過 checksum、
+`f3740d0` 產生的 archive（SHA-256
+`e5e2c0043c6120eb145d67e585fdaa4b319d5ea0acf39f0927a73c4b12586b7b`）已通過 checksum、
 封裝前後簽章、架構與本機 launch smoke。Release build 以獨立 feature flag
 開啟 v2 畫面，另有安全 AO discovery 與 compatibility／project discovery
 probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章
