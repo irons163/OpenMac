@@ -124,6 +124,38 @@ at upstream revision `9159a020`; AO registers it as project
 `openmac-ao-pr-e2e`. The fixture and registration are local test state, not
 part of the OpenMac source repository.
 
+## Opt-in live 3-task E2E
+
+The technical VS-12 smoke composes an approved typed three-task DAG, reserves
+two root attempts at once, starts those two real AO sessions concurrently,
+starts the dependent join only after the roots are recorded as succeeded, runs
+the real Xcode verifier in all three backend-confirmed workspaces, claims the
+same public PR on the join session, reconciles AO facts, and writes the
+identification-free funnel export. It is deliberately opt-in and uses the
+fake AO harness; it does not invoke a coding agent or mutate GitHub:
+
+```bash
+tools/test-agent-orchestrator-live.sh \
+  --url http://127.0.0.1:3001 \
+  --e2e \
+  --start-project openmac-ao-fixture \
+  --harness fake \
+  --base-branch main \
+  --base-commit "$(git -C /Volumes/M2SSD/openmac-ao-fixture rev-parse HEAD)" \
+  --xcode-repository-root /Volumes/M2SSD/openmac-ao-fixture \
+  --xcode-workspace-root /Users/phil/.ao/data/worktrees/openmac-ao-fixture \
+  --xcode-scheme OpenMacAOFixture \
+  --pr-url https://github.com/Untrivial-ai/agent-orchestrator/pull/3451
+```
+
+The current AO project summary does not report a permission scope, so the
+production `DeliveryDispatcher` intentionally stops before reserving a live
+session (`unknown` permission is fail-closed). This smoke therefore exercises
+the approved store reservations plus the real AO backend directly; the
+dispatcher preflight and parallel execution contract remain covered by the
+deterministic suite until AO exposes that permission fact. The command prints
+the temporary `ao-live-e2e-funnel.json` export before cleanup.
+
 ## Current compatibility record
 
 On 2026-07-31, OpenMac was checked against upstream revision
@@ -207,6 +239,14 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   through AO's official session claim endpoint, then read it through the
   OpenMac adapter; URL, open state, passing CI, and required-review facts were
   mapped to the same execution identity and the session was stopped.
+- The opt-in technical VS-12 E2E smoke composed a typed three-task DAG, reserved
+  and started two root sessions concurrently, started the dependent join,
+  verified all three backend-confirmed workspaces with real `xcodebuild`,
+  reconciled PR facts on the join, and exported a privacy-filtered funnel report:
+  3 tasks, 3 sessions, 3 verified tasks, 5 passed evidence facts, and 1 PR. It
+  uses approved store reservations plus the real AO backend directly because the
+  current AO project summary omits permission scope; production dispatcher
+  preflight remains fail-closed until AO exposes that fact.
 - The installed AO desktop `0.11.2` currently exposes only the daemon listener
   at `127.0.0.1:3001`; nothing listens on the documented dashboard port `3000`,
   the daemon root and `/preview` are not dashboard routes, and the app bundle
@@ -214,12 +254,14 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   deep-link pending instead of guessing an `ao://` or browser URL.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08,
-and the backend-confirmed workspace identity, real AO workspace/Xcode-build,
-and live PR-facts prerequisites for VS-09. Control
+the backend-confirmed workspace identity, real AO workspace/Xcode-build, and
+live PR-facts prerequisites for VS-09, plus the technical VS-12 3-task E2E.
+Control
 Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
 test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
-terminate, relaunch, terminate). VS-08 still needs a verified dashboard
-deep-link. PR creation, push, merge, and review mutation were not performed by
-the smoke. The clean Mac Gatekeeper and participant/concierge gates remain
+terminate, relaunch, terminate). The dashboard route helper is configurable and
+fail-closed, but VS-08 still needs a real AO HTML dashboard route to verify.
+PR creation, push, merge, and review mutation were not performed by the smoke.
+The clean Mac Gatekeeper and participant/concierge gates remain
 intentionally deferred.

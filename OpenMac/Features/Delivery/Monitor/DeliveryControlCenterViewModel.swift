@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -24,6 +25,8 @@ final class DeliveryControlCenterViewModel: ObservableObject {
 
     private let persistence: FileDeliveryRunStore
     private let backendFactory: BackendFactory
+    private let defaults: UserDefaults
+    private let dashboardVerifier: AgentOrchestratorDashboardRouteVerifier
     private let now: @Sendable () -> Date
     private let xcodeVerificationCoordinator:
         DeliveryXcodeVerificationCoordinator
@@ -37,11 +40,18 @@ final class DeliveryControlCenterViewModel: ObservableObject {
         backendFactory: @escaping BackendFactory = {
             try DeliveryControlCenterViewModel.makeFixtureBackend(for: $0)
         },
+        defaults: UserDefaults = .standard,
+        dashboardTransport: any AgentOrchestratorHTTPTransport =
+            URLSessionAgentOrchestratorHTTPTransport(),
         xcodeVerifier: XcodeVerifier = XcodeVerifier(),
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.persistence = persistence
         self.backendFactory = backendFactory
+        self.defaults = defaults
+        dashboardVerifier = AgentOrchestratorDashboardRouteVerifier(
+            transport: dashboardTransport
+        )
         self.now = now
         xcodeVerificationCoordinator =
             DeliveryXcodeVerificationCoordinator(
@@ -269,6 +279,40 @@ final class DeliveryControlCenterViewModel: ObservableObject {
                 exportedAt: now()
             )
             statusMessage = "Exported privacy-filtered funnel metrics to \(destinationURL.lastPathComponent)."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func openDashboard(for item: DeliveryAttentionItem) async {
+        guard let session = item.sessionRef,
+              session.backendID == "agent-orchestrator" else {
+            return
+        }
+        guard let rawDashboardURL = defaults.string(
+            forKey: AgentOrchestratorDashboardConfiguration.defaultsKey
+        ),
+        let dashboardURL = URL(string: rawDashboardURL) else {
+            statusMessage =
+                "Configure and verify an AO dashboard URL in the Agent Orchestrator connection window first."
+            return
+        }
+
+        do {
+            let configuration = try AgentOrchestratorDashboardConfiguration(
+                baseURL: dashboardURL
+            )
+            let verifiedURL = try await dashboardVerifier.verify(
+                configuration: configuration,
+                projectID: session.projectID,
+                sessionID: session.sessionID
+            )
+            guard NSWorkspace.shared.open(verifiedURL) else {
+                throw ExecutionBackendError.rejected(
+                    "macOS could not open the verified AO dashboard URL."
+                )
+            }
+            statusMessage = "Opened the verified AO dashboard session route."
         } catch {
             errorMessage = error.localizedDescription
         }

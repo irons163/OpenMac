@@ -16,6 +16,16 @@ nonisolated enum DeliveryAgentOrchestratorConnectionState:
     case failed(String)
 }
 
+nonisolated enum DeliveryAgentOrchestratorDashboardState:
+    Equatable,
+    Sendable
+{
+    case unconfigured
+    case checking
+    case verified(URL)
+    case failed(String)
+}
+
 @MainActor
 final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
     typealias BackendFactory =
@@ -23,22 +33,31 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
 
     static let baseURLDefaultsKey =
         "delivery.agentOrchestrator.baseURL"
+    static let dashboardURLDefaultsKey =
+        AgentOrchestratorDashboardConfiguration.defaultsKey
     static let defaultBaseURL = "http://127.0.0.1:3001"
 
     @Published var baseURLText: String
+    @Published var dashboardURLText: String
     @Published private(set) var state:
         DeliveryAgentOrchestratorConnectionState = .idle
+    @Published private(set) var dashboardState:
+        DeliveryAgentOrchestratorDashboardState = .unconfigured
     @Published private(set) var projectNames: [String] = []
     @Published private(set) var discoveryMessage: String?
 
     private let backendFactory: BackendFactory
     private let defaults: UserDefaults
     private let discovery: AgentOrchestratorDaemonDiscovery
+    private let dashboardVerifier: AgentOrchestratorDashboardRouteVerifier
     private var discoveredEndpoint: AgentOrchestratorDaemonEndpoint?
+    private var projectIDs: [String] = []
 
     init(
         defaults: UserDefaults = .standard,
         discovery: AgentOrchestratorDaemonDiscovery = .init(),
+        dashboardTransport: any AgentOrchestratorHTTPTransport =
+            URLSessionAgentOrchestratorHTTPTransport(),
         backendFactory: @escaping BackendFactory = {
             baseURL,
             expectedDaemonPID in
@@ -54,10 +73,16 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
         self.defaults = defaults
         self.backendFactory = backendFactory
         self.discovery = discovery
+        self.dashboardVerifier = AgentOrchestratorDashboardRouteVerifier(
+            transport: dashboardTransport
+        )
 
         let savedBaseURL = defaults.string(
             forKey: Self.baseURLDefaultsKey
         )
+        dashboardURLText = defaults.string(
+            forKey: Self.dashboardURLDefaultsKey
+        ) ?? ""
         do {
             let endpoint = try discovery.discover()
             discoveredEndpoint = endpoint
@@ -99,9 +124,23 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
         }
     }
 
+    var dashboardStatusMessage: String {
+        switch dashboardState {
+        case .unconfigured:
+            return "Optional: enter the AO web dashboard root, then verify it before opening deep-links."
+        case .checking:
+            return "Checking the dashboard HTML route…"
+        case let .verified(url):
+            return "Verified AO dashboard route at " + url.absoluteString + "."
+        case let .failed(message):
+            return message
+        }
+    }
+
     func discoverDaemon() {
         state = .idle
         projectNames = []
+        projectIDs = []
         do {
             guard let endpoint = try discovery.discover() else {
                 discoveredEndpoint = nil
@@ -123,6 +162,7 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
         guard !isConnecting else { return }
         state = .connecting
         projectNames = []
+        projectIDs = []
         do {
             let trimmedURL = baseURLText.trimmingCharacters(
                 in: .whitespacesAndNewlines
@@ -152,6 +192,7 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
                 )
             }
             let projects = try await backend.listProjects()
+            projectIDs = projects.map { $0.id.rawValue }
             projectNames = projects
                 .map(\.name)
                 .sorted {
@@ -172,6 +213,39 @@ final class DeliveryAgentOrchestratorConnectionViewModel: ObservableObject {
                 (error as? any LocalizedError)?.errorDescription
                     ?? error.localizedDescription
             )
+        }
+    }
+
+    func verifyDashboard() async {
+        guard !isConnecting else { return }
+        dashboardState = .checking
+        do {
+            let trimmedURL = dashboardURLText.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            guard let dashboardURL = URL(string: trimmedURL) else {
+                throw AgentOrchestratorDashboardDeepLinkError.invalidBaseURL(
+                    URL(fileURLWithPath: trimmedURL)
+                )
+            }
+            guard let projectID = projectIDs.first else {
+                throw AgentOrchestratorDashboardDeepLinkError.noProject
+            }
+            let configuration = try AgentOrchestratorDashboardConfiguration(
+                baseURL: dashboardURL
+            )
+            let verifiedURL = try await dashboardVerifier.verify(
+                configuration: configuration,
+                projectID: projectID
+            )
+            defaults.set(
+                configuration.baseURL.absoluteString,
+                forKey: Self.dashboardURLDefaultsKey
+            )
+            dashboardURLText = configuration.baseURL.absoluteString
+            dashboardState = .verified(verifiedURL)
+        } catch {
+            dashboardState = .failed(Self.errorMessage(error))
         }
     }
 
@@ -256,6 +330,36 @@ struct DeliveryAgentOrchestratorConnectionScene: View {
                 }
             }
 
+            GroupBox(L10n.string("AO Dashboard (optional)")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField(
+                        L10n.string("Dashboard root URL"),
+                        text: $model.dashboardURLText
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(model.isConnecting)
+
+                    HStack {
+                        Button(L10n.string("Verify Dashboard Route")) {
+                            Task { await model.verifyDashboard() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            model.isConnecting
+                                || model.projectNames.isEmpty
+                                || model.dashboardURLText
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .isEmpty
+                        )
+
+                        Text(model.dashboardStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(dashboardStatusColor)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
             Spacer()
 
             Text(
@@ -276,6 +380,17 @@ struct DeliveryAgentOrchestratorConnectionScene: View {
         case .connected:
             return .green
         case .idle, .connecting:
+            return .secondary
+        }
+    }
+
+    private var dashboardStatusColor: Color {
+        switch model.dashboardState {
+        case .failed:
+            return .red
+        case .verified:
+            return .green
+        case .unconfigured, .checking:
             return .secondary
         }
     }

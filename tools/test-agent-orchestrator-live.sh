@@ -13,12 +13,14 @@ xcode_repository_root=""
 xcode_scheme="OpenMacAOFixture"
 xcode_workspace_root=""
 pr_url=""
+e2e=false
 
 usage() {
     echo "Usage: $0 [--url URL]"
     echo "       $0 --start-project ID --harness NAME --base-branch BRANCH --base-commit SHA [--url URL]"
     echo "       $0 --start-project ID --base-branch BRANCH --base-commit SHA --xcode-repository-root PATH [--xcode-scheme SCHEME] [--xcode-workspace-root PATH]"
     echo "       $0 --start-project ID --base-branch BRANCH --base-commit SHA --pr-url GITHUB_PR_URL"
+    echo "       $0 --e2e --start-project ID --base-branch BRANCH --base-commit SHA --xcode-repository-root PATH --pr-url GITHUB_PR_URL"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
         --pr-url)
             pr_url="${2:-}"
             shift 2
+            ;;
+        --e2e)
+            e2e=true
+            shift
             ;;
         -h|--help)
             usage
@@ -106,6 +112,13 @@ if [[ -n "$pr_url" && -z "$project_id" ]]; then
     exit 64
 fi
 
+if [[ "$e2e" == true ]]; then
+    if [[ -z "$project_id" || -z "$xcode_repository_root" || -z "$pr_url" ]]; then
+        echo "--e2e requires --start-project, --xcode-repository-root, and --pr-url." >&2
+        exit 64
+    fi
+fi
+
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/openmac-ao-live.XXXXXX")"
 cleanup() {
     rm -rf "$temporary_root"
@@ -149,6 +162,8 @@ unset OPENMAC_AO_LIVE_REPOSITORY_ROOT
 unset OPENMAC_AO_LIVE_XCODE_SCHEME
 unset OPENMAC_AO_LIVE_WORKSPACE_ROOT
 unset OPENMAC_AO_LIVE_PR_URL
+unset OPENMAC_AO_LIVE_E2E
+unset OPENMAC_AO_LIVE_E2E_EXPORT_DIRECTORY
 if [[ -n "$project_id" ]]; then
     export OPENMAC_AO_LIVE_PROJECT_ID="$project_id"
     export OPENMAC_AO_LIVE_BASE_BRANCH="$base_branch"
@@ -173,6 +188,21 @@ if [[ -n "$pr_url" ]]; then
     echo "Authorized live PR facts verification for $pr_url."
 fi
 
+if [[ "$e2e" == true ]]; then
+    e2e_export_directory="$temporary_root/evidence"
+    mkdir -p "$e2e_export_directory"
+    export OPENMAC_AO_LIVE_E2E=1
+    export OPENMAC_AO_LIVE_E2E_EXPORT_DIRECTORY="$e2e_export_directory"
+    echo "Authorized live 3-task AO E2E with parallel roots and evidence export."
+fi
+
+xctest_status=0
 xcrun xctest \
     -XCTest OpenMacTests.AgentOrchestratorLiveSmokeTests \
-    "$test_bundle"
+    "$test_bundle" || xctest_status=$?
+
+if [[ "$e2e" == true && -f "$e2e_export_directory/ao-live-e2e-funnel.json" ]]; then
+    echo "Live AO E2E funnel export:"
+    cat "$e2e_export_directory/ao-live-e2e-funnel.json"
+fi
+exit "$xctest_status"

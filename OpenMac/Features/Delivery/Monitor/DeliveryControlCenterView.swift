@@ -127,7 +127,8 @@ struct DeliveryControlCenterView: View {
                         color: .orange,
                         items: dashboard.needsYou,
                         emptyMessage: L10n.string("No task needs intervention."),
-                        onRetry: retry
+                        onRetry: retry,
+                        onOpenDashboard: openDashboard
                     )
                     DeliveryAttentionSectionView(
                         title: L10n.string("Running"),
@@ -140,7 +141,8 @@ struct DeliveryControlCenterView: View {
                                 dashboard.queuedTaskCount
                             )
                             : L10n.string("No session is running."),
-                        onRetry: retry
+                        onRetry: retry,
+                        onOpenDashboard: openDashboard
                     )
                     DeliveryAttentionSectionView(
                         title: L10n.string("Verifying"),
@@ -148,7 +150,8 @@ struct DeliveryControlCenterView: View {
                         color: .purple,
                         items: dashboard.verifying,
                         emptyMessage: L10n.string("No task is waiting for evidence."),
-                        onRetry: retry
+                        onRetry: retry,
+                        onOpenDashboard: openDashboard
                     )
                     DeliveryAttentionSectionView(
                         title: L10n.string("Ready to Merge"),
@@ -158,7 +161,8 @@ struct DeliveryControlCenterView: View {
                         emptyMessage: L10n.string(
                             "Required evidence and pull request checks are not complete yet."
                         ),
-                        onRetry: retry
+                        onRetry: retry,
+                        onOpenDashboard: openDashboard
                     )
                 }
                 .padding(16)
@@ -247,6 +251,10 @@ struct DeliveryControlCenterView: View {
         Task { await model.retryDispatch(taskID: taskID) }
     }
 
+    private func openDashboard(_ item: DeliveryAttentionItem) {
+        Task { await model.openDashboard(for: item) }
+    }
+
     private func exportFunnel() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
@@ -328,6 +336,7 @@ private struct DeliveryAttentionSectionView: View {
     let items: [DeliveryAttentionItem]
     let emptyMessage: String
     let onRetry: (DeliveryAttentionItem) -> Void
+    let onOpenDashboard: (DeliveryAttentionItem) -> Void
 
     var body: some View {
         GroupBox {
@@ -375,6 +384,11 @@ private struct DeliveryAttentionSectionView: View {
                         L10n.string("Open Source"),
                         destination: sourceURL
                     )
+                }
+                if item.sessionRef?.backendID == "agent-orchestrator" {
+                    Button(L10n.string("Open AO Dashboard")) {
+                        onOpenDashboard(item)
+                    }
                 }
             }
             .controlSize(.small)

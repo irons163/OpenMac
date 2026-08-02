@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-07、VS-09～VS-11 已完成；VS-08 dashboard deep-link 尚待完成（AO workspace identity、Xcode build 與 PR facts 已驗證）
+> 狀態：VS-01～VS-07、VS-09～VS-12 的技術 gate 已完成；VS-08 的 dashboard deep-link 已補 fail-closed route verifier，但目前 AO desktop 沒有可驗證的外部 HTML route，仍待 AO 提供該能力
 > 更新日期：2026-08-02
 
 本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
@@ -46,8 +46,9 @@ acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位�
 compatibility smoke。Control Center 已補 scene-active reload/reconcile，且
 deterministic restart test 會用新的 model instance 驗證 persisted facts 不重播；
 packaged test.2 已通過 `tools/test-packaged-app-restart.sh` 的 launch →
-terminate → relaunch → terminate smoke；取得可驗證設定前的 dashboard deep-link
-仍待完成，不猜測 URL。另對 upstream `main` revision
+terminate → relaunch → terminate smoke；已補可設定的 dashboard root、project/session
+route builder 與 HTML verification，Control Center 只在 route 通過 verification 後
+開啟，不猜測 URL。另對 upstream `main` revision
 [`9159a020`](https://github.com/Untrivial-ai/agent-orchestrator/tree/9159a0206a2e1d2a99333118bf9ebc5590b7404f)
 重新核對：其 desktop dashboard 仍不是 daemon 的 HTTP route，session view
 仍沒有可供外部 app 使用的 dashboard URL；`/preview` 只代表瀏覽器 preview。
@@ -66,6 +67,15 @@ package smoke 已產生可 round-trip 的 build record。AO 的
 build，並以 AO 官方 PR claim endpoint 綁定公開 PR 後驗證 URL、open state、CI
 與 review facts 由同一個 execution identity 傳入。PR creation／push／merge
 仍未由 smoke 執行。
+
+VS-12 的技術 E2E smoke 已在 `/Volumes/M2SSD/openmac-ao-fixture` 重跑：一個
+typed 3-task DAG 先建立 2 個平行 AO sessions，再建立 dependent join；3 個
+backend-confirmed workspaces 都通過 `XcodeVerifier`，join session 讀回同一個公開
+PR 的 URL／CI／review facts，並輸出 privacy-filtered funnel JSON。由於目前 AO
+project summary 沒有 permission scope，production `DeliveryDispatcher` 仍對
+`unknown` fail closed；live smoke 因此使用已批准的 store reservations 直接呼叫
+真實 AO backend，dispatcher preflight 與平行 contract 仍由 deterministic tests
+覆蓋，直到 AO 暴露該 permission fact。
 
 VS-10 將 resume 與 retry 分成兩個明確語意：未綁定 session 的 reservation
 以同一 idempotency key 安全重播；terminal failed／stopped task 的人工 Retry

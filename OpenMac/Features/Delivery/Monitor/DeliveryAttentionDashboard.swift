@@ -7,7 +7,28 @@ nonisolated struct DeliveryAttentionItem: Identifiable, Equatable, Sendable {
     let detail: String
     let nextStep: String
     let sourceURL: URL?
+    let sessionRef: ExternalSessionRef?
     let canRetryDispatch: Bool
+
+    nonisolated init(
+        id: String,
+        taskID: UUID?,
+        title: String,
+        detail: String,
+        nextStep: String,
+        sourceURL: URL?,
+        sessionRef: ExternalSessionRef? = nil,
+        canRetryDispatch: Bool
+    ) {
+        self.id = id
+        self.taskID = taskID
+        self.title = title
+        self.detail = detail
+        self.nextStep = nextStep
+        self.sourceURL = sourceURL
+        self.sessionRef = sessionRef
+        self.canRetryDispatch = canRetryDispatch
+    }
 }
 
 nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
@@ -63,7 +84,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                         task: task,
                         detail: "Dispatch reservation is waiting for a backend session.",
                         nextStep: "Wait for the fixture step or stop future dispatch.",
-                        sourceURL: sourceURL
+                        sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession
                     )
                 )
             case .running:
@@ -73,7 +95,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                         detail: observation?.summary
                             ?? "The isolated backend session is running.",
                         nextStep: "Advance the fixture to import its next fact.",
-                        sourceURL: sourceURL
+                        sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession
                     )
                 )
             case .dispatchFailed:
@@ -84,6 +107,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                             ?? "The backend did not bind a session.",
                         nextStep: "Retry the same idempotent dispatch reservation.",
                         sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession,
                         canRetryDispatch: true
                     )
                 )
@@ -95,7 +119,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                             ?? "The backend session is waiting for input.",
                         nextStep: task.humanActionHint
                             ?? "Open the source and resolve the requested input before continuing.",
-                        sourceURL: sourceURL
+                        sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession
                     )
                 )
             case .failed:
@@ -113,6 +138,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                             ? "Inspect the failure, then create a new isolated attempt."
                             : "Inspect the failure. A dependent task already started, so retry is blocked to avoid mixing attempt lineages.",
                         sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession,
                         canRetryDispatch: canRetry
                     )
                 )
@@ -130,6 +156,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                             ? "Inspect the source, then create a new isolated attempt."
                             : "Inspect the source. A dependent task already started, so retry is blocked to avoid mixing attempt lineages.",
                         sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession,
                         canRetryDispatch: canRetry
                     )
                 )
@@ -145,7 +172,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                         nextStep: attempt?.lastReconcileFailureReason == nil
                             ? "Open the source and reconcile the backend identity before continuing."
                             : "Reconnect the execution backend and reconcile this persisted session before continuing.",
-                        sourceURL: sourceURL
+                        sourceURL: sourceURL,
+                        sessionRef: attempt?.externalSession
                     )
                 )
             case .succeeded:
@@ -171,7 +199,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                                     .map(\.description)
                                     .joined(separator: " · "),
                             nextStep: "Open the source and fix the failing verification.",
-                            sourceURL: sourceURL
+                            sourceURL: sourceURL,
+                            sessionRef: attempt.externalSession
                         )
                     )
                     continue
@@ -193,7 +222,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                                     .map(\.description)
                                     .joined(separator: " · "),
                             nextStep: "Advance the fixture or open the source to collect the required evidence.",
-                            sourceURL: sourceURL
+                            sourceURL: sourceURL,
+                            sessionRef: attempt.externalSession
                         )
                     )
                 } else if state != .readyToMerge {
@@ -202,7 +232,8 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                             task: task,
                             detail: "Task evidence passed; delivery-level pull request checks are still pending.",
                             nextStep: "Advance the fixture to reconcile pull request facts.",
-                            sourceURL: sourceURL
+                            sourceURL: sourceURL,
+                            sessionRef: attempt.externalSession
                         )
                     )
                 }
@@ -219,6 +250,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
                     detail: "All task evidence, pull request checks, and review facts passed.",
                     nextStep: "Open the pull request or source for final human review; OpenMac will not merge automatically.",
                     sourceURL: run.pullRequests.last?.url ?? repositoryURL,
+                    sessionRef: run.attempts.last(where: { $0.externalSession != nil })?.externalSession,
                     canRetryDispatch: false
                 )
             ]
@@ -241,6 +273,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
         detail: String,
         nextStep: String,
         sourceURL: URL?,
+        sessionRef: ExternalSessionRef? = nil,
         canRetryDispatch: Bool = false
     ) -> DeliveryAttentionItem {
         DeliveryAttentionItem(
@@ -250,6 +283,7 @@ nonisolated struct DeliveryAttentionDashboard: Equatable, Sendable {
             detail: detail,
             nextStep: nextStep,
             sourceURL: sourceURL,
+            sessionRef: sessionRef,
             canRetryDispatch: canRetryDispatch
         )
     }
