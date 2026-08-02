@@ -110,7 +110,8 @@ run-file process.
 - The AO desktop was quit gracefully and reopened; the old daemon PID `8874`
   became stale, the new PID `11085` reached ready state, and the read-only
   compatibility smoke passed again with exit code 0.
-- No AO session remains running after the smoke (`hiddenTerminatedCount: 1`).
+- No AO session remains running after the smoke; AO reports only hidden
+  terminated records in the session list.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08.
 VS-08 still needs App restart reconcile and a verified dashboard deep-link,
