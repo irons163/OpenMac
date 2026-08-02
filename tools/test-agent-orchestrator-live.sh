@@ -9,11 +9,14 @@ project_id=""
 harness="fake"
 base_branch=""
 base_commit=""
+xcode_repository_root=""
+xcode_scheme="OpenMacAOFixture"
+xcode_workspace_root=""
 
 usage() {
     echo "Usage: $0 [--url URL]"
-    echo "       $0 --start-project ID --harness NAME \\"
-    echo "          --base-branch BRANCH --base-commit SHA [--url URL]"
+    echo "       $0 --start-project ID --harness NAME --base-branch BRANCH --base-commit SHA [--url URL]"
+    echo "       $0 --start-project ID --base-branch BRANCH --base-commit SHA --xcode-repository-root PATH [--xcode-scheme SCHEME] [--xcode-workspace-root PATH]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +41,18 @@ while [[ $# -gt 0 ]]; do
             base_commit="${2:-}"
             shift 2
             ;;
+        --xcode-repository-root)
+            xcode_repository_root="${2:-}"
+            shift 2
+            ;;
+        --xcode-scheme)
+            xcode_scheme="${2:-}"
+            shift 2
+            ;;
+        --xcode-workspace-root)
+            xcode_workspace_root="${2:-}"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -52,6 +67,26 @@ done
 if [[ -n "$project_id" ]] \
     && [[ -z "$base_branch" || -z "$base_commit" ]]; then
     echo "--start-project requires --base-branch and --base-commit." >&2
+    exit 64
+fi
+
+if [[ -n "$xcode_repository_root" ]]; then
+    if [[ -z "$project_id" ]]; then
+        echo "--xcode-repository-root requires --start-project." >&2
+        exit 64
+    fi
+    if [[ ! -d "$xcode_repository_root" ]]; then
+        echo "The Xcode repository root is not a directory: $xcode_repository_root" >&2
+        exit 64
+    fi
+    if [[ -z "$xcode_scheme" ]]; then
+        echo "--xcode-scheme must not be empty." >&2
+        exit 64
+    fi
+fi
+
+if [[ -n "$xcode_workspace_root" && -z "$xcode_repository_root" ]]; then
+    echo "--xcode-workspace-root requires --xcode-repository-root." >&2
     exit 64
 fi
 
@@ -93,6 +128,10 @@ export LLVM_PROFILE_FILE="$temporary_root/openmac-ao-live-%p.profraw"
 unset OPENMAC_AO_LIVE_PROJECT_ID
 unset OPENMAC_AO_LIVE_BASE_BRANCH
 unset OPENMAC_AO_LIVE_BASE_COMMIT
+unset OPENMAC_AO_LIVE_XCODE
+unset OPENMAC_AO_LIVE_REPOSITORY_ROOT
+unset OPENMAC_AO_LIVE_XCODE_SCHEME
+unset OPENMAC_AO_LIVE_WORKSPACE_ROOT
 if [[ -n "$project_id" ]]; then
     export OPENMAC_AO_LIVE_PROJECT_ID="$project_id"
     export OPENMAC_AO_LIVE_BASE_BRANCH="$base_branch"
@@ -100,6 +139,16 @@ if [[ -n "$project_id" ]]; then
     echo "Authorized live AO session start for project $project_id."
 else
     echo "Running read-only AO health, readiness, and project discovery smoke."
+fi
+
+if [[ -n "$xcode_repository_root" ]]; then
+    export OPENMAC_AO_LIVE_XCODE=1
+    export OPENMAC_AO_LIVE_REPOSITORY_ROOT="$xcode_repository_root"
+    export OPENMAC_AO_LIVE_XCODE_SCHEME="$xcode_scheme"
+    if [[ -n "$xcode_workspace_root" ]]; then
+        export OPENMAC_AO_LIVE_WORKSPACE_ROOT="$xcode_workspace_root"
+    fi
+    echo "Authorized live Xcode verification for $xcode_repository_root ($xcode_scheme)."
 fi
 
 xcrun xctest \

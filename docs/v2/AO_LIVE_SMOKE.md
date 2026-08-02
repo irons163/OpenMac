@@ -71,6 +71,31 @@ with `AO_FAKE_HARNESS=1`. On macOS and Linux, current AO session runtime also
 requires `tmux`; install and trust that dependency separately rather than
 letting OpenMac mutate the system.
 
+## Opt-in AO workspace + Xcode verifier probe
+
+When the disposable AO project contains a Swift package, the same script can
+exercise the full workspace identity handoff and the real `XcodeVerifier`:
+
+```bash
+tools/test-agent-orchestrator-live.sh \
+  --url http://127.0.0.1:3001 \
+  --start-project openmac-ao-fixture \
+  --harness fake \
+  --base-branch main \
+  --base-commit "$(git -C /Volumes/M2SSD/openmac-ao-fixture rev-parse HEAD)" \
+  --xcode-repository-root /Volumes/M2SSD/openmac-ao-fixture \
+  --xcode-workspace-root /Users/phil/.ao/data/worktrees/openmac-ao-fixture \
+  --xcode-scheme OpenMacAOFixture
+```
+
+This opt-in test creates a fresh AO session, obtains the backend-confirmed
+`verificationWorkspaceURL` and branch, checks Git common-directory and
+`Package.swift` identity, runs a real `xcodebuild` build, persists the
+`.xcresult` record, and stops the session. It uses the disposable fixture at
+`/Volumes/M2SSD/openmac-ao-fixture` (commit `529f574`); it does not contact a
+real coding agent or create a PR. A real PR remote and authenticated PR facts
+remain a separate E2E prerequisite.
+
 ## Current compatibility record
 
 On 2026-07-31, OpenMac was checked against upstream revision
@@ -146,6 +171,10 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
 - The live start receipt contained a file URL under AO's managed
   `/.ao/data/worktrees/openmac-ao-fixture/` root, and the temporary shell
   terminal was released; no shell terminals remained after the smoke.
+- The opt-in workspace verifier smoke then ran `xcodebuild -scheme
+  OpenMacAOFixture ... build` inside that AO worktree, produced a passing
+  `.xcresult`, and stopped the session; the fixture's Git common-directory and
+  branch identities matched the AO receipt.
 - The installed AO desktop `0.11.2` currently exposes only the daemon listener
   at `127.0.0.1:3001`; nothing listens on the documented dashboard port `3000`,
   the daemon root and `/preview` are not dashboard routes, and the app bundle
@@ -153,10 +182,12 @@ adapter test and the opt-in live smoke cover the shell-terminal response.
   deep-link pending instead of guessing an `ao://` or browser URL.
 
 This completes the live session and daemon-restart prerequisite for VS-07/VS-08,
-and the backend-confirmed workspace identity prerequisite for VS-09. Control
+and the backend-confirmed workspace identity and real AO workspace/Xcode-build
+prerequisites for VS-09. Control
 Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
 test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
 terminate, relaunch, terminate). VS-08 still needs a verified dashboard
-deep-link, while VS-09 still needs a real Xcode/PR end-to-end run. The clean
-Mac Gatekeeper and participant/concierge gates remain intentionally deferred.
+deep-link, while VS-09 still needs a real PR identity/facts end-to-end run.
+The clean Mac Gatekeeper and participant/concierge gates remain intentionally
+deferred.

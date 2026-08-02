@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-07、VS-10～VS-11 已完成；VS-08 dashboard deep-link、VS-09 真實 Xcode／PR E2E 尚待完成（AO workspace identity adapter 已驗證）
+> 狀態：VS-01～VS-07、VS-10～VS-11 已完成；VS-08 dashboard deep-link、VS-09 真實 PR identity／facts E2E 尚待完成（AO workspace identity 與 Xcode build 已驗證）
 > 更新日期：2026-08-02
 
 本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
@@ -62,7 +62,8 @@ package smoke 已產生可 round-trip 的 build record。AO 的
 與 absolute path 後立即以 `DELETE` 釋放暫時 terminal，再保存
 `verificationWorkspaceURL`。shell-terminal endpoint 缺失、回應不合法或清理失敗
 都會 fail closed，因此不會把原始 repo 冒充隔離 workspace。AO live smoke 已驗證
-此路徑；真實 Xcode／PR E2E 仍待完成。
+此路徑；另以 disposable AO workspace 實際跑過 `XcodeVerifier` 的 Swift package
+build。真實 PR identity／facts E2E 仍待完成。
 
 VS-10 將 resume 與 retry 分成兩個明確語意：未綁定 session 的 reservation
 以同一 idempotency key 安全重播；terminal failed／stopped task 的人工 Retry

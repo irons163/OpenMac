@@ -233,7 +233,8 @@ round-trip 驗證 command、scheme、exit status、summary、timestamps 與
 支援官方 shell-terminal API 的 daemon，adapter 會以 project／session identity
 核對回傳的絕對 `workingDir`，關閉暫時 terminal 後保存為 verification
 workspace。endpoint 缺失或回應／清理失敗時仍 fail closed，絕不以原始 repository
-冒充隔離 workspace。真實 AO Xcode／PR E2E 尚待完成。
+冒充隔離 workspace。disposable AO workspace 的實際 Xcode build smoke 已通過，
+真實 PR identity／facts E2E 尚待完成。
 
 Recovery contract 會區分同一 dispatch reservation 的 idempotent resume 與
 terminal attempt 的新 retry。新 retry 必須綁定使用者看到的 latest attempt；
