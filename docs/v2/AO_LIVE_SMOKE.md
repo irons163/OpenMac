@@ -93,6 +93,18 @@ revision `25c9c96b74b57a9c0d4c0c4efb468eb4847ef74b`. It still checks
 `/healthz` before `/readyz` and requires both responses to identify the
 run-file process.
 
-This record is evidence of live protocol compatibility, not completion of
-VS-07 or Gate B. Those still require an isolated session, verifiable workspace
-identity, Xcode evidence, PR facts, and observed user sessions.
+## Live verification completed on 2026-08-02
+
+- Homebrew `tmux 3.7b` was installed and detected by `ao doctor`.
+- The official AO desktop daemon was running on `127.0.0.1:3001`; health,
+  readiness, served API compatibility, and project discovery passed.
+- An explicit smoke run against disposable project `openmac-ao-fixture` with
+  the deterministic `fake` harness created an isolated session, read facts,
+  and received a stop acknowledgement. The OpenMac test verified request,
+  execution, branch, and stop identities; no production repository or real
+  coding-agent session was used.
+- No AO session remains running after the smoke (`hiddenTerminatedCount: 1`).
+
+This completes the live session prerequisite for VS-07. VS-08 still needs a
+restart/reconcile and dashboard deep-link smoke, while VS-09 remains fail-closed
+until AO exposes a verifiable workspace path for Xcode evidence.

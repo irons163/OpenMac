@@ -212,7 +212,7 @@ Execution backend 負責：
 - [x] 循環依賴或缺少 acceptance／evidence 時不能批准。
 - [x] 未批准的 plan 不會建立 session 或修改 repo。
 - [x] fixture backend 可重現 running、blocked、failed、ready 等情境。
-- [ ] 至少一個真實 backend 可建立隔離 session；AO 是第一個候選。
+- [x] 至少一個真實 backend 可建立隔離 session；AO desktop daemon 已以 deterministic fake harness 完成 live start/facts/stop smoke，workspace identity 仍由後續 Xcode verification 條件限制。
 - [x] 每個 task 可追蹤 session、attempt、branch 與 PR identity。
 - [x] 只 dispatch dependencies 已滿足的 task，重啟後不重複 dispatch。
 - [x] 主畫面能區分 `Running` 與 `Needs You`，並顯示原因與下一步。
@@ -222,9 +222,10 @@ Execution backend 負責：
 - [x] 使用者可停止後續 dispatch，產品不會自動 merge。
 - [x] 有不需 Xcode 編譯即可安裝的 macOS 測試 build，並有明確 license；乾淨 Mac 的 Gatekeeper onboarding 依本輪範圍決策延後。
 
-AO reference adapter 的 captured contract coverage 已完成，但目前開發機沒有 AO CLI
-或 running daemon；在建立一個真實隔離 session 並核對回傳 identity 前，
-「至少一個真實 backend」維持未勾選。
+AO reference adapter 的 captured contract coverage 已完成。2026-08-02 在
+AO desktop daemon、`tmux 3.7b` 與 disposable project 上，health、readiness、
+served API、project discovery，以及 fake isolated session 的 start、facts、
+stop acknowledgement 均通過；request、branch、execution identity 也已核對。
 
 Xcode verifier 已以真實 Swift package 執行 `xcodebuild` build，保存並
 round-trip 驗證 command、scheme、exit status、summary、timestamps 與

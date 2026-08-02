@@ -1,6 +1,6 @@
 # OpenMac v2
 
-> 狀態：VS-01～VS-06、VS-10～VS-11 已完成；VS-07～VS-09 本機 contracts 已完成；AO live isolated-session、workspace identity 與 Xcode／PR E2E 仍待具備 AO runtime prerequisites 的環境
+> 狀態：VS-01～VS-07、VS-10～VS-11 已完成；VS-08 restart/deep-link、VS-09 workspace identity 與 Xcode／PR E2E 尚待完成
 > 更新日期：2026-08-02
 
 本輪範圍決策：跳過乾淨 Mac 的 Gatekeeper onboarding，以及受測者／concierge 驗證。它們仍可在未來 validation window 執行，但不再是本輪完成門檻。
@@ -16,9 +16,10 @@ OpenMac v2 的定位是：
 [`Untrivial-ai/agent-orchestrator`](https://github.com/Untrivial-ai/agent-orchestrator)
 revision `9caafbee89383c9bf7e904936eb88c48add2fa88`。另已對 upstream revision
 `b58bae51bac08c9e48bded4c636e504863a93c21` 的隔離 daemon 通過 health、
-served OpenAPI 與 project discovery；session spawn 因缺少 AO runtime 要求的
-`tmux` 而在 upstream preflight 停止，未建立 session，因此不宣稱已完成真實
-session smoke test。Connection screen 會安全讀取 `~/.ao/running.json`，依序
+served OpenAPI 與 project discovery；早期測試因缺少 AO runtime 要求的 `tmux`
+而在 upstream preflight 停止。2026-08-02 安裝 `tmux 3.7b` 後，使用 AO desktop
+daemon 與 disposable fake-harness project 完成 session start、facts 與 stop
+acknowledgement smoke。Connection screen 會安全讀取 `~/.ao/running.json`，依序
 檢查 health、readiness 與 served OpenAPI，要求兩個 daemon probes 回報相同
 PID、有 run-file 時也必須與其 PID 相符，並確認 adapter 使用的必要 API
 operations 都存在。後續操作會先重新確認 daemon PID；若手動 URL 背後的
