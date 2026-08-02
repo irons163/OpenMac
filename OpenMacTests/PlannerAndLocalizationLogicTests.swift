@@ -733,7 +733,7 @@ struct AppLanguageResolverTests {
 
         let systemNormalized = AppLanguageTestHooks.l10nResolvedDefaultLocale(
             storedOverride: " system ",
-            runtimeLocaleIdentifier: nil,
+            runtimeLocaleIdentifier: "en-US",
             runningTests: false
         )
         #expect(AppLanguage.resolve(preferredLanguages: [systemNormalized.identifier]) == .english)

@@ -111,9 +111,9 @@ enum AppLanguageResolver {
     ) -> AppLanguage {
         #if DEBUG
         // Keep unit tests deterministic even if the host app persisted a non-English override.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
-           overrideRawValue == nil,
-           preferredLanguages == Locale.preferredLanguages {
+        if overrideRawValue == nil,
+           preferredLanguages == Locale.preferredLanguages,
+           L10n.isRunningTests {
             return .english
         }
         #endif
@@ -251,17 +251,18 @@ enum L10n {
 
         let normalizedOverride = storedOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolverOverride: String?
-        if let normalizedOverride,
-           !normalizedOverride.isEmpty,
-           normalizedOverride != AppLanguageSettings.systemValue {
-            resolverOverride = normalizedOverride
-        } else {
-            resolverOverride = nil
+        guard let normalizedOverride,
+              !normalizedOverride.isEmpty,
+              normalizedOverride != AppLanguageSettings.systemValue else {
+            return runtimeLocale
+                ?? Locale(
+                    identifier: Locale.preferredLanguages.first
+                        ?? AppLanguage.english.rawValue
+                )
         }
 
         return resolvedDefaultLocale(
-            overrideRawValue: resolverOverride,
+            overrideRawValue: normalizedOverride,
             runtimeLocale: runtimeLocale
         )
     }

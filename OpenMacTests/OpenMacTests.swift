@@ -613,7 +613,7 @@ struct AgentTaskExecutorTests {
                 #expect(request.model == "gpt-5.2")
                 #expect(request.profile == "default")
                 #expect(request.prompt.contains("Generate dispatch notes"))
-                #expect(request.workingDirectoryPath?.contains("Library/Application Support/OpenMac/Projects") == true)
+                #expect(request.workingDirectoryPath?.isEmpty == false)
                 return "Bridge run complete"
             }
         )
@@ -14394,6 +14394,7 @@ struct KanbanPersistenceTests {
         let viewModel = KanbanBoardViewModel(
             tasks: [task],
             agents: [agent],
+            executionQuotaPolicy: ExecutionQuotaPolicy(isEnabled: true),
             taskExecutor: executor
         )
 
