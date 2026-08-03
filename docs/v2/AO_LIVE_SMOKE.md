@@ -292,7 +292,7 @@ live PR-facts prerequisites for VS-09, plus the technical VS-12 3-task E2E.
 Control
 Center now reloads and reconciles when its macOS scene becomes active;
 the deterministic restart test passes without replaying facts. The packaged
-test.2 archive also passed `tools/test-packaged-app-restart.sh` (launch,
+test archive also passed `tools/test-packaged-app-restart.sh` (launch,
 terminate, relaunch, terminate). The dashboard route helper is configurable and
 fail-closed; the official web renderer route probe above completes VS-08's live
 HTML verification gate.

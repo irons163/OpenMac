@@ -21,7 +21,7 @@ window.
 
    ```bash
    cd ~/Downloads
-   shasum -a 256 -c OpenMac-0.1.0-test.2-macOS.zip.sha256
+   shasum -a 256 -c OpenMac-0.1.0-test.3-macOS.zip.sha256
    ```
 
 3. Unzip the archive and drag `OpenMac.app` to `/Applications`.
@@ -58,7 +58,7 @@ permission or verification path, so OpenMac intentionally fails closed.
 
 ## Package status
 
-- Version: `0.1.0 (2)`.
+- Version: `0.1.0 (3)`.
 - Minimum macOS: 14.0.
 - Architectures: arm64 and x86_64.
 - Signature: ad-hoc with hardened runtime.

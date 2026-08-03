@@ -45,7 +45,7 @@ acknowledgement 與後續明確的 stopped fact 分開保存。AO dashboard 位�
 部署設定改變；2026-08-02 已完成 AO daemon PID `8874 → 11085` 的重啟後
 compatibility smoke。Control Center 已補 scene-active reload/reconcile，且
 deterministic restart test 會用新的 model instance 驗證 persisted facts 不重播；
-packaged test.2 已通過 `tools/test-packaged-app-restart.sh` 的 launch →
+packaged test archive 已通過 `tools/test-packaged-app-restart.sh` 的 launch →
 terminate → relaunch → terminate smoke；已補可設定的 dashboard root、project/session
 route builder 與 HTML verification，Control Center 只在 route 通過 verification 後
 開啟，不猜測 URL。2026-08-02 以 upstream `main` revision
@@ -89,11 +89,11 @@ Control Center 也可匯出本機 funnel JSON；檔案只含里程碑 duration�
 計數，明確排除 brief／prompt、repository path、branch／commit、command／log
 及 PR URL。
 
-VS-11 的目前測試版本為 `0.1.0 (2)`、最低 macOS 14，產出 arm64／x86_64
-universal zip 與 SHA-256。由 clean commit
-`65618e6` 產生的 archive（SHA-256
-`d4e2020f2ebecaeaad3061c0f8b2b06881b43a2e4d3e68eab5607c7bfde5f553`）已通過 checksum、
-封裝前後簽章、架構與本機 launch smoke。Release build 以獨立 feature flag
+VS-11 的目前測試版本為 `0.1.0 (3)`、最低 macOS 14，產出 arm64／x86_64
+universal zip 與 SHA-256。archive 內的 `BUILD-INFO.json` 記錄 exact clean
+source commit，同名 `.sha256` sidecar 是該次 build 的 authoritative checksum；
+test.3 已通過 checksum、封裝前後簽章、架構、本機 launch 與 restart smoke。
+Release build 以獨立 feature flag
 開啟 v2 畫面，另有安全 AO discovery 與 compatibility／project discovery
 probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽章
 且未 notarized；乾淨 Mac Gatekeeper onboarding 依本輪範圍決策延後，不影響本機技術 slice 的完成判定。
@@ -105,7 +105,7 @@ probe。測試包使用 OpenMac Evaluation License、ad-hoc hardened-runtime 簽
 - [兩週 vertical slice backlog](VERTICAL_SLICE_BACKLOG.md)：單人、十個工作日的交付順序與決策閘門。
 - [測試 build 安裝指南](TEST_BUILD_INSTALL.md)：checksum、Gatekeeper、五分鐘 fixture walkthrough 與 AO connection probe。
 - [AO live smoke](AO_LIVE_SMOKE.md)：對既有 loopback daemon 執行 opt-in adapter compatibility 與明確授權的 isolated-session smoke。
-- [Concierge validation](CONCIERGE_VALIDATION.md)：test.2 招募條件、30 分鐘觀察腳本、紀錄模板與早期停止條件（本輪延後）。
+- [Concierge validation](CONCIERGE_VALIDATION.md)：test.3 招募條件、30 分鐘觀察腳本、紀錄模板與早期停止條件（本輪延後）。
 
 在 Day 10 決策閘門通過前：
 

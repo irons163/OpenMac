@@ -4,7 +4,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$script_dir/.." && pwd)"
-archive_path="${1:-$repository_root/dist/OpenMac-0.1.0-test.2-macOS.zip}"
+archive_path="${1:-$repository_root/dist/OpenMac-0.1.0-test.3-macOS.zip}"
 
 if [[ ! -f "$archive_path" ]]; then
     echo "Packaged OpenMac archive was not found: $archive_path" >&2

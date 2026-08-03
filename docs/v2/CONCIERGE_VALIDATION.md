@@ -1,4 +1,4 @@
-# OpenMac 0.1.0 test.2 Concierge Validation（延後）
+# OpenMac 0.1.0 test.3 Concierge Validation（延後）
 
 > 範圍決策（2026-08-02）：本輪跳過受測者／concierge 驗證。本文件保留給未來 validation window，3–5 場觀察測試不列入本輪完成門檻。
 
@@ -54,14 +54,12 @@ Suggested screener:
 
 Send these two files together:
 
-- `OpenMac-0.1.0-test.2-macOS.zip`
-- `OpenMac-0.1.0-test.2-macOS.zip.sha256`
+- `OpenMac-0.1.0-test.3-macOS.zip`
+- `OpenMac-0.1.0-test.3-macOS.zip.sha256`
 
-Expected SHA-256:
-
-```text
-6768da6ccdcdd69a312761b6148ebb30f3bf33f4c0aa8eab2b70a4a38f535439
-```
+Verify the exact archive with the supplied `.sha256` sidecar. The included
+`BUILD-INFO.json` is authoritative for the clean source commit; do not reuse a
+checksum or build metadata from an earlier invited build.
 
 Ask the participant to follow the included `INSTALL.md`. State before the
 session that the build is ad-hoc signed, has a hardened runtime, is not

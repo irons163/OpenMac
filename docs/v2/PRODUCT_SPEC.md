@@ -245,13 +245,13 @@ read/write，或回報 `danger-full-access`，都不得建立 session。MVP funn
 commands、logs 或外部 URL。
 
 VS-11 已建立不需 Xcode 編譯即可啟動的 universal test package 流程。目前版本
-`0.1.0 (2)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
-build metadata。由 clean commit
-`65618e6` 產生的 test.2（SHA-256
-`d4e2020f2ebecaeaad3061c0f8b2b06881b43a2e4d3e68eab5607c7bfde5f553`）已通過封裝前後
-簽章、架構、最低系統版本、checksum 與本機 launch smoke；目前仍是 ad-hoc
-signed、未 notarized。乾淨測試機的首次啟動依本輪範圍決策延後，不阻塞目前
-安裝條件的完成判定。
+`0.1.0 (3)`、最低 macOS 14，並附 OpenMac Evaluation License、SHA-256 與
+build metadata。封裝工具拒絕 dirty source，並以 archive 內的
+`BUILD-INFO.json` 記錄 exact clean commit；同名 `.sha256` sidecar 是該次 build
+的 authoritative checksum，不能沿用先前受邀版本的固定值。test.3 已通過封裝前後
+簽章、架構、最低系統版本、checksum、本機 launch 與 restart smoke；目前仍是
+ad-hoc signed、未 notarized。乾淨測試機的首次啟動依本輪範圍決策延後，不阻塞
+目前安裝條件的完成判定。
 
 ## 10. 安全與信任原則
 
